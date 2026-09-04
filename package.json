@@ -1,0 +1,10 @@
+{
+  "name": "roof-lounge-app",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:miniapp": "npm run dev --workspace apps/miniapp",
+    "build:miniapp": "npm run build --workspace apps/miniapp",
+    "dev:bot": "npm run dev --workspace apps/bot"
+  }
+}
