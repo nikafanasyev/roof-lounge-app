@@ -1,10 +1,20 @@
 // Единая точка доступа к данным приложения.
 //
-// Сейчас работает поверх in-memory моков (seed.ts) — этого достаточно, чтобы
-// пройти все сценарии интерфейса уже сегодня, без Supabase-проекта.
-// Когда появится Supabase-проект (см. README в корне репозитория), функции
-// в этом файле нужно переписать на supabase-js с ТЕМИ ЖЕ сигнатурами —
-// компоненты экранов их не заметят.
+// Без настроенного Supabase-проекта (см. .env.example) работает поверх
+// in-memory моков (seed.ts) — этого достаточно, чтобы пройти все сценарии
+// интерфейса прямо сейчас, без единой настройки.
+//
+// Если VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY заданы — при старте
+// приложения (initData(), вызывается из main.tsx) сторы заполняются реальными
+// данными из Supabase, а мутации (createMix, resolveServiceCall и т.д.)
+// синхронно обновляют стор для мгновенного отклика интерфейса И параллельно,
+// в фоне, пишут то же самое в Supabase — экраны об этом не знают, сигнатуры
+// функций не поменялись.
+//
+// Ограничение текущей версии: ещё нет реальной Telegram-авторизации персонала
+// (см. README, п. 4), поэтому все операции "от лица сотрудника" в Supabase
+// записываются на один служебный профиль DEMO_STAFF_ID. Когда появится
+// авторизация — заменить на staff.id из сессии.
 
 import type {
   ChecklistItem,
@@ -28,6 +38,7 @@ import {
   seedShift,
   seedTasks,
 } from "./seed";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
 
@@ -64,7 +75,226 @@ export const shiftStore = new Store<Shift>(seedShift);
 export const problemsStore = new Store<Problem[]>(seedProblems);
 export const tasksStore = new Store<Task[]>(seedTasks);
 
-const uid = () => Math.random().toString(36).slice(2, 10);
+const uid = () => crypto.randomUUID();
+
+// --- Синхронизация с Supabase (см. заголовок файла) ---
+
+const DEMO_STAFF_ID = "00000000-0000-4000-8000-000000000001";
+const DEMO_STAFF_TELEGRAM_ID = 1;
+const DEMO_STAFF_NAME = "Никита Афанасьев";
+
+let syncInitialized = false;
+const staffNameById = new Map<string, string>();
+const tableIdByNumber = new Map<number, string>();
+const tableNumberById = new Map<string, number>();
+
+function logSyncError(scope: string, error: unknown) {
+  // MVP: логируем в консоль, не блокируем интерфейс. Экран уже обновился
+  // оптимистично из локального стора независимо от результата записи в Supabase.
+  console.error(`[supabase:${scope}]`, error);
+}
+
+/** Вызывается один раз при старте приложения (см. main.tsx). Без Supabase — no-op. */
+export async function initData(): Promise<void> {
+  if (!isSupabaseConfigured || !supabase || syncInitialized) return;
+  syncInitialized = true;
+  try {
+    await ensureDemoStaff();
+    await loadTables();
+    await Promise.all([loadFlavors(), loadGuests(), loadMixes(), loadServiceCalls(), loadShift(), loadProblems(), loadTasks()]);
+    subscribeRealtime();
+  } catch (error) {
+    logSyncError("initData", error);
+  }
+}
+
+async function ensureDemoStaff() {
+  staffNameById.set(DEMO_STAFF_ID, DEMO_STAFF_NAME);
+  const { error } = await supabase!
+    .from("staff")
+    .upsert({ id: DEMO_STAFF_ID, telegram_id: DEMO_STAFF_TELEGRAM_ID, name: DEMO_STAFF_NAME, role: "master" }, { onConflict: "id" });
+  if (error) logSyncError("ensureDemoStaff", error);
+}
+
+async function loadTables() {
+  const { data, error } = await supabase!.from("restaurant_tables").select("*");
+  if (error) return logSyncError("loadTables", error);
+  tableIdByNumber.clear();
+  tableNumberById.clear();
+  for (const row of data ?? []) {
+    tableIdByNumber.set(row.number, row.id);
+    tableNumberById.set(row.id, row.number);
+  }
+}
+
+async function getOrCreateTableId(tableNumber: number): Promise<string | null> {
+  if (!supabase) return null;
+  const cached = tableIdByNumber.get(tableNumber);
+  if (cached) return cached;
+  const { data, error } = await supabase
+    .from("restaurant_tables")
+    .upsert({ number: tableNumber }, { onConflict: "number" })
+    .select()
+    .single();
+  if (error || !data) {
+    logSyncError("getOrCreateTableId", error);
+    return null;
+  }
+  tableIdByNumber.set(data.number, data.id);
+  tableNumberById.set(data.id, data.number);
+  return data.id;
+}
+
+async function loadFlavors() {
+  const { data, error } = await supabase!.from("flavors").select("*").eq("active", true);
+  if (error) return logSyncError("loadFlavors", error);
+  flavorsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      brand: r.brand,
+      name: r.name,
+      code: r.code ?? "",
+      categories: r.categories ?? [],
+    })),
+  );
+}
+
+async function loadGuests() {
+  const { data, error } = await supabase!.from("guests").select("*");
+  if (error) return logSyncError("loadGuests", error);
+  guestsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      displayName: r.display_name,
+      badges: r.badges ?? [],
+      tableTelegramId: r.telegram_id ? String(r.telegram_id) : undefined,
+    })),
+  );
+}
+
+async function loadMixes() {
+  const [mixesRes, itemsRes, ratingsRes] = await Promise.all([
+    supabase!.from("mixes").select("*").order("created_at", { ascending: false }),
+    supabase!.from("mix_items").select("*"),
+    supabase!.from("mix_ratings").select("*"),
+  ]);
+  if (mixesRes.error) return logSyncError("loadMixes", mixesRes.error);
+  if (itemsRes.error) logSyncError("loadMixes:items", itemsRes.error);
+  if (ratingsRes.error) logSyncError("loadMixes:ratings", ratingsRes.error);
+
+  const itemsByMix = new Map<string, MixItem[]>();
+  for (const it of itemsRes.data ?? []) {
+    const list = itemsByMix.get(it.mix_id) ?? [];
+    list.push({ flavorId: it.flavor_id, sharePercent: it.share_percent });
+    itemsByMix.set(it.mix_id, list);
+  }
+  const ratingByMix = new Map<string, number>();
+  for (const r of ratingsRes.data ?? []) {
+    ratingByMix.set(r.mix_id, r.rating);
+  }
+
+  mixesStore.set(
+    (mixesRes.data ?? []).map((r) => ({
+      id: r.id,
+      guestId: r.guest_id,
+      masterId: r.master_id,
+      masterName: staffNameById.get(r.master_id) ?? DEMO_STAFF_NAME,
+      title: r.title,
+      coverEmoji: r.cover_url ?? "🍃",
+      items: itemsByMix.get(r.id) ?? [],
+      strength: r.strength ?? 0,
+      bowlType: r.bowl_type ?? undefined,
+      density: r.density ?? undefined,
+      masterNote: r.master_note ?? undefined,
+      description: r.description ?? undefined,
+      tags: r.tags ?? [],
+      createdAt: r.created_at,
+      rating: ratingByMix.get(r.id),
+    })),
+  );
+}
+
+async function loadServiceCalls() {
+  const { data, error } = await supabase!.from("service_calls").select("*").order("created_at", { ascending: false });
+  if (error) return logSyncError("loadServiceCalls", error);
+  serviceCallsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      tableNumber: tableNumberById.get(r.table_id) ?? 0,
+      type: r.type,
+      status: r.status,
+      createdAt: r.created_at,
+      resolvedAt: r.resolved_at ?? undefined,
+    })),
+  );
+}
+
+async function loadShift() {
+  const { data, error } = await supabase!
+    .from("shifts")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return logSyncError("loadShift", error);
+  if (!data) return; // смен ещё не было — оставляем закрытую заготовку из seed
+  shiftStore.set({
+    id: data.id,
+    status: data.closed_at ? "closed" : data.opened_at ? "open" : "closed",
+    openedBy: data.opened_by ? staffNameById.get(data.opened_by) ?? DEMO_STAFF_NAME : undefined,
+    openedAt: data.opened_at ?? undefined,
+    openChecklist: data.open_checklist?.length ? data.open_checklist : shiftStore.get().openChecklist,
+    closedBy: data.closed_by ? staffNameById.get(data.closed_by) ?? DEMO_STAFF_NAME : undefined,
+    closedAt: data.closed_at ?? undefined,
+    closeChecklist: data.close_checklist?.length ? data.close_checklist : shiftStore.get().closeChecklist,
+    handoverNote: data.handover_note ?? undefined,
+  });
+}
+
+async function loadProblems() {
+  const { data, error } = await supabase!.from("problems").select("*").order("created_at", { ascending: false });
+  if (error) return logSyncError("loadProblems", error);
+  problemsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      category: r.category,
+      description: r.description,
+      reportedBy: r.reported_by ? staffNameById.get(r.reported_by) ?? DEMO_STAFF_NAME : "",
+      createdAt: r.created_at,
+      status: r.status,
+      assignee: r.assignee ? staffNameById.get(r.assignee) : undefined,
+    })),
+  );
+}
+
+async function loadTasks() {
+  const { data, error } = await supabase!.from("tasks").select("*").order("created_at", { ascending: false });
+  if (error) return logSyncError("loadTasks", error);
+  tasksStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      title: r.title,
+      dueDate: r.due_date ?? undefined,
+      assignee: r.assignee ? staffNameById.get(r.assignee) : undefined,
+      done: r.done,
+    })),
+  );
+}
+
+function subscribeRealtime() {
+  if (!supabase) return;
+  supabase
+    .channel("roof-lounge-sync")
+    .on("postgres_changes", { event: "*", schema: "public", table: "mixes" }, () => loadMixes())
+    .on("postgres_changes", { event: "*", schema: "public", table: "mix_items" }, () => loadMixes())
+    .on("postgres_changes", { event: "*", schema: "public", table: "mix_ratings" }, () => loadMixes())
+    .on("postgres_changes", { event: "*", schema: "public", table: "guests" }, () => loadGuests())
+    .on("postgres_changes", { event: "*", schema: "public", table: "service_calls" }, () => loadServiceCalls())
+    .on("postgres_changes", { event: "*", schema: "public", table: "shifts" }, () => loadShift())
+    .on("postgres_changes", { event: "*", schema: "public", table: "problems" }, () => loadProblems())
+    .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => loadTasks())
+    .subscribe();
+}
 
 // --- Гости и вкусовой профиль ---
 
@@ -85,10 +315,26 @@ export function listMixesForGuest(guestId: string): Mix[] {
 
 export function rateMix(mixId: string, rating: number) {
   mixesStore.update((mixes) => mixes.map((m) => (m.id === mixId ? { ...m, rating } : m)));
+  if (isSupabaseConfigured && supabase) {
+    const mix = mixesStore.get().find((m) => m.id === mixId);
+    if (mix) {
+      supabase
+        .from("mix_ratings")
+        .upsert({ mix_id: mixId, guest_id: mix.guestId, rating }, { onConflict: "mix_id,guest_id" })
+        .then(({ error }) => error && logSyncError("rateMix", error));
+    }
+  }
 }
 
 export function removeMix(mixId: string) {
   mixesStore.update((mixes) => mixes.filter((m) => m.id !== mixId));
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("mixes")
+      .delete()
+      .eq("id", mixId)
+      .then(({ error }) => error && logSyncError("removeMix", error));
+  }
 }
 
 export function getFlavor(id: string): Flavor | undefined {
@@ -188,6 +434,34 @@ export function createMix(input: {
     createdAt: new Date().toISOString(),
   };
   mixesStore.update((mixes) => [mix, ...mixes]);
+
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("mixes")
+      .insert({
+        id: mix.id,
+        guest_id: mix.guestId,
+        master_id: DEMO_STAFF_ID,
+        title: mix.title,
+        cover_url: mix.coverEmoji,
+        strength: mix.strength,
+        bowl_type: mix.bowlType,
+        density: mix.density,
+        master_note: mix.masterNote,
+        description: mix.description,
+        tags: mix.tags,
+        created_at: mix.createdAt,
+      })
+      .then(({ error }) => {
+        if (error) return logSyncError("createMix", error);
+        if (!mix.items.length) return;
+        supabase!
+          .from("mix_items")
+          .insert(mix.items.map((it) => ({ mix_id: mix.id, flavor_id: it.flavorId, share_percent: it.sharePercent })))
+          .then(({ error: itemsError }) => itemsError && logSyncError("createMix:items", itemsError));
+      });
+  }
+
   return mix;
 }
 
@@ -206,13 +480,32 @@ export function createServiceCall(tableNumber: number, type: ServiceCallType): S
     createdAt: new Date().toISOString(),
   };
   serviceCallsStore.update((calls) => [call, ...calls]);
+
+  if (isSupabaseConfigured && supabase) {
+    getOrCreateTableId(tableNumber).then((tableId) => {
+      if (!tableId) return;
+      supabase!
+        .from("service_calls")
+        .insert({ id: call.id, table_id: tableId, type: call.type, status: call.status, created_at: call.createdAt })
+        .then(({ error }) => error && logSyncError("createServiceCall", error));
+    });
+  }
+
   return call;
 }
 
 export function resolveServiceCall(id: string) {
+  const resolvedAt = new Date().toISOString();
   serviceCallsStore.update((calls) =>
-    calls.map((c) => (c.id === id ? { ...c, status: "resolved", resolvedAt: new Date().toISOString() } : c)),
+    calls.map((c) => (c.id === id ? { ...c, status: "resolved", resolvedAt } : c)),
   );
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("service_calls")
+      .update({ status: "resolved", resolved_at: resolvedAt, resolved_by: DEMO_STAFF_ID })
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("resolveServiceCall", error));
+  }
 }
 
 export function averageReactionMinutes(): number | null {
@@ -226,9 +519,30 @@ export function averageReactionMinutes(): number | null {
 }
 
 // --- Смена персонала ---
+//
+// Упрощение MVP: и в моках, и в Supabase текущая смена — одна изменяемая
+// запись (id не меняется между открытием/закрытием), а не история по одной
+// строке на смену. Полноценный лог смен — отдельная доработка на будущее.
 
 export function getShift(): Shift {
   return shiftStore.get();
+}
+
+function syncShift(shift: Shift) {
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("shifts")
+    .upsert({
+      id: shift.id,
+      opened_by: shift.openedBy ? DEMO_STAFF_ID : null,
+      opened_at: shift.openedAt ?? null,
+      open_checklist: shift.openChecklist,
+      closed_by: shift.closedBy ? DEMO_STAFF_ID : null,
+      closed_at: shift.closedAt ?? null,
+      close_checklist: shift.closeChecklist,
+      handover_note: shift.handoverNote ?? null,
+    })
+    .then(({ error }) => error && logSyncError("syncShift", error));
 }
 
 export function toggleOpenChecklistItem(itemId: string) {
@@ -236,6 +550,7 @@ export function toggleOpenChecklistItem(itemId: string) {
     ...shift,
     openChecklist: shift.openChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
   }));
+  syncShift(shiftStore.get());
 }
 
 export function toggleCloseChecklistItem(itemId: string) {
@@ -243,10 +558,12 @@ export function toggleCloseChecklistItem(itemId: string) {
     ...shift,
     closeChecklist: shift.closeChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
   }));
+  syncShift(shiftStore.get());
 }
 
 export function openShift(openedBy: string) {
   shiftStore.update((shift) => ({ ...shift, status: "open", openedBy, openedAt: new Date().toISOString() }));
+  syncShift(shiftStore.get());
 }
 
 export function closeShift(closedBy: string, handoverNote?: string) {
@@ -257,6 +574,7 @@ export function closeShift(closedBy: string, handoverNote?: string) {
     closedAt: new Date().toISOString(),
     handoverNote,
   }));
+  syncShift(shiftStore.get());
 }
 
 export function isChecklistComplete(items: ChecklistItem[]): boolean {
@@ -270,14 +588,33 @@ export function listProblems(): Problem[] {
 }
 
 export function reportProblem(input: { category: ProblemCategory; description: string; reportedBy: string }) {
-  problemsStore.update((problems) => [
-    { id: uid(), ...input, createdAt: new Date().toISOString(), status: "open" as const },
-    ...problems,
-  ]);
+  const problem: Problem = { id: uid(), ...input, createdAt: new Date().toISOString(), status: "open" };
+  problemsStore.update((problems) => [problem, ...problems]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("problems")
+      .insert({
+        id: problem.id,
+        category: problem.category,
+        description: problem.description,
+        reported_by: DEMO_STAFF_ID,
+        status: problem.status,
+        created_at: problem.createdAt,
+      })
+      .then(({ error }) => error && logSyncError("reportProblem", error));
+  }
 }
 
 export function resolveProblem(id: string) {
+  const resolvedAt = new Date().toISOString();
   problemsStore.update((problems) => problems.map((p) => (p.id === id ? { ...p, status: "done" as const } : p)));
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("problems")
+      .update({ status: "done", resolved_at: resolvedAt })
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("resolveProblem", error));
+  }
 }
 
 export function daysOpen(createdAt: string): number {
@@ -289,9 +626,36 @@ export function listTasks(): Task[] {
 }
 
 export function toggleTask(id: string) {
-  tasksStore.update((tasks) => tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+  let nextDone = false;
+  tasksStore.update((tasks) =>
+    tasks.map((t) => {
+      if (t.id !== id) return t;
+      nextDone = !t.done;
+      return { ...t, done: nextDone };
+    }),
+  );
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("tasks")
+      .update({ done: nextDone })
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("toggleTask", error));
+  }
 }
 
 export function addTask(title: string, assignee?: string, dueDate?: string) {
-  tasksStore.update((tasks) => [{ id: uid(), title, assignee, dueDate, done: false }, ...tasks]);
+  const task: Task = { id: uid(), title, assignee, dueDate, done: false };
+  tasksStore.update((tasks) => [task, ...tasks]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("tasks")
+      .insert({
+        id: task.id,
+        title: task.title,
+        due_date: task.dueDate ?? null,
+        done: false,
+        created_by: DEMO_STAFF_ID,
+      })
+      .then(({ error }) => error && logSyncError("addTask", error));
+  }
 }
