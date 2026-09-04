@@ -1,15 +1,19 @@
+/* Сдержанная тёмная тема рабочего инструмента — без градиентов, декоративных
+   засечных заголовков и подсветок. Один приглушённый акцент, всё остальное —
+   нейтральные серые. */
+
 :root {
-  --bg: #11161d;
-  --surface: #1a212b;
-  --surface-2: #212d3d;
-  --ink: #f3ead9;
-  --muted: #8fa0b3;
-  --accent: #e8823e;
-  --accent-2: #c9a15b;
-  --good: #6fae82;
-  --warn: #e0b23f;
-  --danger: #d1614f;
-  --border: #2c3646;
+  --bg: #15171b;
+  --surface: #1c1f24;
+  --surface-2: #24272d;
+  --ink: #e7e9ec;
+  --muted: #8b9099;
+  --accent: #b98653;
+  --accent-ink: #171310;
+  --good: #5f9e77;
+  --warn: #c39a4a;
+  --danger: #bd5b4d;
+  --border: #2b2e34;
   color-scheme: dark;
 }
 
@@ -27,7 +31,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -42,26 +46,31 @@ body {
 
 .screen {
   flex: 1;
-  padding: 20px 16px 96px;
+  padding: 18px 16px 96px;
   overflow-y: auto;
 }
 
 h1,
 h2,
 h3 {
-  font-family: Georgia, "Times New Roman", serif;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--ink);
 }
 
 h1 {
-  font-size: 26px;
-  margin: 0 0 16px;
+  font-size: 20px;
+  margin: 0 0 14px;
 }
 
 h2 {
-  font-size: 19px;
-  margin: 0 0 10px;
+  font-size: 15px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
 }
 
 .muted {
@@ -70,8 +79,6 @@ h2 {
 
 .eyebrow {
   font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   color: var(--muted);
   margin-bottom: 6px;
 }
@@ -79,9 +86,9 @@ h2 {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 16px;
-  margin-bottom: 12px;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 10px;
 }
 
 .card-row {
@@ -96,16 +103,16 @@ h2 {
   align-items: center;
   gap: 4px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 10px;
+  border-radius: 6px;
+  padding: 3px 8px;
   font-size: 12px;
   color: var(--muted);
   background: var(--surface-2);
 }
 
 .chip.accent {
-  color: var(--accent-2);
-  border-color: var(--accent-2);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .chip-row {
@@ -117,8 +124,8 @@ h2 {
 
 .btn {
   border: none;
-  border-radius: 14px;
-  padding: 14px 18px;
+  border-radius: 8px;
+  padding: 13px 16px;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
@@ -126,8 +133,8 @@ h2 {
 }
 
 .btn.primary {
-  background: linear-gradient(180deg, #f0a35f, var(--accent));
-  color: #201005;
+  background: var(--accent);
+  color: var(--accent-ink);
   width: 100%;
 }
 
@@ -139,8 +146,8 @@ h2 {
 
 .btn.ghost {
   background: transparent;
-  color: var(--accent-2);
-  border: 1px solid var(--accent-2);
+  color: var(--accent);
+  border: 1px solid var(--accent);
 }
 
 .btn.danger-ghost {
@@ -166,8 +173,8 @@ select {
   width: 100%;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border-radius: 8px;
+  padding: 11px 12px;
   color: var(--ink);
   font-size: 15px;
   font-family: inherit;
@@ -180,31 +187,31 @@ textarea {
 
 .tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 14px;
 }
 
 .tab-btn {
   flex: 1;
-  padding: 10px;
-  border-radius: 12px;
+  padding: 9px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--muted);
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .tab-btn.active {
-  background: var(--accent);
-  color: #201005;
+  background: var(--surface-2);
+  color: var(--ink);
   border-color: var(--accent);
 }
 
 .bar-track {
-  height: 8px;
+  height: 6px;
   border-radius: 99px;
   background: var(--surface-2);
   overflow: hidden;
@@ -212,11 +219,11 @@ textarea {
 
 .bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-2), var(--accent));
+  background: var(--accent);
 }
 
 .stars {
-  color: var(--accent-2);
+  color: var(--accent);
   letter-spacing: 2px;
 }
 
@@ -225,14 +232,13 @@ textarea {
   bottom: 0;
   display: flex;
   border-top: 1px solid var(--border);
-  background: rgba(26, 33, 43, 0.95);
-  backdrop-filter: blur(6px);
+  background: var(--surface);
 }
 
 .bottom-nav a {
   flex: 1;
   text-align: center;
-  padding: 10px 0 14px;
+  padding: 10px 0 12px;
   color: var(--muted);
   text-decoration: none;
   font-size: 11px;
@@ -243,23 +249,23 @@ textarea {
 }
 
 .bottom-nav a.active {
-  color: var(--accent-2);
+  color: var(--ink);
 }
 
 .bottom-nav .icon {
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .top-bar {
-  padding: 14px 16px 0;
+  padding: 12px 16px 0;
 }
 
 .role-switch {
   display: flex;
-  gap: 6px;
-  padding: 4px;
+  gap: 4px;
+  padding: 3px;
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid var(--border);
 }
 
@@ -269,10 +275,11 @@ textarea {
   background: transparent;
   color: var(--muted);
   padding: 8px 4px;
-  border-radius: 9px;
+  border-radius: 6px;
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .role-switch button.active {
@@ -299,20 +306,20 @@ textarea {
 }
 
 .stepper button {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 1px solid var(--accent-2);
-  background: transparent;
-  color: var(--accent-2);
-  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
 
 .badge-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   display: inline-block;
   margin-right: 6px;

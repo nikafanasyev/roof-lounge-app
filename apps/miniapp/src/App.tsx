@@ -11,14 +11,31 @@ import Summary from "@/screens/manager/Summary";
 import ServiceCalls from "@/screens/manager/ServiceCalls";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 
-type AppRole = "staff" | "manager";
+// Три роли — три разных набора экранов. Пока нет реальной Telegram-авторизации
+// персонала, переключатель ниже — временная демо-заглушка: в проде у каждого
+// сотрудника роль будет одна и назначаться она будет один раз (по staff.role
+// в базе), без выбора вручную — см. README.
+type AppRole = "master" | "staff" | "manager";
+
+const ROLE_LABEL: Record<AppRole, string> = {
+  master: "Мастер",
+  staff: "Официант",
+  manager: "Руководитель",
+};
+
+function MasterNav() {
+  return (
+    <nav className="bottom-nav">
+      <NavLink to="/master/guests" className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🧪</span>Гости
+      </NavLink>
+    </nav>
+  );
+}
 
 function StaffNav() {
   return (
     <nav className="bottom-nav">
-      <NavLink to="/staff/guests" className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🧪</span>Гости
-      </NavLink>
       <NavLink to="/staff/shift" className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">✅</span>Смена
       </NavLink>
@@ -45,8 +62,14 @@ function ManagerNav() {
   );
 }
 
+const DEFAULT_ROUTE: Record<AppRole, string> = {
+  master: "/master/guests",
+  staff: "/staff/shift",
+  manager: "/manager/summary",
+};
+
 function RoleShell() {
-  const [role, setRole] = useState<AppRole>("staff");
+  const [role, setRole] = useState<AppRole>("master");
   const location = useLocation();
   const isGuestScreen = location.pathname.startsWith("/table/");
 
@@ -62,21 +85,22 @@ function RoleShell() {
     <div className="app">
       <div className="top-bar">
         <div className="role-switch">
-          <button className={role === "staff" ? "active" : ""} onClick={() => setRole("staff")}>
-            Персонал
-          </button>
-          <button className={role === "manager" ? "active" : ""} onClick={() => setRole("manager")}>
-            Руководитель
-          </button>
+          {(Object.keys(ROLE_LABEL) as AppRole[]).map((r) => (
+            <button key={r} className={role === r ? "active" : ""} onClick={() => setRole(r)}>
+              {ROLE_LABEL[r]}
+            </button>
+          ))}
         </div>
       </div>
 
       <Routes>
-        <Route path="/" element={<Navigate to={role === "staff" ? "/staff/guests" : "/manager/summary"} replace />} />
-        <Route path="/staff/guests" element={<GuestsList />} />
-        <Route path="/staff/guests/:guestId" element={<GuestProfile />} />
-        <Route path="/staff/guests/:guestId/mix" element={<MixBuilder />} />
-        <Route path="/staff/mix/:mixId" element={<MixView />} />
+        <Route path="/" element={<Navigate to={DEFAULT_ROUTE[role]} replace />} />
+
+        <Route path="/master/guests" element={<GuestsList />} />
+        <Route path="/master/guests/:guestId" element={<GuestProfile />} />
+        <Route path="/master/guests/:guestId/mix" element={<MixBuilder />} />
+        <Route path="/master/mix/:mixId" element={<MixView />} />
+
         <Route path="/staff/shift" element={<Shift />} />
         <Route path="/staff/problems" element={<Problems />} />
         <Route path="/staff/tasks" element={<Tasks />} />
@@ -87,7 +111,9 @@ function RoleShell() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      {role === "staff" ? <StaffNav /> : <ManagerNav />}
+      {role === "master" && <MasterNav />}
+      {role === "staff" && <StaffNav />}
+      {role === "manager" && <ManagerNav />}
     </div>
   );
 }

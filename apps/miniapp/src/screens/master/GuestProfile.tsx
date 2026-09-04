@@ -26,7 +26,7 @@ export default function GuestProfile() {
 
   return (
     <div className="screen">
-      <Link to="/staff/guests" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+      <Link to="/master/guests" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
         ← Все гости
       </Link>
 
@@ -86,7 +86,7 @@ export default function GuestProfile() {
             <>
               <div className="eyebrow">Любимые миксы</div>
               {profile.favoriteMixes.map((m) => (
-                <Link key={m.id} to={`/staff/mix/${m.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                <Link key={m.id} to={`/master/mix/${m.id}`} style={{ textDecoration: "none", color: "inherit" }}>
                   <div className="card card-row">
                     <span>
                       {m.coverEmoji} {m.title}
@@ -105,7 +105,7 @@ export default function GuestProfile() {
           {history.length === 0 && <div className="list-empty">Миксов пока нет</div>}
           {history.map((mix) => (
             <div key={mix.id} className="card">
-              <Link to={`/staff/mix/${mix.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+              <Link to={`/master/mix/${mix.id}`} style={{ textDecoration: "none", color: "inherit" }}>
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>
                   {mix.coverEmoji} {mix.title}
                 </div>
@@ -132,7 +132,7 @@ export default function GuestProfile() {
       )}
 
       <div style={{ position: "sticky", bottom: 12, marginTop: 20 }}>
-        <button className="btn primary" onClick={() => navigate(`/staff/guests/${guestId}/mix`)}>
+        <button className="btn primary" onClick={() => navigate(`/master/guests/${guestId}/mix`)}>
           Собрать микс →
         </button>
       </div>

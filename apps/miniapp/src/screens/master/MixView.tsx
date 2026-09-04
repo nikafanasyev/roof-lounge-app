@@ -89,7 +89,7 @@ export default function MixView() {
       </div>
 
       {guest && (
-        <Link to={`/staff/guests/${guest.id}`} className="btn secondary" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 12 }}>
+        <Link to={`/master/guests/${guest.id}`} className="btn secondary" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 12 }}>
           К профилю гостя
         </Link>
       )}

@@ -25,7 +25,7 @@ export default function GuestsList() {
       {filtered.map((guest) => {
         const mixCount = listMixesForGuest(guest.id).length;
         return (
-          <Link key={guest.id} to={`/staff/guests/${guest.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+          <Link key={guest.id} to={`/master/guests/${guest.id}`} style={{ textDecoration: "none", color: "inherit" }}>
             <div className="card card-row">
               <div>
                 <div style={{ fontWeight: 700 }}>{guest.displayName}</div>
