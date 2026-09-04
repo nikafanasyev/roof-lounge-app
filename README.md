@@ -45,7 +45,7 @@ npm run dev
 
 ## Деплой (ориентир, см. раздел 3 архитектурного документа)
 
-- **apps/miniapp** → Vercel (или Netlify): `npm run build`, раздать `dist/`.
+- **apps/miniapp** → Vercel (или Netlify): `npm run build`, раздать `dist/`. Важно: настроить SPA-фолбэк (все пути → `index.html`), иначе прямые ссылки вида `/table/table-7` из QR-кодов будут отдавать 404 — на Vercel это `rewrites` в `vercel.json`, на Netlify — `_redirects`.
 - **apps/bot** → Railway (или любой сервис с постоянным процессом — боту нужен long-polling или webhook, статический хостинг не подойдёт).
 - **QR-коды на столах** — каждый ведёт на `https://t.me/<bot_username>/<app_name>?startapp=table_<N>`, где `<N>` — номер стола (генерация самих QR-картинок — отдельный маленький скрипт, не входит в этот скелет).
 
