@@ -7,43 +7,42 @@ import MixView from "@/screens/master/MixView";
 import Shift from "@/screens/staff/Shift";
 import Problems from "@/screens/staff/Problems";
 import Tasks from "@/screens/staff/Tasks";
+import Dashboard from "@/screens/employee/Dashboard";
+import More from "@/screens/employee/More";
+import Profile from "@/screens/employee/Profile";
+import Schedule from "@/screens/employee/Schedule";
+import Adjustments from "@/screens/employee/Adjustments";
+import Knowledge from "@/screens/employee/Knowledge";
+import KnowledgeArticleScreen from "@/screens/employee/KnowledgeArticle";
 import Summary from "@/screens/manager/Summary";
 import ServiceCalls from "@/screens/manager/ServiceCalls";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 
-// Три роли — три разных набора экранов. Пока нет реальной Telegram-авторизации
-// персонала, переключатель ниже — временная демо-заглушка: в проде у каждого
-// сотрудника роль будет одна и назначаться она будет один раз (по staff.role
-// в базе), без выбора вручную — см. README.
-type AppRole = "master" | "staff" | "manager";
+// Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
+// реально работает в заведении) и отдельно "Руководитель". Переключатель
+// ниже — временная демо-заглушка, пока нет реальной Telegram-авторизации:
+// в проде роль будет закрепляться за аккаунтом один раз, без выбора вручную.
+type AppRole = "employee" | "manager";
 
 const ROLE_LABEL: Record<AppRole, string> = {
-  master: "Мастер",
-  staff: "Официант",
+  employee: "Сотрудник",
   manager: "Руководитель",
 };
 
-function MasterNav() {
+function EmployeeNav() {
   return (
     <nav className="bottom-nav">
-      <NavLink to="/master/guests" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/employee/dashboard" className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">💰</span>Зарплата
+      </NavLink>
+      <NavLink to="/employee/guests" className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🧪</span>Гости
       </NavLink>
-    </nav>
-  );
-}
-
-function StaffNav() {
-  return (
-    <nav className="bottom-nav">
-      <NavLink to="/staff/shift" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/employee/shift" className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">✅</span>Смена
       </NavLink>
-      <NavLink to="/staff/problems" className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🛠</span>Проблемы
-      </NavLink>
-      <NavLink to="/staff/tasks" className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">📋</span>Задачи
+      <NavLink to="/employee/more" className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">☰</span>Ещё
       </NavLink>
     </nav>
   );
@@ -63,13 +62,12 @@ function ManagerNav() {
 }
 
 const DEFAULT_ROUTE: Record<AppRole, string> = {
-  master: "/master/guests",
-  staff: "/staff/shift",
+  employee: "/employee/dashboard",
   manager: "/manager/summary",
 };
 
 function RoleShell() {
-  const [role, setRole] = useState<AppRole>("master");
+  const [role, setRole] = useState<AppRole>("employee");
   const location = useLocation();
   const isGuestScreen = location.pathname.startsWith("/table/");
 
@@ -96,14 +94,20 @@ function RoleShell() {
       <Routes>
         <Route path="/" element={<Navigate to={DEFAULT_ROUTE[role]} replace />} />
 
-        <Route path="/master/guests" element={<GuestsList />} />
-        <Route path="/master/guests/:guestId" element={<GuestProfile />} />
-        <Route path="/master/guests/:guestId/mix" element={<MixBuilder />} />
-        <Route path="/master/mix/:mixId" element={<MixView />} />
-
-        <Route path="/staff/shift" element={<Shift />} />
-        <Route path="/staff/problems" element={<Problems />} />
-        <Route path="/staff/tasks" element={<Tasks />} />
+        <Route path="/employee/dashboard" element={<Dashboard />} />
+        <Route path="/employee/guests" element={<GuestsList />} />
+        <Route path="/employee/guests/:guestId" element={<GuestProfile />} />
+        <Route path="/employee/guests/:guestId/mix" element={<MixBuilder />} />
+        <Route path="/employee/mix/:mixId" element={<MixView />} />
+        <Route path="/employee/shift" element={<Shift />} />
+        <Route path="/employee/problems" element={<Problems />} />
+        <Route path="/employee/tasks" element={<Tasks />} />
+        <Route path="/employee/more" element={<More />} />
+        <Route path="/employee/profile" element={<Profile />} />
+        <Route path="/employee/schedule" element={<Schedule />} />
+        <Route path="/employee/adjustments" element={<Adjustments />} />
+        <Route path="/employee/knowledge" element={<Knowledge />} />
+        <Route path="/employee/knowledge/:articleId" element={<KnowledgeArticleScreen />} />
 
         <Route path="/manager/summary" element={<Summary />} />
         <Route path="/manager/calls" element={<ServiceCalls />} />
@@ -111,8 +115,7 @@ function RoleShell() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      {role === "master" && <MasterNav />}
-      {role === "staff" && <StaffNav />}
+      {role === "employee" && <EmployeeNav />}
       {role === "manager" && <ManagerNav />}
     </div>
   );

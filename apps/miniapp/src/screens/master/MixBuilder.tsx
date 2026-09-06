@@ -91,7 +91,7 @@ export default function MixBuilder() {
       description: description.trim() || undefined,
       tags: Array.from(new Set(selected.flatMap((f) => f.categories))),
     });
-    navigate(`/master/mix/${mix.id}`);
+    navigate(`/employee/mix/${mix.id}`);
   }
 
   if (!guest) {

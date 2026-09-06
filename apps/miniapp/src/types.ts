@@ -115,3 +115,50 @@ export interface WaitlistEntry {
   partySize: number;
   createdAt: string;
 }
+
+// --- Личный кабинет сотрудника ---
+
+export interface StaffProfile {
+  id: string;
+  name: string;
+  photoUrl?: string;
+  phone?: string;
+  email?: string;
+  medicalBookNumber?: string;
+  medicalBookExpiry?: string; // ISO-дата окончания действия медкнижки
+  hiredAt: string; // ISO-дата трудоустройства, отсюда считается выслуга лет
+  salaryModel: string; // текстовое описание модели ЗП, например "оклад 2500/смена + 5% от выручки"
+}
+
+export interface ShiftPayrollEntry {
+  id: string;
+  date: string; // ISO-дата смены
+  revenue: number; // выручка за смену, ₽
+  salary: number; // начислено сотруднику за смену, ₽
+  paid: boolean;
+}
+
+export type AdjustmentType = "fine" | "bonus";
+
+export interface Adjustment {
+  id: string;
+  type: AdjustmentType;
+  amount: number; // ₽, всегда положительное число
+  reason: string;
+  date: string; // ISO-дата
+}
+
+export interface ScheduleEntry {
+  id: string;
+  date: string; // ISO-дата
+  startTime: string; // "18:00"
+  endTime: string; // "02:00"
+  roleLabel: string; // например "Мастер", "Официант"
+}
+
+export interface KnowledgeArticle {
+  id: string;
+  category: string;
+  title: string;
+  body: string; // краткий текст-заглушка, наполняется реальным контентом позже
+}

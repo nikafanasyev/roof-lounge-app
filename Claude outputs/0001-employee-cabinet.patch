@@ -1,0 +1,1014 @@
+From d294b8e7d0ee460fe37c22c0334ac9d5930cb4d3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Sun, 6 Sep 2026 13:56:03 +0000
+Subject: [PATCH] =?UTF-8?q?feat:=20=D0=B5=D0=B4=D0=B8=D0=BD=D1=8B=D0=B9=20?=
+ =?UTF-8?q?=D0=BA=D0=B0=D0=B1=D0=B8=D0=BD=D0=B5=D1=82=20=C2=AB=D0=A1=D0=BE?=
+ =?UTF-8?q?=D1=82=D1=80=D1=83=D0=B4=D0=BD=D0=B8=D0=BA=C2=BB=20=E2=80=94=20?=
+ =?UTF-8?q?=D0=B7=D0=B0=D1=80=D0=BF=D0=BB=D0=B0=D1=82=D0=B0,=20=D0=BF?=
+ =?UTF-8?q?=D1=80=D0=BE=D1=84=D0=B8=D0=BB=D1=8C,=20=D0=B3=D1=80=D0=B0?=
+ =?UTF-8?q?=D1=84=D0=B8=D0=BA,=20=D1=88=D1=82=D1=80=D0=B0=D1=84=D1=8B/?=
+ =?UTF-8?q?=D0=BF=D1=80=D0=B5=D0=BC=D0=B8=D0=B8,=20=D0=B1=D0=B0=D0=B7?=
+ =?UTF-8?q?=D0=B0=20=D0=B7=D0=BD=D0=B0=D0=BD=D0=B8=D0=B9?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Объединил Мастера и Официанта в один кабинет "Сотрудник" (домашний
+экран — дашборд ЗП: заработано/к выплате/премии/штрафы/выплачено +
+разбивка по сменам). Гости/миксы, Смена остались как были, остальное
+(Профиль с фото/телефоном/медкнижкой/стажем/моделью ЗП, График смен,
+Штрафы и премии, Проблемы, Задачи, База знаний из 12 статей по
+категориям) вынесено в раздел "Ещё".
+
+Пока только на моках — под staff_profile/payroll/adjustments/schedule/
+knowledge_base ещё нет таблиц в Supabase, это следующий шаг.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BhZ45j4FFAfvtAGo4A4vw
+---
+ README.md                                     | 30 +++++--
+ apps/miniapp/src/App.tsx                      | 73 +++++++--------
+ apps/miniapp/src/data/repo.ts                 | 89 +++++++++++++++++++
+ apps/miniapp/src/data/seed.ts                 | 61 ++++++++++++-
+ .../src/screens/employee/Adjustments.tsx      | 83 +++++++++++++++++
+ .../src/screens/employee/Dashboard.tsx        | 65 ++++++++++++++
+ .../src/screens/employee/Knowledge.tsx        | 27 ++++++
+ .../src/screens/employee/KnowledgeArticle.tsx | 28 ++++++
+ apps/miniapp/src/screens/employee/More.tsx    | 29 ++++++
+ apps/miniapp/src/screens/employee/Profile.tsx | 88 ++++++++++++++++++
+ .../miniapp/src/screens/employee/Schedule.tsx | 32 +++++++
+ .../src/screens/master/GuestProfile.tsx       |  8 +-
+ .../miniapp/src/screens/master/GuestsList.tsx |  2 +-
+ .../miniapp/src/screens/master/MixBuilder.tsx |  2 +-
+ apps/miniapp/src/screens/master/MixView.tsx   |  2 +-
+ apps/miniapp/src/styles.css                   | 52 +++++++++++
+ apps/miniapp/src/types.ts                     | 47 ++++++++++
+ 17 files changed, 666 insertions(+), 52 deletions(-)
+ create mode 100644 apps/miniapp/src/screens/employee/Adjustments.tsx
+ create mode 100644 apps/miniapp/src/screens/employee/Dashboard.tsx
+ create mode 100644 apps/miniapp/src/screens/employee/Knowledge.tsx
+ create mode 100644 apps/miniapp/src/screens/employee/KnowledgeArticle.tsx
+ create mode 100644 apps/miniapp/src/screens/employee/More.tsx
+ create mode 100644 apps/miniapp/src/screens/employee/Profile.tsx
+ create mode 100644 apps/miniapp/src/screens/employee/Schedule.tsx
+
+diff --git a/README.md b/README.md
+index dc2063d..837ceab 100644
+--- a/README.md
++++ b/README.md
+@@ -10,15 +10,27 @@
+ 
+ ## Что показывает прототип
+ 
+-В приложении три роли — сейчас переключатель наверху экрана переключает их вручную (для демонстрации на одном устройстве), в реальной эксплуатации каждый сотрудник будет видеть только свою роль автоматически, по своему Telegram-аккаунту, без выбора.
+-
+-- **Мастер → Гости**: поиск гостя → карточка (вкусовой профиль: шкалы предпочтений, средняя крепость, любимые миксы) → история миксов → «Собрать микс →» (бренд → вкус → доли в % → оформление).
+-- **Официант → Смена**: чек-лист открытия/закрытия, передача смены заметкой.
+-- **Официант → Проблемы**: фиксация поломки, статус, сколько дней открыта.
+-- **Официант → Задачи**: постановка и отметка выполнения.
+-- **Руководитель → Сводка**: счётчики + автоматические предупреждения (пропущенный чек-лист, зависшая проблема, вызов без реакции).
+-- **Руководитель → Вызовы**: лента QR-вызовов со столов, время реакции.
+-- **Гостевой QR-экран** (`/table/:token`, отдельный маршрут без нижней навигации): «позвать сотрудника» / «попросить счёт» / «нужна помощь» / «оставил вещь».
++В приложении две роли — **Сотрудник** (единый кабинет для любого сотрудника: мастер и официант — это один человек) и **Руководитель**. Переключатель наверху экрана переключает их вручную (демо-заглушка на одном устройстве), в реальной эксплуатации сотрудник будет видеть только свой кабинет автоматически, по Telegram-аккаунту, без выбора.
++
++**Сотрудник:**
++- **Зарплата** (домашний экран): дашборд — заработано / к выплате / премии / штрафы / выплачено, ниже разбивка по сменам (дата, выручка, начислено).
++- **Гости**: поиск гостя → карточка (вкусовой профиль: шкалы предпочтений, средняя крепость, любимые миксы) → история миксов → «Собрать микс →» (бренд → вкус → доли в % → оформление).
++- **Смена**: чек-лист открытия/закрытия, передача смены заметкой.
++- **Ещё** → хаб со ссылками:
++  - **Профиль** — фото (меняется тапом), телефон, почта, номер и срок действия медкнижки (с предупреждением, если скоро истекает), стаж, модель ЗП.
++  - **График смен** — список смен с датой/временем.
++  - **Штрафы и премии** — лента начислений + форма добавления (в проде — доступ только руководителю, см. комментарий в коде).
++  - **Проблемы** — фиксация поломки, статус, сколько дней открыта.
++  - **Задачи** — постановка и отметка выполнения.
++  - **База знаний** — по категориям: чек-листы, касса, где что лежит, тех карты, меню и цены, штрафная сетка, свет и вода, вентиляция, ЧС, охрана, важные номера, генеральная уборка. Сейчас статьи — заглушки, наполняются реальным контентом отдельно.
++
++**Руководитель:**
++- **Сводка**: счётчики + автоматические предупреждения (пропущенный чек-лист, зависшая проблема, вызов без реакции).
++- **Вызовы**: лента QR-вызовов со столов, время реакции.
++
++**Гостевой QR-экран** (`/table/:token`, отдельный маршрут без нижней навигации): «позвать сотрудника» / «попросить счёт» / «нужна помощь» / «оставил вещь».
++
++Личный кабинет сотрудника (зарплата, профиль, график, штрафы/премии, база знаний) пока работает только на моках — под эти сущности ещё нет таблиц в Supabase, это следующий шаг после того, как определимся с точной моделью ЗП и наполнением базы знаний.
+ 
+ ## Как запустить локально
+ 
+diff --git a/apps/miniapp/src/App.tsx b/apps/miniapp/src/App.tsx
+index 070cacb..febe0b7 100644
+--- a/apps/miniapp/src/App.tsx
++++ b/apps/miniapp/src/App.tsx
+@@ -7,43 +7,42 @@ import MixView from "@/screens/master/MixView";
+ import Shift from "@/screens/staff/Shift";
+ import Problems from "@/screens/staff/Problems";
+ import Tasks from "@/screens/staff/Tasks";
++import Dashboard from "@/screens/employee/Dashboard";
++import More from "@/screens/employee/More";
++import Profile from "@/screens/employee/Profile";
++import Schedule from "@/screens/employee/Schedule";
++import Adjustments from "@/screens/employee/Adjustments";
++import Knowledge from "@/screens/employee/Knowledge";
++import KnowledgeArticleScreen from "@/screens/employee/KnowledgeArticle";
+ import Summary from "@/screens/manager/Summary";
+ import ServiceCalls from "@/screens/manager/ServiceCalls";
+ import TableGuestScreen from "@/screens/guest/TableGuestScreen";
+ 
+-// Три роли — три разных набора экранов. Пока нет реальной Telegram-авторизации
+-// персонала, переключатель ниже — временная демо-заглушка: в проде у каждого
+-// сотрудника роль будет одна и назначаться она будет один раз (по staff.role
+-// в базе), без выбора вручную — см. README.
+-type AppRole = "master" | "staff" | "manager";
++// Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
++// реально работает в заведении) и отдельно "Руководитель". Переключатель
++// ниже — временная демо-заглушка, пока нет реальной Telegram-авторизации:
++// в проде роль будет закрепляться за аккаунтом один раз, без выбора вручную.
++type AppRole = "employee" | "manager";
+ 
+ const ROLE_LABEL: Record<AppRole, string> = {
+-  master: "Мастер",
+-  staff: "Официант",
++  employee: "Сотрудник",
+   manager: "Руководитель",
+ };
+ 
+-function MasterNav() {
++function EmployeeNav() {
+   return (
+     <nav className="bottom-nav">
+-      <NavLink to="/master/guests" className={({ isActive }) => (isActive ? "active" : "")}>
++      <NavLink to="/employee/dashboard" className={({ isActive }) => (isActive ? "active" : "")}>
++        <span className="icon">💰</span>Зарплата
++      </NavLink>
++      <NavLink to="/employee/guests" className={({ isActive }) => (isActive ? "active" : "")}>
+         <span className="icon">🧪</span>Гости
+       </NavLink>
+-    </nav>
+-  );
+-}
+-
+-function StaffNav() {
+-  return (
+-    <nav className="bottom-nav">
+-      <NavLink to="/staff/shift" className={({ isActive }) => (isActive ? "active" : "")}>
++      <NavLink to="/employee/shift" className={({ isActive }) => (isActive ? "active" : "")}>
+         <span className="icon">✅</span>Смена
+       </NavLink>
+-      <NavLink to="/staff/problems" className={({ isActive }) => (isActive ? "active" : "")}>
+-        <span className="icon">🛠</span>Проблемы
+-      </NavLink>
+-      <NavLink to="/staff/tasks" className={({ isActive }) => (isActive ? "active" : "")}>
+-        <span className="icon">📋</span>Задачи
++      <NavLink to="/employee/more" className={({ isActive }) => (isActive ? "active" : "")}>
++        <span className="icon">☰</span>Ещё
+       </NavLink>
+     </nav>
+   );
+@@ -63,13 +62,12 @@ function ManagerNav() {
+ }
+ 
+ const DEFAULT_ROUTE: Record<AppRole, string> = {
+-  master: "/master/guests",
+-  staff: "/staff/shift",
++  employee: "/employee/dashboard",
+   manager: "/manager/summary",
+ };
+ 
+ function RoleShell() {
+-  const [role, setRole] = useState<AppRole>("master");
++  const [role, setRole] = useState<AppRole>("employee");
+   const location = useLocation();
+   const isGuestScreen = location.pathname.startsWith("/table/");
+ 
+@@ -96,14 +94,20 @@ function RoleShell() {
+       <Routes>
+         <Route path="/" element={<Navigate to={DEFAULT_ROUTE[role]} replace />} />
+ 
+-        <Route path="/master/guests" element={<GuestsList />} />
+-        <Route path="/master/guests/:guestId" element={<GuestProfile />} />
+-        <Route path="/master/guests/:guestId/mix" element={<MixBuilder />} />
+-        <Route path="/master/mix/:mixId" element={<MixView />} />
+-
+-        <Route path="/staff/shift" element={<Shift />} />
+-        <Route path="/staff/problems" element={<Problems />} />
+-        <Route path="/staff/tasks" element={<Tasks />} />
++        <Route path="/employee/dashboard" element={<Dashboard />} />
++        <Route path="/employee/guests" element={<GuestsList />} />
++        <Route path="/employee/guests/:guestId" element={<GuestProfile />} />
++        <Route path="/employee/guests/:guestId/mix" element={<MixBuilder />} />
++        <Route path="/employee/mix/:mixId" element={<MixView />} />
++        <Route path="/employee/shift" element={<Shift />} />
++        <Route path="/employee/problems" element={<Problems />} />
++        <Route path="/employee/tasks" element={<Tasks />} />
++        <Route path="/employee/more" element={<More />} />
++        <Route path="/employee/profile" element={<Profile />} />
++        <Route path="/employee/schedule" element={<Schedule />} />
++        <Route path="/employee/adjustments" element={<Adjustments />} />
++        <Route path="/employee/knowledge" element={<Knowledge />} />
++        <Route path="/employee/knowledge/:articleId" element={<KnowledgeArticleScreen />} />
+ 
+         <Route path="/manager/summary" element={<Summary />} />
+         <Route path="/manager/calls" element={<ServiceCalls />} />
+@@ -111,8 +115,7 @@ function RoleShell() {
+         <Route path="*" element={<Navigate to="/" replace />} />
+       </Routes>
+ 
+-      {role === "master" && <MasterNav />}
+-      {role === "staff" && <StaffNav />}
++      {role === "employee" && <EmployeeNav />}
+       {role === "manager" && <ManagerNav />}
+     </div>
+   );
+diff --git a/apps/miniapp/src/data/repo.ts b/apps/miniapp/src/data/repo.ts
+index 89d0187..bfee489 100644
+--- a/apps/miniapp/src/data/repo.ts
++++ b/apps/miniapp/src/data/repo.ts
+@@ -17,25 +17,36 @@
+ // авторизация — заменить на staff.id из сессии.
+ 
+ import type {
++  Adjustment,
++  AdjustmentType,
+   ChecklistItem,
+   Flavor,
+   Guest,
++  KnowledgeArticle,
+   Mix,
+   MixItem,
+   Problem,
+   ProblemCategory,
++  ScheduleEntry,
+   ServiceCall,
+   ServiceCallType,
+   Shift,
++  ShiftPayrollEntry,
++  StaffProfile,
+   Task,
+ } from "@/types";
+ import {
++  seedAdjustments,
+   seedFlavors,
+   seedGuests,
++  seedKnowledgeArticles,
+   seedMixes,
+   seedProblems,
++  seedSchedule,
+   seedServiceCalls,
+   seedShift,
++  seedShiftPayroll,
++  seedStaffProfile,
+   seedTasks,
+ } from "./seed";
+ import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+@@ -74,6 +85,11 @@ export const serviceCallsStore = new Store<ServiceCall[]>(seedServiceCalls);
+ export const shiftStore = new Store<Shift>(seedShift);
+ export const problemsStore = new Store<Problem[]>(seedProblems);
+ export const tasksStore = new Store<Task[]>(seedTasks);
++export const staffProfileStore = new Store<StaffProfile>(seedStaffProfile);
++export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll);
++export const adjustmentsStore = new Store<Adjustment[]>(seedAdjustments);
++export const scheduleStore = new Store<ScheduleEntry[]>(seedSchedule);
++export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
+ 
+ const uid = () => crypto.randomUUID();
+ 
+@@ -659,3 +675,76 @@ export function addTask(title: string, assignee?: string, dueDate?: string) {
+       .then(({ error }) => error && logSyncError("addTask", error));
+   }
+ }
++
++// --- Личный кабинет сотрудника ---
++//
++// Пока работает только на моках: под эти сущности (staff_profile, payroll,
++// adjustments, schedule, knowledge_base) ещё нет таблиц в Supabase — это
++// следующий шаг, когда определимся с моделью ЗП и структурой базы знаний.
++
++export function getStaffProfile(): StaffProfile {
++  return staffProfileStore.get();
++}
++
++export function updateStaffProfile(patch: Partial<Omit<StaffProfile, "id">>) {
++  staffProfileStore.update((profile) => ({ ...profile, ...patch }));
++}
++
++export function yearsOfService(hiredAt: string): { years: number; months: number } {
++  const ms = Date.now() - new Date(hiredAt).getTime();
++  const totalMonths = Math.max(0, Math.floor(ms / (86400000 * 30.44)));
++  return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
++}
++
++export function listShiftPayroll(): ShiftPayrollEntry[] {
++  return [...shiftPayrollStore.get()].sort((a, b) => b.date.localeCompare(a.date));
++}
++
++export function listAdjustments(): Adjustment[] {
++  return [...adjustmentsStore.get()].sort((a, b) => b.date.localeCompare(a.date));
++}
++
++export function addAdjustment(type: AdjustmentType, amount: number, reason: string) {
++  adjustmentsStore.update((list) => [{ id: uid(), type, amount, reason, date: new Date().toISOString() }, ...list]);
++}
++
++export interface PayrollSummary {
++  earned: number; // сумма ЗП по сменам + премии − штрафы
++  fines: number;
++  bonuses: number;
++  paid: number;
++  due: number;
++}
++
++export function computePayrollSummary(): PayrollSummary {
++  const shifts = shiftPayrollStore.get();
++  const adjustments = adjustmentsStore.get();
++  const fromShifts = shifts.reduce((sum, s) => sum + s.salary, 0);
++  const paid = shifts.filter((s) => s.paid).reduce((sum, s) => sum + s.salary, 0);
++  const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
++  const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
++  const earned = fromShifts + bonuses - fines;
++  return { earned, fines, bonuses, paid, due: earned - paid };
++}
++
++export function listSchedule(): ScheduleEntry[] {
++  return [...scheduleStore.get()].sort((a, b) => a.date.localeCompare(b.date));
++}
++
++export function listKnowledgeArticles(): KnowledgeArticle[] {
++  return knowledgeStore.get();
++}
++
++export function getKnowledgeArticle(id: string): KnowledgeArticle | undefined {
++  return knowledgeStore.get().find((a) => a.id === id);
++}
++
++export function groupKnowledgeByCategory(): { category: string; articles: KnowledgeArticle[] }[] {
++  const byCategory = new Map<string, KnowledgeArticle[]>();
++  for (const article of knowledgeStore.get()) {
++    const list = byCategory.get(article.category) ?? [];
++    list.push(article);
++    byCategory.set(article.category, list);
++  }
++  return Array.from(byCategory.entries()).map(([category, articles]) => ({ category, articles }));
++}
+diff --git a/apps/miniapp/src/data/seed.ts b/apps/miniapp/src/data/seed.ts
+index deaddbe..7d0e39a 100644
+--- a/apps/miniapp/src/data/seed.ts
++++ b/apps/miniapp/src/data/seed.ts
+@@ -1,4 +1,17 @@
+-import type { Flavor, Guest, Mix, Problem, Shift, Task, ServiceCall } from "@/types";
++import type {
++  Adjustment,
++  Flavor,
++  Guest,
++  KnowledgeArticle,
++  Mix,
++  Problem,
++  ScheduleEntry,
++  Shift,
++  ShiftPayrollEntry,
++  StaffProfile,
++  Task,
++  ServiceCall,
++} from "@/types";
+ 
+ // Примерные данные для демонстрации UI. Отмечены как пример — не реальные гости Roof Lounge.
+ // При подключении Supabase этот файл не используется, только data/repo.ts.
+@@ -115,3 +128,49 @@ export const seedTasks: Task[] = [
+   { id: "t1", title: "Заменить лампу на балконе", dueDate: "Пятница", assignee: "Дмитрий", done: false },
+   { id: "t2", title: "Пересчитать склад расходников", done: true },
+ ];
++
++// --- Личный кабинет сотрудника ---
++
++export const seedStaffProfile: StaffProfile = {
++  id: "s1",
++  name: "Никита Афанасьев",
++  phone: "",
++  email: "",
++  medicalBookNumber: "",
++  medicalBookExpiry: undefined,
++  hiredAt: new Date(Date.now() - 86400000 * 240).toISOString(),
++  salaryModel: "Оклад за смену + % от выручки — уточнить точную формулу у управляющего",
++};
++
++export const seedShiftPayroll: ShiftPayrollEntry[] = [
++  { id: "sp1", date: new Date(Date.now() - 86400000 * 1).toISOString(), revenue: 84000, salary: 4200, paid: false },
++  { id: "sp2", date: new Date(Date.now() - 86400000 * 3).toISOString(), revenue: 61000, salary: 3050, paid: false },
++  { id: "sp3", date: new Date(Date.now() - 86400000 * 6).toISOString(), revenue: 97000, salary: 4850, paid: true },
++  { id: "sp4", date: new Date(Date.now() - 86400000 * 9).toISOString(), revenue: 52000, salary: 2600, paid: true },
++];
++
++export const seedAdjustments: Adjustment[] = [
++  { id: "a1", type: "bonus", amount: 1500, reason: "Лучший отзыв недели от гостя", date: new Date(Date.now() - 86400000 * 6).toISOString() },
++  { id: "a2", type: "fine", amount: 500, reason: "Опоздание на смену на 20 минут", date: new Date(Date.now() - 86400000 * 9).toISOString() },
++];
++
++export const seedKnowledgeArticles: KnowledgeArticle[] = [
++  { id: "k1", category: "Смена", title: "Чек-листы открытия и закрытия смены", body: "Полный порядок действий при открытии и закрытии смены — заполняется управляющим." },
++  { id: "k2", category: "Смена", title: "Касса", body: "Правила работы с кассой, инкассация, сверка — заполняется управляющим." },
++  { id: "k3", category: "Зал", title: "Где что лежит", body: "Расположение расходников, инвентаря, документов — заполняется управляющим." },
++  { id: "k4", category: "Меню", title: "Тех карты", body: "Технологические карты позиций меню — заполняется управляющим." },
++  { id: "k5", category: "Меню", title: "Позиции меню и стоимость", body: "Актуальный прайс-лист — заполняется управляющим." },
++  { id: "k6", category: "HR", title: "Штрафная сетка", body: "Список нарушений и соответствующих штрафов — заполняется управляющим." },
++  { id: "k7", category: "Техника", title: "Свет и вода", body: "Порядок действий при отключении электричества/воды, где рубильники/краны — заполняется управляющим." },
++  { id: "k8", category: "Техника", title: "Приточно-вытяжная система", body: "Управление вентиляцией зала — заполняется управляющим." },
++  { id: "k9", category: "Безопасность", title: "ЧС и как реагировать", body: "Порядок действий при чрезвычайной ситуации — заполняется управляющим." },
++  { id: "k10", category: "Безопасность", title: "Охрана", body: "Контакты и порядок вызова охраны — заполняется управляющим." },
++  { id: "k11", category: "Безопасность", title: "Важные номера", body: "Список важных телефонов (управляющий, техник, охрана, экстренные службы) — заполняется управляющим." },
++  { id: "k12", category: "Зал", title: "Генеральная уборка", body: "Регламент и график генеральной уборки — заполняется управляющим." },
++];
++
++export const seedSchedule: ScheduleEntry[] = [
++  { id: "sc1", date: new Date(Date.now() + 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
++  { id: "sc2", date: new Date(Date.now() + 86400000 * 3).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
++  { id: "sc3", date: new Date(Date.now() - 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
++];
+diff --git a/apps/miniapp/src/screens/employee/Adjustments.tsx b/apps/miniapp/src/screens/employee/Adjustments.tsx
+new file mode 100644
+index 0000000..1200b8f
+--- /dev/null
++++ b/apps/miniapp/src/screens/employee/Adjustments.tsx
+@@ -0,0 +1,83 @@
++// MVP-заглушка: форма добавления записи открыта всем — по-хорошему начислять
++// штрафы/премии должен только руководитель. Вернуться к этому, когда появится
++// реальное разделение прав по ролям.
++import { useState } from "react";
++import { useStore } from "@/data/useStore";
++import { addAdjustment, adjustmentsStore, listAdjustments } from "@/data/repo";
++import type { AdjustmentType } from "@/types";
++
++function money(n: number): string {
++  return n.toLocaleString("ru-RU") + " ₽";
++}
++
++export default function Adjustments() {
++  useStore(adjustmentsStore);
++  const entries = listAdjustments();
++
++  const [showForm, setShowForm] = useState(false);
++  const [type, setType] = useState<AdjustmentType>("bonus");
++  const [amount, setAmount] = useState("");
++  const [reason, setReason] = useState("");
++
++  function submit() {
++    const value = Number(amount);
++    if (!value || !reason.trim()) return;
++    addAdjustment(type, value, reason.trim());
++    setAmount("");
++    setReason("");
++    setShowForm(false);
++  }
++
++  return (
++    <div className="screen">
++      <h1>Штрафы и премии</h1>
++
++      {entries.length === 0 && <div className="list-empty">Записей пока нет</div>}
++      {entries.map((a) => (
++        <div key={a.id} className="card card-row">
++          <div>
++            <div style={{ fontWeight: 700 }}>{a.reason}</div>
++            <div className="muted" style={{ fontSize: 13 }}>
++              {new Date(a.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}
++            </div>
++          </div>
++          <span style={{ fontWeight: 700, color: a.type === "bonus" ? "var(--good)" : "var(--danger)" }}>
++            {a.type === "bonus" ? "+" : "−"}
++            {money(a.amount)}
++          </span>
++        </div>
++      ))}
++
++      {!showForm && (
++        <button className="btn secondary" style={{ width: "100%", marginTop: 8 }} onClick={() => setShowForm(true)}>
++          + Добавить запись
++        </button>
++      )}
++
++      {showForm && (
++        <div className="card" style={{ marginTop: 8 }}>
++          <div className="tabs">
++            <button className={`tab-btn ${type === "bonus" ? "active" : ""}`} onClick={() => setType("bonus")}>
++              Премия
++            </button>
++            <button className={`tab-btn ${type === "fine" ? "active" : ""}`} onClick={() => setType("fine")}>
++              Штраф
++            </button>
++          </div>
++          <div className="eyebrow">Сумма, ₽</div>
++          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ marginBottom: 12 }} />
++          <div className="eyebrow">Причина</div>
++          <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} style={{ marginBottom: 12 }} />
++          <div className="btn-row">
++            <button className="btn secondary" style={{ flex: 1 }} onClick={() => setShowForm(false)}>
++              Отмена
++            </button>
++            <button className="btn primary" style={{ flex: 1 }} onClick={submit}>
++              Добавить
++            </button>
++          </div>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/screens/employee/Dashboard.tsx b/apps/miniapp/src/screens/employee/Dashboard.tsx
+new file mode 100644
+index 0000000..8cee9e5
+--- /dev/null
++++ b/apps/miniapp/src/screens/employee/Dashboard.tsx
+@@ -0,0 +1,65 @@
++import { useStore } from "@/data/useStore";
++import { computePayrollSummary, listShiftPayroll, shiftPayrollStore, adjustmentsStore } from "@/data/repo";
++
++function money(n: number): string {
++  return n.toLocaleString("ru-RU") + " ₽";
++}
++
++export default function Dashboard() {
++  useStore(shiftPayrollStore);
++  useStore(adjustmentsStore);
++  const summary = computePayrollSummary();
++  const shifts = listShiftPayroll();
++
++  return (
++    <div className="screen">
++      <h1>Моя зарплата</h1>
++
++      <div className="stat-grid">
++        <div className="stat-tile">
++          <div className="value">{money(summary.earned)}</div>
++          <div className="label">Заработано</div>
++        </div>
++        <div className="stat-tile">
++          <div className="value">{money(summary.due)}</div>
++          <div className="label">К выплате</div>
++        </div>
++        <div className="stat-tile">
++          <div className="value" style={{ color: "var(--good)" }}>
++            +{money(summary.bonuses)}
++          </div>
++          <div className="label">Премии</div>
++        </div>
++        <div className="stat-tile">
++          <div className="value" style={{ color: "var(--danger)" }}>
++            −{money(summary.fines)}
++          </div>
++          <div className="label">Штрафы</div>
++        </div>
++        <div className="stat-tile" style={{ gridColumn: "span 2" }}>
++          <div className="value">{money(summary.paid)}</div>
++          <div className="label">Уже выплачено</div>
++        </div>
++      </div>
++
++      <h2>Разбивка по сменам</h2>
++      {shifts.length === 0 && <div className="list-empty">Смен пока не было</div>}
++      {shifts.map((s) => (
++        <div key={s.id} className="card card-row">
++          <div>
++            <div style={{ fontWeight: 700 }}>
++              {new Date(s.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}
++            </div>
++            <div className="muted" style={{ fontSize: 13 }}>
++              Выручка {money(s.revenue)}
++            </div>
++          </div>
++          <div style={{ textAlign: "right" }}>
++            <div style={{ fontWeight: 700 }}>{money(s.salary)}</div>
++            <span className={`chip ${s.paid ? "" : "accent"}`}>{s.paid ? "выплачено" : "к выплате"}</span>
++          </div>
++        </div>
++      ))}
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/screens/employee/Knowledge.tsx b/apps/miniapp/src/screens/employee/Knowledge.tsx
+new file mode 100644
+index 0000000..48cdc81
+--- /dev/null
++++ b/apps/miniapp/src/screens/employee/Knowledge.tsx
+@@ -0,0 +1,27 @@
++import { Link } from "react-router-dom";
++import { useStore } from "@/data/useStore";
++import { groupKnowledgeByCategory, knowledgeStore } from "@/data/repo";
++
++export default function Knowledge() {
++  useStore(knowledgeStore);
++  const groups = groupKnowledgeByCategory();
++
++  return (
++    <div className="screen">
++      <h1>База знаний</h1>
++      {groups.map((group) => (
++        <div key={group.category} style={{ marginBottom: 16 }}>
++          <h2>{group.category}</h2>
++          {group.articles.map((a) => (
++            <Link key={a.id} to={`/employee/knowledge/${a.id}`} style={{ textDecoration: "none", color: "inherit" }}>
++              <div className="card card-row">
++                <span>{a.title}</span>
++                <span className="muted">→</span>
++              </div>
++            </Link>
++          ))}
++        </div>
++      ))}
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/screens/employee/KnowledgeArticle.tsx b/apps/miniapp/src/screens/employee/KnowledgeArticle.tsx
+new file mode 100644
+index 0000000..6b43ec0
+--- /dev/null
++++ b/apps/miniapp/src/screens/employee/KnowledgeArticle.tsx
+@@ -0,0 +1,28 @@
++import { Link, useParams } from "react-router-dom";
++import { getKnowledgeArticle } from "@/data/repo";
++
++export default function KnowledgeArticleScreen() {
++  const { articleId = "" } = useParams();
++  const article = getKnowledgeArticle(articleId);
++
++  if (!article) {
++    return (
++      <div className="screen">
++        <div className="list-empty">Статья не найдена</div>
++      </div>
++    );
++  }
++
++  return (
++    <div className="screen">
++      <Link to="/employee/knowledge" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
++        ← База знаний
++      </Link>
++      <div className="eyebrow" style={{ marginTop: 12 }}>
++        {article.category}
++      </div>
++      <h1>{article.title}</h1>
++      <div className="card">{article.body}</div>
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/screens/employee/More.tsx b/apps/miniapp/src/screens/employee/More.tsx
+new file mode 100644
+index 0000000..3d1cf48
+--- /dev/null
++++ b/apps/miniapp/src/screens/employee/More.tsx
+@@ -0,0 +1,29 @@
++import { Link } from "react-router-dom";
++
++const ITEMS = [
++  { to: "/employee/profile", icon: "👤", label: "Профиль" },
++  { to: "/employee/schedule", icon: "🗓", label: "График смен" },
++  { to: "/employee/adjustments", icon: "💸", label: "Штрафы и премии" },
++  { to: "/employee/problems", icon: "🛠", label: "Проблемы" },
++  { to: "/employee/tasks", icon: "📋", label: "Задачи" },
++  { to: "/employee/knowledge", icon: "📚", label: "База знаний" },
++];
++
++export default function More() {
++  return (
++    <div className="screen menu-list">
++      <h1>Ещё</h1>
++      {ITEMS.map((item) => (
++        <Link key={item.to} to={item.to} style={{ textDecoration: "none", color: "inherit" }}>
++          <div className="card card-row">
++            <span>
++              <span style={{ marginRight: 10 }}>{item.icon}</span>
++              {item.label}
++            </span>
++            <span className="muted">→</span>
++          </div>
++        </Link>
++      ))}
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/screens/employee/Profile.tsx b/apps/miniapp/src/screens/employee/Profile.tsx
+new file mode 100644
+index 0000000..a2f350a
+--- /dev/null
++++ b/apps/miniapp/src/screens/employee/Profile.tsx
+@@ -0,0 +1,88 @@
++import { useRef, useState } from "react";
++import { useStore } from "@/data/useStore";
++import { getStaffProfile, staffProfileStore, updateStaffProfile, yearsOfService } from "@/data/repo";
++
++function formatTenure(hiredAt: string): string {
++  const { years, months } = yearsOfService(hiredAt);
++  const parts: string[] = [];
++  if (years > 0) parts.push(`${years} г.`);
++  parts.push(`${months} мес.`);
++  return parts.join(" ");
++}
++
++export default function Profile() {
++  useStore(staffProfileStore);
++  const profile = getStaffProfile();
++  const fileInputRef = useRef<HTMLInputElement>(null);
++
++  const [phone, setPhone] = useState(profile.phone ?? "");
++  const [email, setEmail] = useState(profile.email ?? "");
++  const [medicalBookNumber, setMedicalBookNumber] = useState(profile.medicalBookNumber ?? "");
++  const [medicalBookExpiry, setMedicalBookExpiry] = useState(profile.medicalBookExpiry?.slice(0, 10) ?? "");
++
++  function handlePhotoPick(e: React.ChangeEvent<HTMLInputElement>) {
++    const file = e.target.files?.[0];
++    if (!file) return;
++    const reader = new FileReader();
++    reader.onload = () => updateStaffProfile({ photoUrl: String(reader.result) });
++    reader.readAsDataURL(file);
++  }
++
++  function save() {
++    updateStaffProfile({
++      phone: phone.trim() || undefined,
++      email: email.trim() || undefined,
++      medicalBookNumber: medicalBookNumber.trim() || undefined,
++      medicalBookExpiry: medicalBookExpiry ? new Date(medicalBookExpiry).toISOString() : undefined,
++    });
++  }
++
++  const expirySoon =
++    profile.medicalBookExpiry && new Date(profile.medicalBookExpiry).getTime() - Date.now() < 86400000 * 30;
++
++  return (
++    <div className="screen">
++      <h1>Профиль</h1>
++
++      <div className="card" style={{ display: "flex", gap: 14, alignItems: "center" }}>
++        <div className="avatar-upload" onClick={() => fileInputRef.current?.click()}>
++          {profile.photoUrl ? <img src={profile.photoUrl} alt="" /> : "📷"}
++        </div>
++        <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoPick} style={{ display: "none" }} />
++        <div>
++          <div style={{ fontWeight: 700 }}>{profile.name}</div>
++          <div className="muted" style={{ fontSize: 13 }}>
++            Стаж: {formatTenure(profile.hiredAt)}
++          </div>
++          <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12, marginTop: 6 }} onClick={() => fileInputRef.current?.click()}>
++            Сменить фото
++          </button>
++        </div>
++      </div>
++
++      <div className="eyebrow">Телефон</div>
++      <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 900 000-00-00" style={{ marginBottom: 12 }} />
++
++      <div className="eyebrow">Почта</div>
++      <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" style={{ marginBottom: 12 }} />
++
++      <div className="eyebrow">Номер медкнижки</div>
++      <input type="text" value={medicalBookNumber} onChange={(e) => setMedicalBookNumber(e.target.value)} style={{ marginBottom: 12 }} />
++
++      <div className="eyebrow">Действует до</div>
++      <input type="date" value={medicalBookExpiry} onChange={(e) => setMedicalBookExpiry(e.target.value)} style={{ marginBottom: 12 }} />
++      {expirySoon && (
++        <div className="card" style={{ borderColor: "var(--warn)", marginTop: -4 }}>
++          <span className="muted">⚠️ Срок действия медкнижки скоро истекает или уже истёк — сообщи управляющему</span>
++        </div>
++      )}
++
++      <div className="eyebrow">Модель ЗП</div>
++      <div className="card muted">{profile.salaryModel}</div>
++
++      <button className="btn primary" onClick={save} style={{ marginTop: 8 }}>
++        Сохранить
++      </button>
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/screens/employee/Schedule.tsx b/apps/miniapp/src/screens/employee/Schedule.tsx
+new file mode 100644
+index 0000000..dfc6de4
+--- /dev/null
++++ b/apps/miniapp/src/screens/employee/Schedule.tsx
+@@ -0,0 +1,32 @@
++import { useStore } from "@/data/useStore";
++import { listSchedule, scheduleStore } from "@/data/repo";
++
++export default function Schedule() {
++  useStore(scheduleStore);
++  const entries = listSchedule();
++  const today = new Date().toDateString();
++
++  return (
++    <div className="screen">
++      <h1>График смен</h1>
++      {entries.length === 0 && <div className="list-empty">Смены пока не назначены</div>}
++      {entries.map((e) => {
++        const date = new Date(e.date);
++        const isPast = date.getTime() < Date.now() && date.toDateString() !== today;
++        return (
++          <div key={e.id} className="card card-row" style={{ opacity: isPast ? 0.5 : 1 }}>
++            <div>
++              <div style={{ fontWeight: 700 }}>
++                {date.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "short" })}
++              </div>
++              <div className="muted" style={{ fontSize: 13 }}>
++                {e.startTime}–{e.endTime}
++              </div>
++            </div>
++            <span className="chip">{e.roleLabel}</span>
++          </div>
++        );
++      })}
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/screens/master/GuestProfile.tsx b/apps/miniapp/src/screens/master/GuestProfile.tsx
+index 7dfe3cd..853ce2f 100644
+--- a/apps/miniapp/src/screens/master/GuestProfile.tsx
++++ b/apps/miniapp/src/screens/master/GuestProfile.tsx
+@@ -26,7 +26,7 @@ export default function GuestProfile() {
+ 
+   return (
+     <div className="screen">
+-      <Link to="/master/guests" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
++      <Link to="/employee/guests" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+         ← Все гости
+       </Link>
+ 
+@@ -86,7 +86,7 @@ export default function GuestProfile() {
+             <>
+               <div className="eyebrow">Любимые миксы</div>
+               {profile.favoriteMixes.map((m) => (
+-                <Link key={m.id} to={`/master/mix/${m.id}`} style={{ textDecoration: "none", color: "inherit" }}>
++                <Link key={m.id} to={`/employee/mix/${m.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                   <div className="card card-row">
+                     <span>
+                       {m.coverEmoji} {m.title}
+@@ -105,7 +105,7 @@ export default function GuestProfile() {
+           {history.length === 0 && <div className="list-empty">Миксов пока нет</div>}
+           {history.map((mix) => (
+             <div key={mix.id} className="card">
+-              <Link to={`/master/mix/${mix.id}`} style={{ textDecoration: "none", color: "inherit" }}>
++              <Link to={`/employee/mix/${mix.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                 <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                   {mix.coverEmoji} {mix.title}
+                 </div>
+@@ -132,7 +132,7 @@ export default function GuestProfile() {
+       )}
+ 
+       <div style={{ position: "sticky", bottom: 12, marginTop: 20 }}>
+-        <button className="btn primary" onClick={() => navigate(`/master/guests/${guestId}/mix`)}>
++        <button className="btn primary" onClick={() => navigate(`/employee/guests/${guestId}/mix`)}>
+           Собрать микс →
+         </button>
+       </div>
+diff --git a/apps/miniapp/src/screens/master/GuestsList.tsx b/apps/miniapp/src/screens/master/GuestsList.tsx
+index 267211c..e8a4178 100644
+--- a/apps/miniapp/src/screens/master/GuestsList.tsx
++++ b/apps/miniapp/src/screens/master/GuestsList.tsx
+@@ -25,7 +25,7 @@ export default function GuestsList() {
+       {filtered.map((guest) => {
+         const mixCount = listMixesForGuest(guest.id).length;
+         return (
+-          <Link key={guest.id} to={`/master/guests/${guest.id}`} style={{ textDecoration: "none", color: "inherit" }}>
++          <Link key={guest.id} to={`/employee/guests/${guest.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+             <div className="card card-row">
+               <div>
+                 <div style={{ fontWeight: 700 }}>{guest.displayName}</div>
+diff --git a/apps/miniapp/src/screens/master/MixBuilder.tsx b/apps/miniapp/src/screens/master/MixBuilder.tsx
+index e7e6a94..54796e2 100644
+--- a/apps/miniapp/src/screens/master/MixBuilder.tsx
++++ b/apps/miniapp/src/screens/master/MixBuilder.tsx
+@@ -91,7 +91,7 @@ export default function MixBuilder() {
+       description: description.trim() || undefined,
+       tags: Array.from(new Set(selected.flatMap((f) => f.categories))),
+     });
+-    navigate(`/master/mix/${mix.id}`);
++    navigate(`/employee/mix/${mix.id}`);
+   }
+ 
+   if (!guest) {
+diff --git a/apps/miniapp/src/screens/master/MixView.tsx b/apps/miniapp/src/screens/master/MixView.tsx
+index 07ee16a..c53bf44 100644
+--- a/apps/miniapp/src/screens/master/MixView.tsx
++++ b/apps/miniapp/src/screens/master/MixView.tsx
+@@ -89,7 +89,7 @@ export default function MixView() {
+       </div>
+ 
+       {guest && (
+-        <Link to={`/master/guests/${guest.id}`} className="btn secondary" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 12 }}>
++        <Link to={`/employee/guests/${guest.id}`} className="btn secondary" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 12 }}>
+           К профилю гостя
+         </Link>
+       )}
+diff --git a/apps/miniapp/src/styles.css b/apps/miniapp/src/styles.css
+index 16beca2..db9d8b0 100644
+--- a/apps/miniapp/src/styles.css
++++ b/apps/miniapp/src/styles.css
+@@ -332,3 +332,55 @@ textarea {
+ .badge-dot.done {
+   background: var(--good);
+ }
++
++.stat-grid {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 8px;
++  margin-bottom: 16px;
++}
++
++.stat-tile {
++  background: var(--surface);
++  border: 1px solid var(--border);
++  border-radius: 10px;
++  padding: 12px 14px;
++}
++
++.stat-tile .value {
++  font-size: 20px;
++  font-weight: 700;
++  color: var(--ink);
++}
++
++.stat-tile .label {
++  font-size: 12px;
++  color: var(--muted);
++  margin-top: 2px;
++}
++
++.menu-list .card-row {
++  cursor: pointer;
++}
++
++.avatar-upload {
++  width: 72px;
++  height: 72px;
++  border-radius: 50%;
++  background: var(--surface-2);
++  border: 1px solid var(--border);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  font-size: 24px;
++  color: var(--muted);
++  overflow: hidden;
++  cursor: pointer;
++  flex-shrink: 0;
++}
++
++.avatar-upload img {
++  width: 100%;
++  height: 100%;
++  object-fit: cover;
++}
+diff --git a/apps/miniapp/src/types.ts b/apps/miniapp/src/types.ts
+index 1307815..8f2a8ee 100644
+--- a/apps/miniapp/src/types.ts
++++ b/apps/miniapp/src/types.ts
+@@ -115,3 +115,50 @@ export interface WaitlistEntry {
+   partySize: number;
+   createdAt: string;
+ }
++
++// --- Личный кабинет сотрудника ---
++
++export interface StaffProfile {
++  id: string;
++  name: string;
++  photoUrl?: string;
++  phone?: string;
++  email?: string;
++  medicalBookNumber?: string;
++  medicalBookExpiry?: string; // ISO-дата окончания действия медкнижки
++  hiredAt: string; // ISO-дата трудоустройства, отсюда считается выслуга лет
++  salaryModel: string; // текстовое описание модели ЗП, например "оклад 2500/смена + 5% от выручки"
++}
++
++export interface ShiftPayrollEntry {
++  id: string;
++  date: string; // ISO-дата смены
++  revenue: number; // выручка за смену, ₽
++  salary: number; // начислено сотруднику за смену, ₽
++  paid: boolean;
++}
++
++export type AdjustmentType = "fine" | "bonus";
++
++export interface Adjustment {
++  id: string;
++  type: AdjustmentType;
++  amount: number; // ₽, всегда положительное число
++  reason: string;
++  date: string; // ISO-дата
++}
++
++export interface ScheduleEntry {
++  id: string;
++  date: string; // ISO-дата
++  startTime: string; // "18:00"
++  endTime: string; // "02:00"
++  roleLabel: string; // например "Мастер", "Официант"
++}
++
++export interface KnowledgeArticle {
++  id: string;
++  category: string;
++  title: string;
++  body: string; // краткий текст-заглушка, наполняется реальным контентом позже
++}
+-- 
+2.43.0
+

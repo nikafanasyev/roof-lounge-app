@@ -1,4 +1,17 @@
-import type { Flavor, Guest, Mix, Problem, Shift, Task, ServiceCall } from "@/types";
+import type {
+  Adjustment,
+  Flavor,
+  Guest,
+  KnowledgeArticle,
+  Mix,
+  Problem,
+  ScheduleEntry,
+  Shift,
+  ShiftPayrollEntry,
+  StaffProfile,
+  Task,
+  ServiceCall,
+} from "@/types";
 
 // Примерные данные для демонстрации UI. Отмечены как пример — не реальные гости Roof Lounge.
 // При подключении Supabase этот файл не используется, только data/repo.ts.
@@ -114,4 +127,50 @@ export const seedProblems: Problem[] = [
 export const seedTasks: Task[] = [
   { id: "t1", title: "Заменить лампу на балконе", dueDate: "Пятница", assignee: "Дмитрий", done: false },
   { id: "t2", title: "Пересчитать склад расходников", done: true },
+];
+
+// --- Личный кабинет сотрудника ---
+
+export const seedStaffProfile: StaffProfile = {
+  id: "s1",
+  name: "Никита Афанасьев",
+  phone: "",
+  email: "",
+  medicalBookNumber: "",
+  medicalBookExpiry: undefined,
+  hiredAt: new Date(Date.now() - 86400000 * 240).toISOString(),
+  salaryModel: "Оклад за смену + % от выручки — уточнить точную формулу у управляющего",
+};
+
+export const seedShiftPayroll: ShiftPayrollEntry[] = [
+  { id: "sp1", date: new Date(Date.now() - 86400000 * 1).toISOString(), revenue: 84000, salary: 4200, paid: false },
+  { id: "sp2", date: new Date(Date.now() - 86400000 * 3).toISOString(), revenue: 61000, salary: 3050, paid: false },
+  { id: "sp3", date: new Date(Date.now() - 86400000 * 6).toISOString(), revenue: 97000, salary: 4850, paid: true },
+  { id: "sp4", date: new Date(Date.now() - 86400000 * 9).toISOString(), revenue: 52000, salary: 2600, paid: true },
+];
+
+export const seedAdjustments: Adjustment[] = [
+  { id: "a1", type: "bonus", amount: 1500, reason: "Лучший отзыв недели от гостя", date: new Date(Date.now() - 86400000 * 6).toISOString() },
+  { id: "a2", type: "fine", amount: 500, reason: "Опоздание на смену на 20 минут", date: new Date(Date.now() - 86400000 * 9).toISOString() },
+];
+
+export const seedKnowledgeArticles: KnowledgeArticle[] = [
+  { id: "k1", category: "Смена", title: "Чек-листы открытия и закрытия смены", body: "Полный порядок действий при открытии и закрытии смены — заполняется управляющим." },
+  { id: "k2", category: "Смена", title: "Касса", body: "Правила работы с кассой, инкассация, сверка — заполняется управляющим." },
+  { id: "k3", category: "Зал", title: "Где что лежит", body: "Расположение расходников, инвентаря, документов — заполняется управляющим." },
+  { id: "k4", category: "Меню", title: "Тех карты", body: "Технологические карты позиций меню — заполняется управляющим." },
+  { id: "k5", category: "Меню", title: "Позиции меню и стоимость", body: "Актуальный прайс-лист — заполняется управляющим." },
+  { id: "k6", category: "HR", title: "Штрафная сетка", body: "Список нарушений и соответствующих штрафов — заполняется управляющим." },
+  { id: "k7", category: "Техника", title: "Свет и вода", body: "Порядок действий при отключении электричества/воды, где рубильники/краны — заполняется управляющим." },
+  { id: "k8", category: "Техника", title: "Приточно-вытяжная система", body: "Управление вентиляцией зала — заполняется управляющим." },
+  { id: "k9", category: "Безопасность", title: "ЧС и как реагировать", body: "Порядок действий при чрезвычайной ситуации — заполняется управляющим." },
+  { id: "k10", category: "Безопасность", title: "Охрана", body: "Контакты и порядок вызова охраны — заполняется управляющим." },
+  { id: "k11", category: "Безопасность", title: "Важные номера", body: "Список важных телефонов (управляющий, техник, охрана, экстренные службы) — заполняется управляющим." },
+  { id: "k12", category: "Зал", title: "Генеральная уборка", body: "Регламент и график генеральной уборки — заполняется управляющим." },
+];
+
+export const seedSchedule: ScheduleEntry[] = [
+  { id: "sc1", date: new Date(Date.now() + 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
+  { id: "sc2", date: new Date(Date.now() + 86400000 * 3).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
+  { id: "sc3", date: new Date(Date.now() - 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
 ];

@@ -17,25 +17,36 @@
 // авторизация — заменить на staff.id из сессии.
 
 import type {
+  Adjustment,
+  AdjustmentType,
   ChecklistItem,
   Flavor,
   Guest,
+  KnowledgeArticle,
   Mix,
   MixItem,
   Problem,
   ProblemCategory,
+  ScheduleEntry,
   ServiceCall,
   ServiceCallType,
   Shift,
+  ShiftPayrollEntry,
+  StaffProfile,
   Task,
 } from "@/types";
 import {
+  seedAdjustments,
   seedFlavors,
   seedGuests,
+  seedKnowledgeArticles,
   seedMixes,
   seedProblems,
+  seedSchedule,
   seedServiceCalls,
   seedShift,
+  seedShiftPayroll,
+  seedStaffProfile,
   seedTasks,
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -74,6 +85,11 @@ export const serviceCallsStore = new Store<ServiceCall[]>(seedServiceCalls);
 export const shiftStore = new Store<Shift>(seedShift);
 export const problemsStore = new Store<Problem[]>(seedProblems);
 export const tasksStore = new Store<Task[]>(seedTasks);
+export const staffProfileStore = new Store<StaffProfile>(seedStaffProfile);
+export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll);
+export const adjustmentsStore = new Store<Adjustment[]>(seedAdjustments);
+export const scheduleStore = new Store<ScheduleEntry[]>(seedSchedule);
+export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
 
 const uid = () => crypto.randomUUID();
 
@@ -658,4 +674,77 @@ export function addTask(title: string, assignee?: string, dueDate?: string) {
       })
       .then(({ error }) => error && logSyncError("addTask", error));
   }
+}
+
+// --- Личный кабинет сотрудника ---
+//
+// Пока работает только на моках: под эти сущности (staff_profile, payroll,
+// adjustments, schedule, knowledge_base) ещё нет таблиц в Supabase — это
+// следующий шаг, когда определимся с моделью ЗП и структурой базы знаний.
+
+export function getStaffProfile(): StaffProfile {
+  return staffProfileStore.get();
+}
+
+export function updateStaffProfile(patch: Partial<Omit<StaffProfile, "id">>) {
+  staffProfileStore.update((profile) => ({ ...profile, ...patch }));
+}
+
+export function yearsOfService(hiredAt: string): { years: number; months: number } {
+  const ms = Date.now() - new Date(hiredAt).getTime();
+  const totalMonths = Math.max(0, Math.floor(ms / (86400000 * 30.44)));
+  return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
+}
+
+export function listShiftPayroll(): ShiftPayrollEntry[] {
+  return [...shiftPayrollStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export function listAdjustments(): Adjustment[] {
+  return [...adjustmentsStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export function addAdjustment(type: AdjustmentType, amount: number, reason: string) {
+  adjustmentsStore.update((list) => [{ id: uid(), type, amount, reason, date: new Date().toISOString() }, ...list]);
+}
+
+export interface PayrollSummary {
+  earned: number; // сумма ЗП по сменам + премии − штрафы
+  fines: number;
+  bonuses: number;
+  paid: number;
+  due: number;
+}
+
+export function computePayrollSummary(): PayrollSummary {
+  const shifts = shiftPayrollStore.get();
+  const adjustments = adjustmentsStore.get();
+  const fromShifts = shifts.reduce((sum, s) => sum + s.salary, 0);
+  const paid = shifts.filter((s) => s.paid).reduce((sum, s) => sum + s.salary, 0);
+  const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
+  const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
+  const earned = fromShifts + bonuses - fines;
+  return { earned, fines, bonuses, paid, due: earned - paid };
+}
+
+export function listSchedule(): ScheduleEntry[] {
+  return [...scheduleStore.get()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export function listKnowledgeArticles(): KnowledgeArticle[] {
+  return knowledgeStore.get();
+}
+
+export function getKnowledgeArticle(id: string): KnowledgeArticle | undefined {
+  return knowledgeStore.get().find((a) => a.id === id);
+}
+
+export function groupKnowledgeByCategory(): { category: string; articles: KnowledgeArticle[] }[] {
+  const byCategory = new Map<string, KnowledgeArticle[]>();
+  for (const article of knowledgeStore.get()) {
+    const list = byCategory.get(article.category) ?? [];
+    list.push(article);
+    byCategory.set(article.category, list);
+  }
+  return Array.from(byCategory.entries()).map(([category, articles]) => ({ category, articles }));
 }
