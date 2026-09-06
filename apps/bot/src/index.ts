@@ -5,7 +5,14 @@ import { watchServiceCalls, watchShiftPhotos } from "./notify";
 const bot = new Bot(env.BOT_TOKEN);
 
 bot.command("start", async (ctx) => {
-  const keyboard = new InlineKeyboard().webApp("Открыть Roof Lounge", env.MINI_APP_URL);
+  // Кнопка типа web_app (открытие мини-аппа прямо в Telegram) разрешена Telegram
+  // только в личных сообщениях с ботом — в группах API отвечает BUTTON_TYPE_INVALID.
+  // Поэтому в группах даём обычную ссылку в личку с ботом, а мини-апп открываем
+  // кнопкой web_app только один на один.
+  const isPrivate = ctx.chat.type === "private";
+  const keyboard = isPrivate
+    ? new InlineKeyboard().webApp("Открыть Roof Lounge", env.MINI_APP_URL)
+    : new InlineKeyboard().url("Написать боту в личку", `https://t.me/${ctx.me.username}?start=open`);
   await ctx.reply(
     "Добро пожаловать в Roof Lounge.\n\nЗдесь — сервис за столом и рабочие инструменты для персонала. Заказ и оплата — в основном боте заведения.",
     { reply_markup: keyboard },
