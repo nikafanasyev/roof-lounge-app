@@ -3,15 +3,17 @@ import { useRef, useState } from "react";
 // Открывает камеру устройства (атрибут capture — на мобильных сразу запускает
 // системную камеру, а не выбор файла) и вшивает дату/время съёмки прямо в
 // пиксели фото (штамп в углу), чтобы его нельзя было просто подменить старым
-// снимком из галереи.
+// снимком из галереи. Отдаёт наружу и превью (object URL, только для показа
+// в интерфейсе), и сам Blob — вызывающий код отправляет его дальше и нигде
+// не сохраняет постоянно (см. data/repo.ts uploadAndNotifyShiftPhoto).
 
 interface Props {
-  photoUrl?: string;
-  onCapture: (dataUrl: string) => void;
+  previewUrl?: string;
+  onCapture: (previewUrl: string, blob: Blob) => void;
   label?: string;
 }
 
-export default function CameraCapture({ photoUrl, onCapture, label = "Сделать фото" }: Props) {
+export default function CameraCapture({ previewUrl, onCapture, label = "Сделать фото" }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
@@ -57,8 +59,15 @@ export default function CameraCapture({ photoUrl, onCapture, label = "Сдела
         ctx.textBaseline = "middle";
         ctx.fillText(stamp, canvas.width - boxWidth - margin + paddingX, canvas.height - margin - boxHeight / 2);
 
-        onCapture(canvas.toDataURL("image/jpeg", 0.85));
-        setBusy(false);
+        canvas.toBlob(
+          (blob) => {
+            setBusy(false);
+            if (!blob) return;
+            onCapture(URL.createObjectURL(blob), blob);
+          },
+          "image/jpeg",
+          0.85,
+        );
       };
       img.src = String(reader.result);
     };
@@ -75,9 +84,9 @@ export default function CameraCapture({ photoUrl, onCapture, label = "Сдела
         onChange={handleFile}
         style={{ display: "none" }}
       />
-      {photoUrl ? (
+      {previewUrl ? (
         <div className="card" style={{ padding: 8 }}>
-          <img src={photoUrl} alt="" style={{ width: "100%", borderRadius: 8, display: "block" }} />
+          <img src={previewUrl} alt="" style={{ width: "100%", borderRadius: 8, display: "block" }} />
           <button
             className="btn secondary"
             style={{ width: "100%", marginTop: 8 }}

@@ -12,4 +12,6 @@ export const env = {
   SUPABASE_URL: process.env.SUPABASE_URL ?? "",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
   STAFF_CHAT_ID: process.env.STAFF_CHAT_ID ?? "", // куда падают уведомления о QR-вызовах
+  // Куда пересылать фото открытия/закрытия смены. Если не задано — падают в STAFF_CHAT_ID.
+  SHIFT_PHOTOS_CHAT_ID: process.env.SHIFT_PHOTOS_CHAT_ID ?? "",
 };

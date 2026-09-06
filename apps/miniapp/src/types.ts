@@ -74,12 +74,13 @@ export interface Shift {
   openedBy?: string;
   openedAt?: string;
   openChecklist: ChecklistItem[];
-  openPhotoUrl?: string; // фото сотрудника в заведении при открытии смены, со штампом даты/времени
   closedBy?: string;
   closedAt?: string;
   closeChecklist: ChecklistItem[];
-  closePhotoUrl?: string;
   handoverNote?: string;
+  // Фото открытия/закрытия смены НЕ хранится в этой записи — оно загружается
+  // в Storage, бот пересылает его руководителю в Telegram и сразу удаляет
+  // (см. data/repo.ts uploadAndNotifyShiftPhoto и supabase/migrations/0002).
 }
 
 export type ProblemCategory =

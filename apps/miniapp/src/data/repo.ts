@@ -549,9 +549,6 @@ export function getShift(): Shift {
 
 function syncShift(shift: Shift) {
   if (!isSupabaseConfigured || !supabase) return;
-  // MVP: фото хранится как data URL прямо в текстовой колонке. Перед реальным
-  // продакшеном стоит перенести в Supabase Storage (bucket + публичная/подписанная
-  // ссылка) — так дешевле по трафику и не раздувает таблицу.
   supabase
     .from("shifts")
     .upsert({
@@ -559,14 +556,34 @@ function syncShift(shift: Shift) {
       opened_by: shift.openedBy ? DEMO_STAFF_ID : null,
       opened_at: shift.openedAt ?? null,
       open_checklist: shift.openChecklist,
-      open_photo_url: shift.openPhotoUrl ?? null,
       closed_by: shift.closedBy ? DEMO_STAFF_ID : null,
       closed_at: shift.closedAt ?? null,
       close_checklist: shift.closeChecklist,
-      close_photo_url: shift.closePhotoUrl ?? null,
       handover_note: shift.handoverNote ?? null,
     })
     .then(({ error }) => error && logSyncError("syncShift", error));
+}
+
+/**
+ * Фото открытия/закрытия смены НЕ сохраняется у нас: загружаем в Storage-бакет
+ * shift-photos и кладём строку в shift_photo_uploads — бот (apps/bot) подхватывает
+ * её через Realtime, пересылает фото руководителю в Telegram и сразу удаляет и
+ * файл, и запись. Без Supabase — просто no-op, фото живёт только в памяти вкладки.
+ */
+function uploadAndNotifyShiftPhoto(kind: "open" | "close", blob: Blob, staffName: string) {
+  if (!isSupabaseConfigured || !supabase) return;
+  const shiftId = shiftStore.get().id;
+  const path = `${shiftId}/${kind}-${Date.now()}.jpg`;
+  supabase.storage
+    .from("shift-photos")
+    .upload(path, blob, { contentType: "image/jpeg" })
+    .then(({ error: uploadError }) => {
+      if (uploadError) return logSyncError("uploadShiftPhoto", uploadError);
+      supabase!
+        .from("shift_photo_uploads")
+        .insert({ shift_id: shiftId, kind, storage_path: path, staff_name: staffName })
+        .then(({ error }) => error && logSyncError("shiftPhotoUpload:insert", error));
+    });
 }
 
 export function toggleOpenChecklistItem(itemId: string) {
@@ -585,27 +602,22 @@ export function toggleCloseChecklistItem(itemId: string) {
   syncShift(shiftStore.get());
 }
 
-export function openShift(openedBy: string, photoUrl?: string) {
-  shiftStore.update((shift) => ({
-    ...shift,
-    status: "open",
-    openedBy,
-    openedAt: new Date().toISOString(),
-    openPhotoUrl: photoUrl,
-  }));
+export function openShift(openedBy: string, photoBlob?: Blob) {
+  shiftStore.update((shift) => ({ ...shift, status: "open", openedBy, openedAt: new Date().toISOString() }));
   syncShift(shiftStore.get());
+  if (photoBlob) uploadAndNotifyShiftPhoto("open", photoBlob, openedBy);
 }
 
-export function closeShift(closedBy: string, handoverNote?: string, photoUrl?: string) {
+export function closeShift(closedBy: string, handoverNote?: string, photoBlob?: Blob) {
   shiftStore.update((shift) => ({
     ...shift,
     status: "closed",
     closedBy,
     closedAt: new Date().toISOString(),
     handoverNote,
-    closePhotoUrl: photoUrl,
   }));
   syncShift(shiftStore.get());
+  if (photoBlob) uploadAndNotifyShiftPhoto("close", photoBlob, closedBy);
 }
 
 export function isChecklistComplete(items: ChecklistItem[]): boolean {

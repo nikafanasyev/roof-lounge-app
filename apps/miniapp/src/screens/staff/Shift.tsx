@@ -12,11 +12,16 @@ import CameraCapture from "@/components/CameraCapture";
 
 const CURRENT_STAFF_NAME = "Никита Афанасьев"; // заглушка до подключения Telegram-авторизации
 
+interface CapturedPhoto {
+  url: string;
+  blob: Blob;
+}
+
 export default function Shift() {
   const shift = useStore(shiftStore);
   const [handoverNote, setHandoverNote] = useState("");
-  const [openPhoto, setOpenPhoto] = useState<string | undefined>();
-  const [closePhoto, setClosePhoto] = useState<string | undefined>();
+  const [openPhoto, setOpenPhoto] = useState<CapturedPhoto | undefined>();
+  const [closePhoto, setClosePhoto] = useState<CapturedPhoto | undefined>();
 
   const openReady = isChecklistComplete(shift.openChecklist) && !!openPhoto;
   const closeReady = isChecklistComplete(shift.closeChecklist) && !!closePhoto;
@@ -51,16 +56,20 @@ export default function Shift() {
           ))}
 
           <div className="eyebrow" style={{ marginTop: 8 }}>
-            Фото на месте (со штампом даты и времени)
+            Фото на месте (со штампом даты и времени, уходит руководителю в Telegram)
           </div>
-          <CameraCapture photoUrl={openPhoto} onCapture={setOpenPhoto} label="Сфотографироваться в заведении" />
+          <CameraCapture
+            previewUrl={openPhoto?.url}
+            onCapture={(url, blob) => setOpenPhoto({ url, blob })}
+            label="Сфотографироваться в заведении"
+          />
 
           <button
             className="btn primary"
             style={{ marginTop: 12 }}
             disabled={!openReady}
             onClick={() => {
-              openShift(CURRENT_STAFF_NAME, openPhoto);
+              openShift(CURRENT_STAFF_NAME, openPhoto?.blob);
               setOpenPhoto(undefined);
             }}
           >
@@ -80,9 +89,13 @@ export default function Shift() {
           ))}
 
           <div className="eyebrow" style={{ marginTop: 8 }}>
-            Фото контрольных зон (со штампом даты и времени)
+            Фото контрольных зон (со штампом даты и времени, уходит руководителю в Telegram)
           </div>
-          <CameraCapture photoUrl={closePhoto} onCapture={setClosePhoto} label="Сфотографировать зал" />
+          <CameraCapture
+            previewUrl={closePhoto?.url}
+            onCapture={(url, blob) => setClosePhoto({ url, blob })}
+            label="Сфотографировать зал"
+          />
 
           <div className="eyebrow" style={{ marginTop: 12 }}>
             Передача смены (заметка для следующей)
@@ -98,7 +111,7 @@ export default function Shift() {
             className="btn primary"
             disabled={!closeReady}
             onClick={() => {
-              closeShift(CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto);
+              closeShift(CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto?.blob);
               setClosePhoto(undefined);
               setHandoverNote("");
             }}
@@ -114,15 +127,6 @@ export default function Shift() {
             Заметка предыдущей смены
           </div>
           <div className="card muted">{shift.handoverNote}</div>
-        </>
-      )}
-
-      {shift.status === "closed" && shift.closePhotoUrl && (
-        <>
-          <div className="eyebrow" style={{ marginTop: 12 }}>
-            Фото прошлого закрытия
-          </div>
-          <img src={shift.closePhotoUrl} alt="" style={{ width: "100%", borderRadius: 10 }} />
         </>
       )}
     </div>

@@ -1,6 +1,6 @@
-import { Bot, InlineKeyboard } from "grammy";
+import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
-import { watchServiceCalls } from "./notify";
+import { watchServiceCalls, watchShiftPhotos } from "./notify";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -38,6 +38,23 @@ async function main() {
     console.log("Слушаю service_calls через Supabase Realtime — уведомления персоналу включены.");
   } else {
     console.log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STAFF_CHAT_ID не заданы — уведомления о вызовах выключены.");
+  }
+
+  // Фото открытия/закрытия смены: пересылаем руководителю (или в отдельный чат,
+  // если задан SHIFT_PHOTOS_CHAT_ID) и сразу стираем из Storage — не храним.
+  const shiftPhotosChatId = env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && shiftPhotosChatId) {
+    watchShiftPhotos(async (event) => {
+      const buffer = await event.downloadPhoto();
+      if (!buffer) return;
+      const label = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
+      await bot.api.sendPhoto(shiftPhotosChatId, new InputFile(buffer, "shift.jpg"), {
+        caption: `${label}${event.staffName ? ` — ${event.staffName}` : ""}`,
+      });
+    });
+    console.log("Слушаю shift_photo_uploads через Supabase Realtime — пересылка фото смен включена.");
+  } else {
+    console.log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STAFF_CHAT_ID (или SHIFT_PHOTOS_CHAT_ID) не заданы — пересылка фото смен выключена.");
   }
 
   await bot.start();
