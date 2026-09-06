@@ -74,9 +74,11 @@ export interface Shift {
   openedBy?: string;
   openedAt?: string;
   openChecklist: ChecklistItem[];
+  openPhotoUrl?: string; // фото сотрудника в заведении при открытии смены, со штампом даты/времени
   closedBy?: string;
   closedAt?: string;
   closeChecklist: ChecklistItem[];
+  closePhotoUrl?: string;
   handoverNote?: string;
 }
 

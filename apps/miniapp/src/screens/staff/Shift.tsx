@@ -8,15 +8,18 @@ import {
   toggleCloseChecklistItem,
   toggleOpenChecklistItem,
 } from "@/data/repo";
+import CameraCapture from "@/components/CameraCapture";
 
 const CURRENT_STAFF_NAME = "Никита Афанасьев"; // заглушка до подключения Telegram-авторизации
 
 export default function Shift() {
   const shift = useStore(shiftStore);
   const [handoverNote, setHandoverNote] = useState("");
+  const [openPhoto, setOpenPhoto] = useState<string | undefined>();
+  const [closePhoto, setClosePhoto] = useState<string | undefined>();
 
-  const openReady = isChecklistComplete(shift.openChecklist);
-  const closeReady = isChecklistComplete(shift.closeChecklist);
+  const openReady = isChecklistComplete(shift.openChecklist) && !!openPhoto;
+  const closeReady = isChecklistComplete(shift.closeChecklist) && !!closePhoto;
 
   return (
     <div className="screen">
@@ -46,8 +49,22 @@ export default function Shift() {
               <input type="checkbox" checked={item.done} onChange={() => toggleOpenChecklistItem(item.id)} />
             </label>
           ))}
-          <button className="btn primary" disabled={!openReady} onClick={() => openShift(CURRENT_STAFF_NAME)}>
-            {openReady ? "Открыть смену" : "Отметьте все пункты"}
+
+          <div className="eyebrow" style={{ marginTop: 8 }}>
+            Фото на месте (со штампом даты и времени)
+          </div>
+          <CameraCapture photoUrl={openPhoto} onCapture={setOpenPhoto} label="Сфотографироваться в заведении" />
+
+          <button
+            className="btn primary"
+            style={{ marginTop: 12 }}
+            disabled={!openReady}
+            onClick={() => {
+              openShift(CURRENT_STAFF_NAME, openPhoto);
+              setOpenPhoto(undefined);
+            }}
+          >
+            {openReady ? "Открыть смену" : !isChecklistComplete(shift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
           </button>
         </>
       )}
@@ -62,7 +79,14 @@ export default function Shift() {
             </label>
           ))}
 
-          <div className="eyebrow">Передача смены (заметка для следующей)</div>
+          <div className="eyebrow" style={{ marginTop: 8 }}>
+            Фото контрольных зон (со штампом даты и времени)
+          </div>
+          <CameraCapture photoUrl={closePhoto} onCapture={setClosePhoto} label="Сфотографировать зал" />
+
+          <div className="eyebrow" style={{ marginTop: 12 }}>
+            Передача смены (заметка для следующей)
+          </div>
           <textarea
             value={handoverNote}
             onChange={(e) => setHandoverNote(e.target.value)}
@@ -73,9 +97,13 @@ export default function Shift() {
           <button
             className="btn primary"
             disabled={!closeReady}
-            onClick={() => closeShift(CURRENT_STAFF_NAME, handoverNote || undefined)}
+            onClick={() => {
+              closeShift(CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto);
+              setClosePhoto(undefined);
+              setHandoverNote("");
+            }}
           >
-            {closeReady ? "Закрыть смену" : "Отметьте все пункты"}
+            {closeReady ? "Закрыть смену" : !isChecklistComplete(shift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
           </button>
         </>
       )}
@@ -86,6 +114,15 @@ export default function Shift() {
             Заметка предыдущей смены
           </div>
           <div className="card muted">{shift.handoverNote}</div>
+        </>
+      )}
+
+      {shift.status === "closed" && shift.closePhotoUrl && (
+        <>
+          <div className="eyebrow" style={{ marginTop: 12 }}>
+            Фото прошлого закрытия
+          </div>
+          <img src={shift.closePhotoUrl} alt="" style={{ width: "100%", borderRadius: 10 }} />
         </>
       )}
     </div>

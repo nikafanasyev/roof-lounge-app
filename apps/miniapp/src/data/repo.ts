@@ -549,6 +549,9 @@ export function getShift(): Shift {
 
 function syncShift(shift: Shift) {
   if (!isSupabaseConfigured || !supabase) return;
+  // MVP: фото хранится как data URL прямо в текстовой колонке. Перед реальным
+  // продакшеном стоит перенести в Supabase Storage (bucket + публичная/подписанная
+  // ссылка) — так дешевле по трафику и не раздувает таблицу.
   supabase
     .from("shifts")
     .upsert({
@@ -556,9 +559,11 @@ function syncShift(shift: Shift) {
       opened_by: shift.openedBy ? DEMO_STAFF_ID : null,
       opened_at: shift.openedAt ?? null,
       open_checklist: shift.openChecklist,
+      open_photo_url: shift.openPhotoUrl ?? null,
       closed_by: shift.closedBy ? DEMO_STAFF_ID : null,
       closed_at: shift.closedAt ?? null,
       close_checklist: shift.closeChecklist,
+      close_photo_url: shift.closePhotoUrl ?? null,
       handover_note: shift.handoverNote ?? null,
     })
     .then(({ error }) => error && logSyncError("syncShift", error));
@@ -580,18 +585,25 @@ export function toggleCloseChecklistItem(itemId: string) {
   syncShift(shiftStore.get());
 }
 
-export function openShift(openedBy: string) {
-  shiftStore.update((shift) => ({ ...shift, status: "open", openedBy, openedAt: new Date().toISOString() }));
+export function openShift(openedBy: string, photoUrl?: string) {
+  shiftStore.update((shift) => ({
+    ...shift,
+    status: "open",
+    openedBy,
+    openedAt: new Date().toISOString(),
+    openPhotoUrl: photoUrl,
+  }));
   syncShift(shiftStore.get());
 }
 
-export function closeShift(closedBy: string, handoverNote?: string) {
+export function closeShift(closedBy: string, handoverNote?: string, photoUrl?: string) {
   shiftStore.update((shift) => ({
     ...shift,
     status: "closed",
     closedBy,
     closedAt: new Date().toISOString(),
     handoverNote,
+    closePhotoUrl: photoUrl,
   }));
   syncShift(shiftStore.get());
 }

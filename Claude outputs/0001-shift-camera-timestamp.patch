@@ -1,0 +1,324 @@
+From 84d9797845c93b5228f147ee2e140220057b34bb Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Sun, 6 Sep 2026 14:26:05 +0000
+Subject: [PATCH] =?UTF-8?q?feat:=20=D1=84=D0=BE=D1=82=D0=BE=20=D1=81=D0=BE?=
+ =?UTF-8?q?=20=D1=88=D1=82=D0=B0=D0=BC=D0=BF=D0=BE=D0=BC=20=D0=B4=D0=B0?=
+ =?UTF-8?q?=D1=82=D1=8B/=D0=B2=D1=80=D0=B5=D0=BC=D0=B5=D0=BD=D0=B8=20?=
+ =?UTF-8?q?=D0=BF=D1=80=D0=B8=20=D0=BE=D1=82=D0=BA=D1=80=D1=8B=D1=82=D0=B8?=
+ =?UTF-8?q?=D0=B8=20=D0=B8=20=D0=B7=D0=B0=D0=BA=D1=80=D1=8B=D1=82=D0=B8?=
+ =?UTF-8?q?=D0=B8=20=D1=81=D0=BC=D0=B5=D0=BD=D1=8B?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Новый компонент CameraCapture — открывает камеру устройства
+(input capture="environment") и вшивает штамп даты/времени прямо в
+пиксели снимка (не просто EXIF, который легко подделать/потерять).
+Обязательное условие для "Открыть смену" (фото сотрудника в
+заведении) и "Закрыть смену" (фото контрольных зон) — кнопка
+неактивна, пока фото не сделано.
+
+MVP хранит фото как data URL в новой колонке shifts.open_photo_url /
+close_photo_url (миграция 0002) — до продакшена стоит перенести в
+Supabase Storage, см. комментарий в data/repo.ts.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BhZ45j4FFAfvtAGo4A4vw
+---
+ apps/miniapp/src/components/CameraCapture.tsx | 97 +++++++++++++++++++
+ apps/miniapp/src/data/repo.ts                 | 18 +++-
+ apps/miniapp/src/screens/staff/Shift.tsx      | 51 ++++++++--
+ apps/miniapp/src/types.ts                     |  2 +
+ supabase/migrations/0002_shift_photos.sql     |  6 ++
+ 5 files changed, 164 insertions(+), 10 deletions(-)
+ create mode 100644 apps/miniapp/src/components/CameraCapture.tsx
+ create mode 100644 supabase/migrations/0002_shift_photos.sql
+
+diff --git a/apps/miniapp/src/components/CameraCapture.tsx b/apps/miniapp/src/components/CameraCapture.tsx
+new file mode 100644
+index 0000000..4a0d489
+--- /dev/null
++++ b/apps/miniapp/src/components/CameraCapture.tsx
+@@ -0,0 +1,97 @@
++import { useRef, useState } from "react";
++
++// Открывает камеру устройства (атрибут capture — на мобильных сразу запускает
++// системную камеру, а не выбор файла) и вшивает дату/время съёмки прямо в
++// пиксели фото (штамп в углу), чтобы его нельзя было просто подменить старым
++// снимком из галереи.
++
++interface Props {
++  photoUrl?: string;
++  onCapture: (dataUrl: string) => void;
++  label?: string;
++}
++
++export default function CameraCapture({ photoUrl, onCapture, label = "Сделать фото" }: Props) {
++  const inputRef = useRef<HTMLInputElement>(null);
++  const [busy, setBusy] = useState(false);
++
++  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
++    const file = e.target.files?.[0];
++    e.target.value = ""; // чтобы можно было пересъёмкой выбрать тот же файл повторно
++    if (!file) return;
++    setBusy(true);
++
++    const reader = new FileReader();
++    reader.onload = () => {
++      const img = new Image();
++      img.onload = () => {
++        const canvas = document.createElement("canvas");
++        canvas.width = img.width;
++        canvas.height = img.height;
++        const ctx = canvas.getContext("2d");
++        if (!ctx) {
++          setBusy(false);
++          return;
++        }
++        ctx.drawImage(img, 0, 0);
++
++        const stamp = new Date().toLocaleString("ru-RU", {
++          day: "2-digit",
++          month: "2-digit",
++          year: "numeric",
++          hour: "2-digit",
++          minute: "2-digit",
++        });
++        const fontSize = Math.max(16, Math.round(canvas.width / 26));
++        ctx.font = `700 ${fontSize}px sans-serif`;
++        const paddingX = fontSize * 0.6;
++        const paddingY = fontSize * 0.45;
++        const textWidth = ctx.measureText(stamp).width;
++        const boxWidth = textWidth + paddingX * 2;
++        const boxHeight = fontSize + paddingY * 2;
++        const margin = Math.round(canvas.width * 0.03);
++
++        ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
++        ctx.fillRect(canvas.width - boxWidth - margin, canvas.height - boxHeight - margin, boxWidth, boxHeight);
++        ctx.fillStyle = "#ffffff";
++        ctx.textBaseline = "middle";
++        ctx.fillText(stamp, canvas.width - boxWidth - margin + paddingX, canvas.height - margin - boxHeight / 2);
++
++        onCapture(canvas.toDataURL("image/jpeg", 0.85));
++        setBusy(false);
++      };
++      img.src = String(reader.result);
++    };
++    reader.readAsDataURL(file);
++  }
++
++  return (
++    <div>
++      <input
++        ref={inputRef}
++        type="file"
++        accept="image/*"
++        capture="environment"
++        onChange={handleFile}
++        style={{ display: "none" }}
++      />
++      {photoUrl ? (
++        <div className="card" style={{ padding: 8 }}>
++          <img src={photoUrl} alt="" style={{ width: "100%", borderRadius: 8, display: "block" }} />
++          <button
++            className="btn secondary"
++            style={{ width: "100%", marginTop: 8 }}
++            onClick={() => inputRef.current?.click()}
++            disabled={busy}
++          >
++            Переснять
++          </button>
++        </div>
++      ) : (
++        <button className="btn secondary" style={{ width: "100%" }} onClick={() => inputRef.current?.click()} disabled={busy}>
++          {busy ? "Обработка…" : `📸 ${label}`}
++        </button>
++      )}
++    </div>
++  );
++}
+diff --git a/apps/miniapp/src/data/repo.ts b/apps/miniapp/src/data/repo.ts
+index e11388b..fb6d37c 100644
+--- a/apps/miniapp/src/data/repo.ts
++++ b/apps/miniapp/src/data/repo.ts
+@@ -549,6 +549,9 @@ export function getShift(): Shift {
+ 
+ function syncShift(shift: Shift) {
+   if (!isSupabaseConfigured || !supabase) return;
++  // MVP: фото хранится как data URL прямо в текстовой колонке. Перед реальным
++  // продакшеном стоит перенести в Supabase Storage (bucket + публичная/подписанная
++  // ссылка) — так дешевле по трафику и не раздувает таблицу.
+   supabase
+     .from("shifts")
+     .upsert({
+@@ -556,9 +559,11 @@ function syncShift(shift: Shift) {
+       opened_by: shift.openedBy ? DEMO_STAFF_ID : null,
+       opened_at: shift.openedAt ?? null,
+       open_checklist: shift.openChecklist,
++      open_photo_url: shift.openPhotoUrl ?? null,
+       closed_by: shift.closedBy ? DEMO_STAFF_ID : null,
+       closed_at: shift.closedAt ?? null,
+       close_checklist: shift.closeChecklist,
++      close_photo_url: shift.closePhotoUrl ?? null,
+       handover_note: shift.handoverNote ?? null,
+     })
+     .then(({ error }) => error && logSyncError("syncShift", error));
+@@ -580,18 +585,25 @@ export function toggleCloseChecklistItem(itemId: string) {
+   syncShift(shiftStore.get());
+ }
+ 
+-export function openShift(openedBy: string) {
+-  shiftStore.update((shift) => ({ ...shift, status: "open", openedBy, openedAt: new Date().toISOString() }));
++export function openShift(openedBy: string, photoUrl?: string) {
++  shiftStore.update((shift) => ({
++    ...shift,
++    status: "open",
++    openedBy,
++    openedAt: new Date().toISOString(),
++    openPhotoUrl: photoUrl,
++  }));
+   syncShift(shiftStore.get());
+ }
+ 
+-export function closeShift(closedBy: string, handoverNote?: string) {
++export function closeShift(closedBy: string, handoverNote?: string, photoUrl?: string) {
+   shiftStore.update((shift) => ({
+     ...shift,
+     status: "closed",
+     closedBy,
+     closedAt: new Date().toISOString(),
+     handoverNote,
++    closePhotoUrl: photoUrl,
+   }));
+   syncShift(shiftStore.get());
+ }
+diff --git a/apps/miniapp/src/screens/staff/Shift.tsx b/apps/miniapp/src/screens/staff/Shift.tsx
+index 6b2989e..40148e7 100644
+--- a/apps/miniapp/src/screens/staff/Shift.tsx
++++ b/apps/miniapp/src/screens/staff/Shift.tsx
+@@ -8,15 +8,18 @@ import {
+   toggleCloseChecklistItem,
+   toggleOpenChecklistItem,
+ } from "@/data/repo";
++import CameraCapture from "@/components/CameraCapture";
+ 
+ const CURRENT_STAFF_NAME = "Никита Афанасьев"; // заглушка до подключения Telegram-авторизации
+ 
+ export default function Shift() {
+   const shift = useStore(shiftStore);
+   const [handoverNote, setHandoverNote] = useState("");
++  const [openPhoto, setOpenPhoto] = useState<string | undefined>();
++  const [closePhoto, setClosePhoto] = useState<string | undefined>();
+ 
+-  const openReady = isChecklistComplete(shift.openChecklist);
+-  const closeReady = isChecklistComplete(shift.closeChecklist);
++  const openReady = isChecklistComplete(shift.openChecklist) && !!openPhoto;
++  const closeReady = isChecklistComplete(shift.closeChecklist) && !!closePhoto;
+ 
+   return (
+     <div className="screen">
+@@ -46,8 +49,22 @@ export default function Shift() {
+               <input type="checkbox" checked={item.done} onChange={() => toggleOpenChecklistItem(item.id)} />
+             </label>
+           ))}
+-          <button className="btn primary" disabled={!openReady} onClick={() => openShift(CURRENT_STAFF_NAME)}>
+-            {openReady ? "Открыть смену" : "Отметьте все пункты"}
++
++          <div className="eyebrow" style={{ marginTop: 8 }}>
++            Фото на месте (со штампом даты и времени)
++          </div>
++          <CameraCapture photoUrl={openPhoto} onCapture={setOpenPhoto} label="Сфотографироваться в заведении" />
++
++          <button
++            className="btn primary"
++            style={{ marginTop: 12 }}
++            disabled={!openReady}
++            onClick={() => {
++              openShift(CURRENT_STAFF_NAME, openPhoto);
++              setOpenPhoto(undefined);
++            }}
++          >
++            {openReady ? "Открыть смену" : !isChecklistComplete(shift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+           </button>
+         </>
+       )}
+@@ -62,7 +79,14 @@ export default function Shift() {
+             </label>
+           ))}
+ 
+-          <div className="eyebrow">Передача смены (заметка для следующей)</div>
++          <div className="eyebrow" style={{ marginTop: 8 }}>
++            Фото контрольных зон (со штампом даты и времени)
++          </div>
++          <CameraCapture photoUrl={closePhoto} onCapture={setClosePhoto} label="Сфотографировать зал" />
++
++          <div className="eyebrow" style={{ marginTop: 12 }}>
++            Передача смены (заметка для следующей)
++          </div>
+           <textarea
+             value={handoverNote}
+             onChange={(e) => setHandoverNote(e.target.value)}
+@@ -73,9 +97,13 @@ export default function Shift() {
+           <button
+             className="btn primary"
+             disabled={!closeReady}
+-            onClick={() => closeShift(CURRENT_STAFF_NAME, handoverNote || undefined)}
++            onClick={() => {
++              closeShift(CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto);
++              setClosePhoto(undefined);
++              setHandoverNote("");
++            }}
+           >
+-            {closeReady ? "Закрыть смену" : "Отметьте все пункты"}
++            {closeReady ? "Закрыть смену" : !isChecklistComplete(shift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+           </button>
+         </>
+       )}
+@@ -88,6 +116,15 @@ export default function Shift() {
+           <div className="card muted">{shift.handoverNote}</div>
+         </>
+       )}
++
++      {shift.status === "closed" && shift.closePhotoUrl && (
++        <>
++          <div className="eyebrow" style={{ marginTop: 12 }}>
++            Фото прошлого закрытия
++          </div>
++          <img src={shift.closePhotoUrl} alt="" style={{ width: "100%", borderRadius: 10 }} />
++        </>
++      )}
+     </div>
+   );
+ }
+diff --git a/apps/miniapp/src/types.ts b/apps/miniapp/src/types.ts
+index 5755561..36b40ce 100644
+--- a/apps/miniapp/src/types.ts
++++ b/apps/miniapp/src/types.ts
+@@ -74,9 +74,11 @@ export interface Shift {
+   openedBy?: string;
+   openedAt?: string;
+   openChecklist: ChecklistItem[];
++  openPhotoUrl?: string; // фото сотрудника в заведении при открытии смены, со штампом даты/времени
+   closedBy?: string;
+   closedAt?: string;
+   closeChecklist: ChecklistItem[];
++  closePhotoUrl?: string;
+   handoverNote?: string;
+ }
+ 
+diff --git a/supabase/migrations/0002_shift_photos.sql b/supabase/migrations/0002_shift_photos.sql
+new file mode 100644
+index 0000000..2b30929
+--- /dev/null
++++ b/supabase/migrations/0002_shift_photos.sql
+@@ -0,0 +1,6 @@
++-- Фото сотрудника при открытии смены и фото контрольных зон при закрытии —
++-- MVP хранит их как data URL прямо в текстовой колонке (см. комментарий в
++-- data/repo.ts). Перед продакшеном стоит перенести в Supabase Storage.
++
++alter table shifts add column if not exists open_photo_url text;
++alter table shifts add column if not exists close_photo_url text;
+-- 
+2.43.0
+
