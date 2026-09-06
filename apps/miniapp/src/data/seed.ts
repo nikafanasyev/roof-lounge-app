@@ -98,7 +98,11 @@ export const seedServiceCalls: ServiceCall[] = [
 ];
 
 export const seedShift: Shift = {
-  id: "sh1",
+  // Настоящий UUID, а не "sh1" — эта запись при подключённом Supabase уходит
+  // в таблицу shifts (колонка id — uuid) и используется как shift_id в
+  // shift_photo_uploads; строковый плейсхолдер там не проходил валидацию
+  // и синхронизация молча падала (см. logSyncError).
+  id: crypto.randomUUID(),
   status: "closed",
   openChecklist: [
     { id: "oc1", label: "Зал готов к приёму гостей", done: false },
