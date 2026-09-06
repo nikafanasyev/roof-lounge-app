@@ -110,7 +110,6 @@ export const seedShift: Shift = {
   closeChecklist: [
     { id: "cc1", label: "Зал приведён в порядок", done: false },
     { id: "cc2", label: "Касса сверена", done: false },
-    { id: "cc3", label: "Фото контрольных зон сделано", done: false },
   ],
 };
 
