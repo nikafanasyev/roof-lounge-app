@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { useStore } from "@/data/useStore";
-import { getStaffProfile, staffProfileStore, updateStaffProfile, yearsOfService } from "@/data/repo";
+import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, yearsOfService } from "@/data/repo";
+import { getTelegramUser } from "@/lib/telegram";
 
 function formatTenure(hiredAt: string): string {
   const { years, months } = yearsOfService(hiredAt);
@@ -10,15 +11,16 @@ function formatTenure(hiredAt: string): string {
   return parts.join(" ");
 }
 
+function formatExpiry(iso?: string): string {
+  if (!iso) return "не указано";
+  return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 export default function Profile() {
   useStore(staffProfileStore);
   const profile = getStaffProfile();
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [phone, setPhone] = useState(profile.phone ?? "");
-  const [email, setEmail] = useState(profile.email ?? "");
-  const [medicalBookNumber, setMedicalBookNumber] = useState(profile.medicalBookNumber ?? "");
-  const [medicalBookExpiry, setMedicalBookExpiry] = useState(profile.medicalBookExpiry?.slice(0, 10) ?? "");
+  const telegramUser = getTelegramUser();
 
   function handlePhotoPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -26,15 +28,6 @@ export default function Profile() {
     const reader = new FileReader();
     reader.onload = () => updateStaffProfile({ photoUrl: String(reader.result) });
     reader.readAsDataURL(file);
-  }
-
-  function save() {
-    updateStaffProfile({
-      phone: phone.trim() || undefined,
-      email: email.trim() || undefined,
-      medicalBookNumber: medicalBookNumber.trim() || undefined,
-      medicalBookExpiry: medicalBookExpiry ? new Date(medicalBookExpiry).toISOString() : undefined,
-    });
   }
 
   const expirySoon =
@@ -60,29 +53,34 @@ export default function Profile() {
         </div>
       </div>
 
+      {/* Телефон приходит из Telegram (шаринг контакта — TODO: подключить
+          WebApp.requestContact и сохранение в staff.phone), почту и данные
+          медкнижки заполняет руководитель. Сотрудник эти поля не редактирует. */}
       <div className="eyebrow">Телефон</div>
-      <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 900 000-00-00" style={{ marginBottom: 12 }} />
+      <div className="card muted">{profile.phone || telegramUser?.username || "определится из Telegram"}</div>
 
       <div className="eyebrow">Почта</div>
-      <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" style={{ marginBottom: 12 }} />
+      <div className="card muted">{profile.email || "заполняет руководитель"}</div>
 
-      <div className="eyebrow">Номер медкнижки</div>
-      <input type="text" value={medicalBookNumber} onChange={(e) => setMedicalBookNumber(e.target.value)} style={{ marginBottom: 12 }} />
-
-      <div className="eyebrow">Действует до</div>
-      <input type="date" value={medicalBookExpiry} onChange={(e) => setMedicalBookExpiry(e.target.value)} style={{ marginBottom: 12 }} />
+      <div className="eyebrow">Медкнижка</div>
+      <div className="card">
+        <div className="card-row">
+          <span className="muted">Номер</span>
+          <span>{profile.medicalBookNumber || "не указан"}</span>
+        </div>
+        <div className="card-row" style={{ marginTop: 8 }}>
+          <span className="muted">Действует до</span>
+          <span style={{ color: expirySoon ? "var(--warn)" : "var(--ink)" }}>{formatExpiry(profile.medicalBookExpiry)}</span>
+        </div>
+      </div>
       {expirySoon && (
-        <div className="card" style={{ borderColor: "var(--warn)", marginTop: -4 }}>
+        <div className="card" style={{ borderColor: "var(--warn)" }}>
           <span className="muted">⚠️ Срок действия медкнижки скоро истекает или уже истёк — сообщи управляющему</span>
         </div>
       )}
 
       <div className="eyebrow">Модель ЗП</div>
-      <div className="card muted">{profile.salaryModel}</div>
-
-      <button className="btn primary" onClick={save} style={{ marginTop: 8 }}>
-        Сохранить
-      </button>
+      <div className="card muted">{formatSalaryModel(profile)}</div>
     </div>
   );
 }

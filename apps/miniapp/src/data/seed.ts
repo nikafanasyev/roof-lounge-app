@@ -4,6 +4,7 @@ import type {
   Guest,
   KnowledgeArticle,
   Mix,
+  PayoutRecord,
   Problem,
   ScheduleEntry,
   Shift,
@@ -134,19 +135,24 @@ export const seedTasks: Task[] = [
 export const seedStaffProfile: StaffProfile = {
   id: "s1",
   name: "Никита Афанасьев",
-  phone: "",
-  email: "",
-  medicalBookNumber: "",
-  medicalBookExpiry: undefined,
+  phone: undefined, // заполнится из Telegram, когда подключим шаринг контакта
+  email: undefined, // заполняет руководитель
+  medicalBookNumber: undefined, // заполняет руководитель
+  medicalBookExpiry: undefined, // заполняет руководитель
   hiredAt: new Date(Date.now() - 86400000 * 240).toISOString(),
-  salaryModel: "Оклад за смену + % от выручки — уточнить точную формулу у управляющего",
+  salaryModel: { type: "percent", value: 5 },
 };
 
 export const seedShiftPayroll: ShiftPayrollEntry[] = [
-  { id: "sp1", date: new Date(Date.now() - 86400000 * 1).toISOString(), revenue: 84000, salary: 4200, paid: false },
-  { id: "sp2", date: new Date(Date.now() - 86400000 * 3).toISOString(), revenue: 61000, salary: 3050, paid: false },
-  { id: "sp3", date: new Date(Date.now() - 86400000 * 6).toISOString(), revenue: 97000, salary: 4850, paid: true },
-  { id: "sp4", date: new Date(Date.now() - 86400000 * 9).toISOString(), revenue: 52000, salary: 2600, paid: true },
+  { id: "sp1", date: new Date(Date.now() - 86400000 * 1).toISOString(), revenue: 84000, salary: 4200 },
+  { id: "sp2", date: new Date(Date.now() - 86400000 * 3).toISOString(), revenue: 61000, salary: 3050 },
+  { id: "sp3", date: new Date(Date.now() - 86400000 * 6).toISOString(), revenue: 97000, salary: 4850 },
+  { id: "sp4", date: new Date(Date.now() - 86400000 * 9).toISOString(), revenue: 52000, salary: 2600 },
+  { id: "sp5", date: new Date(Date.now() - 86400000 * 33).toISOString(), revenue: 71000, salary: 3550 },
+];
+
+export const seedPayouts: PayoutRecord[] = [
+  { id: "po1", date: new Date(Date.now() - 86400000 * 15).toISOString(), amount: 28230, note: "За первую половину месяца" },
 ];
 
 export const seedAdjustments: Adjustment[] = [

@@ -25,6 +25,7 @@ import type {
   KnowledgeArticle,
   Mix,
   MixItem,
+  PayoutRecord,
   Problem,
   ProblemCategory,
   ScheduleEntry,
@@ -41,6 +42,7 @@ import {
   seedGuests,
   seedKnowledgeArticles,
   seedMixes,
+  seedPayouts,
   seedProblems,
   seedSchedule,
   seedServiceCalls,
@@ -87,6 +89,7 @@ export const problemsStore = new Store<Problem[]>(seedProblems);
 export const tasksStore = new Store<Task[]>(seedTasks);
 export const staffProfileStore = new Store<StaffProfile>(seedStaffProfile);
 export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll);
+export const payoutsStore = new Store<PayoutRecord[]>(seedPayouts);
 export const adjustmentsStore = new Store<Adjustment[]>(seedAdjustments);
 export const scheduleStore = new Store<ScheduleEntry[]>(seedSchedule);
 export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
@@ -696,8 +699,36 @@ export function yearsOfService(hiredAt: string): { years: number; months: number
   return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
 }
 
+export function formatSalaryModel(profile: StaffProfile): string {
+  const { salaryModel } = profile;
+  return salaryModel.type === "fixed"
+    ? `Фиксированная ставка: ${salaryModel.value.toLocaleString("ru-RU")} ₽ / смена`
+    : `Процент от выручки: ${salaryModel.value}%`;
+}
+
 export function listShiftPayroll(): ShiftPayrollEntry[] {
   return [...shiftPayrollStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** Смены сгруппированы по месяцу — выплаты идут не по сменам, а за период. */
+export function listShiftPayrollByMonth(): { monthLabel: string; total: number; shifts: ShiftPayrollEntry[] }[] {
+  const shifts = listShiftPayroll();
+  const groups = new Map<string, ShiftPayrollEntry[]>();
+  for (const s of shifts) {
+    const key = s.date.slice(0, 7); // YYYY-MM
+    const list = groups.get(key) ?? [];
+    list.push(s);
+    groups.set(key, list);
+  }
+  return Array.from(groups.entries()).map(([key, list]) => ({
+    monthLabel: new Date(key + "-01").toLocaleDateString("ru-RU", { month: "long", year: "numeric" }),
+    total: list.reduce((sum, s) => sum + s.salary, 0),
+    shifts: list,
+  }));
+}
+
+export function listPayouts(): PayoutRecord[] {
+  return [...payoutsStore.get()].sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export function listAdjustments(): Adjustment[] {
@@ -719,8 +750,9 @@ export interface PayrollSummary {
 export function computePayrollSummary(): PayrollSummary {
   const shifts = shiftPayrollStore.get();
   const adjustments = adjustmentsStore.get();
+  const payouts = payoutsStore.get();
   const fromShifts = shifts.reduce((sum, s) => sum + s.salary, 0);
-  const paid = shifts.filter((s) => s.paid).reduce((sum, s) => sum + s.salary, 0);
+  const paid = payouts.reduce((sum, p) => sum + p.amount, 0);
   const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
   const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
   const earned = fromShifts + bonuses - fines;

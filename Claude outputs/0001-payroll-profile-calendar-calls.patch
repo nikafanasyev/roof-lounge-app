@@ -1,0 +1,616 @@
+From a161cb46f15c699a4144d15e000a4ef3c56af6e6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Sun, 6 Sep 2026 14:19:34 +0000
+Subject: [PATCH] =?UTF-8?q?feat:=20=D0=B4=D0=B0=D1=88=D0=B1=D0=BE=D1=80?=
+ =?UTF-8?q?=D0=B4=20=D0=97=D0=9F=20=D0=BF=D0=BE=20=D0=BC=D0=B5=D1=81=D1=8F?=
+ =?UTF-8?q?=D1=86=D0=B0=D0=BC,=20=D0=BF=D1=80=D0=BE=D1=84=D0=B8=D0=BB?=
+ =?UTF-8?q?=D1=8C=20read-only=20=D0=BF=D0=BE=D0=BB=D0=B5=D0=B9,=20=D0=BA?=
+ =?UTF-8?q?=D0=B0=D0=BB=D0=B5=D0=BD=D0=B4=D0=B0=D1=80=D1=8C=20=D1=81=D0=BC?=
+ =?UTF-8?q?=D0=B5=D0=BD,=20=D0=B2=D1=8B=D0=B7=D0=BE=D0=B2=D1=8B=20=D1=83?=
+ =?UTF-8?q?=20=D1=81=D0=BE=D1=82=D1=80=D1=83=D0=B4=D0=BD=D0=B8=D0=BA=D0=B0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Зарплата: карточка "К выплате" + 4 плитки в духе HPE CRM, разбивка по
+  сменам сгруппирована по месяцу с итогом (выплаты идут за период, не
+  по сменам — убрал флаг paid у смены, добавил отдельные записи выплат).
+- Профиль: телефон/почта/медкнижка теперь read-only (заполняются из
+  Telegram и руководителем, не сотрудником), модель ЗП — типизированная
+  (фиксированная ставка или % от выручки, у каждого своя).
+- График смен: переключатель Календарь/Список.
+- В нижнюю навигацию и роуты сотрудника добавлены "Вызовы" (та же лента,
+  что видит руководитель).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BhZ45j4FFAfvtAGo4A4vw
+---
+ README.md                                     |   7 +-
+ apps/miniapp/src/App.tsx                      |   4 +
+ apps/miniapp/src/data/repo.ts                 |  34 ++++-
+ apps/miniapp/src/data/seed.ts                 |  24 ++--
+ .../src/screens/employee/Dashboard.tsx        |  80 +++++++-----
+ apps/miniapp/src/screens/employee/Profile.tsx |  56 ++++-----
+ .../miniapp/src/screens/employee/Schedule.tsx | 118 ++++++++++++++++--
+ apps/miniapp/src/types.ts                     |  25 +++-
+ 8 files changed, 268 insertions(+), 80 deletions(-)
+
+diff --git a/README.md b/README.md
+index 837ceab..af99061 100644
+--- a/README.md
++++ b/README.md
+@@ -13,12 +13,13 @@
+ В приложении две роли — **Сотрудник** (единый кабинет для любого сотрудника: мастер и официант — это один человек) и **Руководитель**. Переключатель наверху экрана переключает их вручную (демо-заглушка на одном устройстве), в реальной эксплуатации сотрудник будет видеть только свой кабинет автоматически, по Telegram-аккаунту, без выбора.
+ 
+ **Сотрудник:**
+-- **Зарплата** (домашний экран): дашборд — заработано / к выплате / премии / штрафы / выплачено, ниже разбивка по сменам (дата, выручка, начислено).
++- **Зарплата** (домашний экран): карточка «К выплате» (= зарплата + премии − штрафы − выплачено) + плитки Зарплата/Выплачено/Штрафы/Премии, ниже разбивка по сменам **сгруппированная по месяцу** с итогом за месяц (выплаты идут не по сменам, а за период, не по каждой смене отдельно).
+ - **Гости**: поиск гостя → карточка (вкусовой профиль: шкалы предпочтений, средняя крепость, любимые миксы) → история миксов → «Собрать микс →» (бренд → вкус → доли в % → оформление).
+ - **Смена**: чек-лист открытия/закрытия, передача смены заметкой.
++- **Вызовы**: лента QR-вызовов со столов, реакция и время закрытия — та же лента, что видит руководитель.
+ - **Ещё** → хаб со ссылками:
+-  - **Профиль** — фото (меняется тапом), телефон, почта, номер и срок действия медкнижки (с предупреждением, если скоро истекает), стаж, модель ЗП.
+-  - **График смен** — список смен с датой/временем.
++  - **Профиль** — фото (меняется тапом); телефон (придёт из Telegram, когда подключим шаринг контакта — сейчас заглушка), почта и медкнижка (номер + дата «действует до», с предупреждением при истечении) — заполняет руководитель, сотрудник не редактирует; стаж считается автоматически; модель ЗП — у каждого своя: либо фиксированная ставка за смену, либо процент от выручки.
++  - **График смен** — переключатель Календарь/Список: календарь текущего месяца с отметками смен, и обычный список.
+   - **Штрафы и премии** — лента начислений + форма добавления (в проде — доступ только руководителю, см. комментарий в коде).
+   - **Проблемы** — фиксация поломки, статус, сколько дней открыта.
+   - **Задачи** — постановка и отметка выполнения.
+diff --git a/apps/miniapp/src/App.tsx b/apps/miniapp/src/App.tsx
+index febe0b7..e77c1ce 100644
+--- a/apps/miniapp/src/App.tsx
++++ b/apps/miniapp/src/App.tsx
+@@ -41,6 +41,9 @@ function EmployeeNav() {
+       <NavLink to="/employee/shift" className={({ isActive }) => (isActive ? "active" : "")}>
+         <span className="icon">✅</span>Смена
+       </NavLink>
++      <NavLink to="/employee/calls" className={({ isActive }) => (isActive ? "active" : "")}>
++        <span className="icon">🔔</span>Вызовы
++      </NavLink>
+       <NavLink to="/employee/more" className={({ isActive }) => (isActive ? "active" : "")}>
+         <span className="icon">☰</span>Ещё
+       </NavLink>
+@@ -100,6 +103,7 @@ function RoleShell() {
+         <Route path="/employee/guests/:guestId/mix" element={<MixBuilder />} />
+         <Route path="/employee/mix/:mixId" element={<MixView />} />
+         <Route path="/employee/shift" element={<Shift />} />
++        <Route path="/employee/calls" element={<ServiceCalls />} />
+         <Route path="/employee/problems" element={<Problems />} />
+         <Route path="/employee/tasks" element={<Tasks />} />
+         <Route path="/employee/more" element={<More />} />
+diff --git a/apps/miniapp/src/data/repo.ts b/apps/miniapp/src/data/repo.ts
+index bfee489..e11388b 100644
+--- a/apps/miniapp/src/data/repo.ts
++++ b/apps/miniapp/src/data/repo.ts
+@@ -25,6 +25,7 @@ import type {
+   KnowledgeArticle,
+   Mix,
+   MixItem,
++  PayoutRecord,
+   Problem,
+   ProblemCategory,
+   ScheduleEntry,
+@@ -41,6 +42,7 @@ import {
+   seedGuests,
+   seedKnowledgeArticles,
+   seedMixes,
++  seedPayouts,
+   seedProblems,
+   seedSchedule,
+   seedServiceCalls,
+@@ -87,6 +89,7 @@ export const problemsStore = new Store<Problem[]>(seedProblems);
+ export const tasksStore = new Store<Task[]>(seedTasks);
+ export const staffProfileStore = new Store<StaffProfile>(seedStaffProfile);
+ export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll);
++export const payoutsStore = new Store<PayoutRecord[]>(seedPayouts);
+ export const adjustmentsStore = new Store<Adjustment[]>(seedAdjustments);
+ export const scheduleStore = new Store<ScheduleEntry[]>(seedSchedule);
+ export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
+@@ -696,10 +699,38 @@ export function yearsOfService(hiredAt: string): { years: number; months: number
+   return { years: Math.floor(totalMonths / 12), months: totalMonths % 12 };
+ }
+ 
++export function formatSalaryModel(profile: StaffProfile): string {
++  const { salaryModel } = profile;
++  return salaryModel.type === "fixed"
++    ? `Фиксированная ставка: ${salaryModel.value.toLocaleString("ru-RU")} ₽ / смена`
++    : `Процент от выручки: ${salaryModel.value}%`;
++}
++
+ export function listShiftPayroll(): ShiftPayrollEntry[] {
+   return [...shiftPayrollStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+ }
+ 
++/** Смены сгруппированы по месяцу — выплаты идут не по сменам, а за период. */
++export function listShiftPayrollByMonth(): { monthLabel: string; total: number; shifts: ShiftPayrollEntry[] }[] {
++  const shifts = listShiftPayroll();
++  const groups = new Map<string, ShiftPayrollEntry[]>();
++  for (const s of shifts) {
++    const key = s.date.slice(0, 7); // YYYY-MM
++    const list = groups.get(key) ?? [];
++    list.push(s);
++    groups.set(key, list);
++  }
++  return Array.from(groups.entries()).map(([key, list]) => ({
++    monthLabel: new Date(key + "-01").toLocaleDateString("ru-RU", { month: "long", year: "numeric" }),
++    total: list.reduce((sum, s) => sum + s.salary, 0),
++    shifts: list,
++  }));
++}
++
++export function listPayouts(): PayoutRecord[] {
++  return [...payoutsStore.get()].sort((a, b) => b.date.localeCompare(a.date));
++}
++
+ export function listAdjustments(): Adjustment[] {
+   return [...adjustmentsStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+ }
+@@ -719,8 +750,9 @@ export interface PayrollSummary {
+ export function computePayrollSummary(): PayrollSummary {
+   const shifts = shiftPayrollStore.get();
+   const adjustments = adjustmentsStore.get();
++  const payouts = payoutsStore.get();
+   const fromShifts = shifts.reduce((sum, s) => sum + s.salary, 0);
+-  const paid = shifts.filter((s) => s.paid).reduce((sum, s) => sum + s.salary, 0);
++  const paid = payouts.reduce((sum, p) => sum + p.amount, 0);
+   const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
+   const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
+   const earned = fromShifts + bonuses - fines;
+diff --git a/apps/miniapp/src/data/seed.ts b/apps/miniapp/src/data/seed.ts
+index 7d0e39a..835eaf6 100644
+--- a/apps/miniapp/src/data/seed.ts
++++ b/apps/miniapp/src/data/seed.ts
+@@ -4,6 +4,7 @@ import type {
+   Guest,
+   KnowledgeArticle,
+   Mix,
++  PayoutRecord,
+   Problem,
+   ScheduleEntry,
+   Shift,
+@@ -134,19 +135,24 @@ export const seedTasks: Task[] = [
+ export const seedStaffProfile: StaffProfile = {
+   id: "s1",
+   name: "Никита Афанасьев",
+-  phone: "",
+-  email: "",
+-  medicalBookNumber: "",
+-  medicalBookExpiry: undefined,
++  phone: undefined, // заполнится из Telegram, когда подключим шаринг контакта
++  email: undefined, // заполняет руководитель
++  medicalBookNumber: undefined, // заполняет руководитель
++  medicalBookExpiry: undefined, // заполняет руководитель
+   hiredAt: new Date(Date.now() - 86400000 * 240).toISOString(),
+-  salaryModel: "Оклад за смену + % от выручки — уточнить точную формулу у управляющего",
++  salaryModel: { type: "percent", value: 5 },
+ };
+ 
+ export const seedShiftPayroll: ShiftPayrollEntry[] = [
+-  { id: "sp1", date: new Date(Date.now() - 86400000 * 1).toISOString(), revenue: 84000, salary: 4200, paid: false },
+-  { id: "sp2", date: new Date(Date.now() - 86400000 * 3).toISOString(), revenue: 61000, salary: 3050, paid: false },
+-  { id: "sp3", date: new Date(Date.now() - 86400000 * 6).toISOString(), revenue: 97000, salary: 4850, paid: true },
+-  { id: "sp4", date: new Date(Date.now() - 86400000 * 9).toISOString(), revenue: 52000, salary: 2600, paid: true },
++  { id: "sp1", date: new Date(Date.now() - 86400000 * 1).toISOString(), revenue: 84000, salary: 4200 },
++  { id: "sp2", date: new Date(Date.now() - 86400000 * 3).toISOString(), revenue: 61000, salary: 3050 },
++  { id: "sp3", date: new Date(Date.now() - 86400000 * 6).toISOString(), revenue: 97000, salary: 4850 },
++  { id: "sp4", date: new Date(Date.now() - 86400000 * 9).toISOString(), revenue: 52000, salary: 2600 },
++  { id: "sp5", date: new Date(Date.now() - 86400000 * 33).toISOString(), revenue: 71000, salary: 3550 },
++];
++
++export const seedPayouts: PayoutRecord[] = [
++  { id: "po1", date: new Date(Date.now() - 86400000 * 15).toISOString(), amount: 28230, note: "За первую половину месяца" },
+ ];
+ 
+ export const seedAdjustments: Adjustment[] = [
+diff --git a/apps/miniapp/src/screens/employee/Dashboard.tsx b/apps/miniapp/src/screens/employee/Dashboard.tsx
+index 8cee9e5..a633105 100644
+--- a/apps/miniapp/src/screens/employee/Dashboard.tsx
++++ b/apps/miniapp/src/screens/employee/Dashboard.tsx
+@@ -1,5 +1,11 @@
+ import { useStore } from "@/data/useStore";
+-import { computePayrollSummary, listShiftPayroll, shiftPayrollStore, adjustmentsStore } from "@/data/repo";
++import {
++  adjustmentsStore,
++  computePayrollSummary,
++  listShiftPayrollByMonth,
++  payoutsStore,
++  shiftPayrollStore,
++} from "@/data/repo";
+ 
+ function money(n: number): string {
+   return n.toLocaleString("ru-RU") + " ₽";
+@@ -8,56 +14,74 @@ function money(n: number): string {
+ export default function Dashboard() {
+   useStore(shiftPayrollStore);
+   useStore(adjustmentsStore);
++  useStore(payoutsStore);
+   const summary = computePayrollSummary();
+-  const shifts = listShiftPayroll();
++  const months = listShiftPayrollByMonth();
+ 
+   return (
+     <div className="screen">
+       <h1>Моя зарплата</h1>
+ 
+-      <div className="stat-grid">
+-        <div className="stat-tile">
+-          <div className="value">{money(summary.earned)}</div>
+-          <div className="label">Заработано</div>
++      <div className="card" style={{ textAlign: "center", padding: "18px 16px" }}>
++        <div className="eyebrow" style={{ marginBottom: 4 }}>
++          К выплате
+         </div>
++        <div style={{ fontSize: 30, fontWeight: 700 }}>{money(summary.due)}</div>
++        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
++          зарплата + премии − штрафы − выплачено
++        </div>
++      </div>
++
++      <div className="stat-grid">
+         <div className="stat-tile">
+-          <div className="value">{money(summary.due)}</div>
+-          <div className="label">К выплате</div>
++          <div className="value" style={{ color: "var(--accent)" }}>
++            {money(summary.earned)}
++          </div>
++          <div className="label">Зарплата</div>
+         </div>
+         <div className="stat-tile">
+           <div className="value" style={{ color: "var(--good)" }}>
+-            +{money(summary.bonuses)}
++            {money(summary.paid)}
+           </div>
+-          <div className="label">Премии</div>
++          <div className="label">Выплачено</div>
+         </div>
+         <div className="stat-tile">
+           <div className="value" style={{ color: "var(--danger)" }}>
+-            −{money(summary.fines)}
++            {money(summary.fines)}
+           </div>
+           <div className="label">Штрафы</div>
+         </div>
+-        <div className="stat-tile" style={{ gridColumn: "span 2" }}>
+-          <div className="value">{money(summary.paid)}</div>
+-          <div className="label">Уже выплачено</div>
++        <div className="stat-tile">
++          <div className="value" style={{ color: "var(--good)" }}>
++            {money(summary.bonuses)}
++          </div>
++          <div className="label">Премии</div>
+         </div>
+       </div>
+ 
+       <h2>Разбивка по сменам</h2>
+-      {shifts.length === 0 && <div className="list-empty">Смен пока не было</div>}
+-      {shifts.map((s) => (
+-        <div key={s.id} className="card card-row">
+-          <div>
+-            <div style={{ fontWeight: 700 }}>
+-              {new Date(s.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}
+-            </div>
+-            <div className="muted" style={{ fontSize: 13 }}>
+-              Выручка {money(s.revenue)}
+-            </div>
+-          </div>
+-          <div style={{ textAlign: "right" }}>
+-            <div style={{ fontWeight: 700 }}>{money(s.salary)}</div>
+-            <span className={`chip ${s.paid ? "" : "accent"}`}>{s.paid ? "выплачено" : "к выплате"}</span>
++      {months.length === 0 && <div className="list-empty">Смен пока не было</div>}
++      {months.map((group) => (
++        <div key={group.monthLabel} style={{ marginBottom: 16 }}>
++          <div className="card-row" style={{ marginBottom: 6 }}>
++            <span className="muted" style={{ fontSize: 13, textTransform: "capitalize" }}>
++              {group.monthLabel}
++            </span>
++            <span style={{ fontWeight: 700 }}>{money(group.total)}</span>
+           </div>
++          {group.shifts.map((s) => (
++            <div key={s.id} className="card card-row">
++              <div>
++                <div style={{ fontWeight: 700 }}>
++                  {new Date(s.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
++                </div>
++                <div className="muted" style={{ fontSize: 12 }}>
++                  выручка {money(s.revenue)}
++                </div>
++              </div>
++              <div style={{ fontWeight: 700, color: "var(--accent)" }}>{money(s.salary)}</div>
++            </div>
++          ))}
+         </div>
+       ))}
+     </div>
+diff --git a/apps/miniapp/src/screens/employee/Profile.tsx b/apps/miniapp/src/screens/employee/Profile.tsx
+index a2f350a..1d0c2ca 100644
+--- a/apps/miniapp/src/screens/employee/Profile.tsx
++++ b/apps/miniapp/src/screens/employee/Profile.tsx
+@@ -1,6 +1,7 @@
+-import { useRef, useState } from "react";
++import { useRef } from "react";
+ import { useStore } from "@/data/useStore";
+-import { getStaffProfile, staffProfileStore, updateStaffProfile, yearsOfService } from "@/data/repo";
++import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, yearsOfService } from "@/data/repo";
++import { getTelegramUser } from "@/lib/telegram";
+ 
+ function formatTenure(hiredAt: string): string {
+   const { years, months } = yearsOfService(hiredAt);
+@@ -10,15 +11,16 @@ function formatTenure(hiredAt: string): string {
+   return parts.join(" ");
+ }
+ 
++function formatExpiry(iso?: string): string {
++  if (!iso) return "не указано";
++  return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
++}
++
+ export default function Profile() {
+   useStore(staffProfileStore);
+   const profile = getStaffProfile();
+   const fileInputRef = useRef<HTMLInputElement>(null);
+-
+-  const [phone, setPhone] = useState(profile.phone ?? "");
+-  const [email, setEmail] = useState(profile.email ?? "");
+-  const [medicalBookNumber, setMedicalBookNumber] = useState(profile.medicalBookNumber ?? "");
+-  const [medicalBookExpiry, setMedicalBookExpiry] = useState(profile.medicalBookExpiry?.slice(0, 10) ?? "");
++  const telegramUser = getTelegramUser();
+ 
+   function handlePhotoPick(e: React.ChangeEvent<HTMLInputElement>) {
+     const file = e.target.files?.[0];
+@@ -28,15 +30,6 @@ export default function Profile() {
+     reader.readAsDataURL(file);
+   }
+ 
+-  function save() {
+-    updateStaffProfile({
+-      phone: phone.trim() || undefined,
+-      email: email.trim() || undefined,
+-      medicalBookNumber: medicalBookNumber.trim() || undefined,
+-      medicalBookExpiry: medicalBookExpiry ? new Date(medicalBookExpiry).toISOString() : undefined,
+-    });
+-  }
+-
+   const expirySoon =
+     profile.medicalBookExpiry && new Date(profile.medicalBookExpiry).getTime() - Date.now() < 86400000 * 30;
+ 
+@@ -60,29 +53,34 @@ export default function Profile() {
+         </div>
+       </div>
+ 
++      {/* Телефон приходит из Telegram (шаринг контакта — TODO: подключить
++          WebApp.requestContact и сохранение в staff.phone), почту и данные
++          медкнижки заполняет руководитель. Сотрудник эти поля не редактирует. */}
+       <div className="eyebrow">Телефон</div>
+-      <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7 900 000-00-00" style={{ marginBottom: 12 }} />
++      <div className="card muted">{profile.phone || telegramUser?.username || "определится из Telegram"}</div>
+ 
+       <div className="eyebrow">Почта</div>
+-      <input type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" style={{ marginBottom: 12 }} />
++      <div className="card muted">{profile.email || "заполняет руководитель"}</div>
+ 
+-      <div className="eyebrow">Номер медкнижки</div>
+-      <input type="text" value={medicalBookNumber} onChange={(e) => setMedicalBookNumber(e.target.value)} style={{ marginBottom: 12 }} />
+-
+-      <div className="eyebrow">Действует до</div>
+-      <input type="date" value={medicalBookExpiry} onChange={(e) => setMedicalBookExpiry(e.target.value)} style={{ marginBottom: 12 }} />
++      <div className="eyebrow">Медкнижка</div>
++      <div className="card">
++        <div className="card-row">
++          <span className="muted">Номер</span>
++          <span>{profile.medicalBookNumber || "не указан"}</span>
++        </div>
++        <div className="card-row" style={{ marginTop: 8 }}>
++          <span className="muted">Действует до</span>
++          <span style={{ color: expirySoon ? "var(--warn)" : "var(--ink)" }}>{formatExpiry(profile.medicalBookExpiry)}</span>
++        </div>
++      </div>
+       {expirySoon && (
+-        <div className="card" style={{ borderColor: "var(--warn)", marginTop: -4 }}>
++        <div className="card" style={{ borderColor: "var(--warn)" }}>
+           <span className="muted">⚠️ Срок действия медкнижки скоро истекает или уже истёк — сообщи управляющему</span>
+         </div>
+       )}
+ 
+       <div className="eyebrow">Модель ЗП</div>
+-      <div className="card muted">{profile.salaryModel}</div>
+-
+-      <button className="btn primary" onClick={save} style={{ marginTop: 8 }}>
+-        Сохранить
+-      </button>
++      <div className="card muted">{formatSalaryModel(profile)}</div>
+     </div>
+   );
+ }
+diff --git a/apps/miniapp/src/screens/employee/Schedule.tsx b/apps/miniapp/src/screens/employee/Schedule.tsx
+index dfc6de4..c7951a9 100644
+--- a/apps/miniapp/src/screens/employee/Schedule.tsx
++++ b/apps/miniapp/src/screens/employee/Schedule.tsx
+@@ -1,15 +1,30 @@
++import { useMemo, useState } from "react";
+ import { useStore } from "@/data/useStore";
+ import { listSchedule, scheduleStore } from "@/data/repo";
++import type { ScheduleEntry } from "@/types";
+ 
+-export default function Schedule() {
+-  useStore(scheduleStore);
+-  const entries = listSchedule();
+-  const today = new Date().toDateString();
++function dateKey(d: Date): string {
++  return d.toISOString().slice(0, 10);
++}
+ 
++function buildMonthGrid(year: number, month: number): (Date | null)[] {
++  const first = new Date(year, month, 1);
++  // Понедельник = 0 ... воскресенье = 6
++  const firstWeekday = (first.getDay() + 6) % 7;
++  const daysInMonth = new Date(year, month + 1, 0).getDate();
++  const cells: (Date | null)[] = Array(firstWeekday).fill(null);
++  for (let day = 1; day <= daysInMonth; day++) {
++    cells.push(new Date(year, month, day));
++  }
++  while (cells.length % 7 !== 0) cells.push(null);
++  return cells;
++}
++
++function ListView({ entries }: { entries: ScheduleEntry[] }) {
++  const today = new Date().toDateString();
++  if (entries.length === 0) return <div className="list-empty">Смены пока не назначены</div>;
+   return (
+-    <div className="screen">
+-      <h1>График смен</h1>
+-      {entries.length === 0 && <div className="list-empty">Смены пока не назначены</div>}
++    <>
+       {entries.map((e) => {
+         const date = new Date(e.date);
+         const isPast = date.getTime() < Date.now() && date.toDateString() !== today;
+@@ -27,6 +42,95 @@ export default function Schedule() {
+           </div>
+         );
+       })}
++    </>
++  );
++}
++
++function CalendarView({ entries }: { entries: ScheduleEntry[] }) {
++  const [cursor, setCursor] = useState(() => new Date());
++  const year = cursor.getFullYear();
++  const month = cursor.getMonth();
++
++  const byDate = useMemo(() => {
++    const map = new Map<string, ScheduleEntry>();
++    for (const e of entries) map.set(dateKey(new Date(e.date)), e);
++    return map;
++  }, [entries]);
++
++  const cells = useMemo(() => buildMonthGrid(year, month), [year, month]);
++  const todayKey = dateKey(new Date());
++
++  return (
++    <>
++      <div className="card-row" style={{ marginBottom: 10 }}>
++        <button className="btn secondary" style={{ padding: "6px 12px" }} onClick={() => setCursor(new Date(year, month - 1, 1))}>
++          ←
++        </button>
++        <div style={{ fontWeight: 700, textTransform: "capitalize" }}>
++          {cursor.toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}
++        </div>
++        <button className="btn secondary" style={{ padding: "6px 12px" }} onClick={() => setCursor(new Date(year, month + 1, 1))}>
++          →
++        </button>
++      </div>
++
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 }}>
++        {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d) => (
++          <div key={d} className="muted" style={{ textAlign: "center", fontSize: 11 }}>
++            {d}
++          </div>
++        ))}
++      </div>
++
++      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
++        {cells.map((date, i) => {
++          if (!date) return <div key={i} />;
++          const key = dateKey(date);
++          const entry = byDate.get(key);
++          const isToday = key === todayKey;
++          return (
++            <div
++              key={i}
++              className="card"
++              style={{
++                padding: "6px 4px",
++                textAlign: "center",
++                margin: 0,
++                background: entry ? "var(--surface-2)" : "var(--surface)",
++                borderColor: isToday ? "var(--accent)" : "var(--border)",
++              }}
++            >
++              <div style={{ fontSize: 12, fontWeight: isToday ? 700 : 400 }}>{date.getDate()}</div>
++              {entry && (
++                <div className="badge-dot done" style={{ margin: "4px auto 0" }} />
++              )}
++            </div>
++          );
++        })}
++      </div>
++    </>
++  );
++}
++
++export default function Schedule() {
++  useStore(scheduleStore);
++  const entries = listSchedule();
++  const [view, setView] = useState<"list" | "calendar">("calendar");
++
++  return (
++    <div className="screen">
++      <h1>График смен</h1>
++
++      <div className="tabs">
++        <button className={`tab-btn ${view === "calendar" ? "active" : ""}`} onClick={() => setView("calendar")}>
++          Календарь
++        </button>
++        <button className={`tab-btn ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>
++          Список
++        </button>
++      </div>
++
++      {view === "calendar" ? <CalendarView entries={entries} /> : <ListView entries={entries} />}
+     </div>
+   );
+ }
+diff --git a/apps/miniapp/src/types.ts b/apps/miniapp/src/types.ts
+index 8f2a8ee..5755561 100644
+--- a/apps/miniapp/src/types.ts
++++ b/apps/miniapp/src/types.ts
+@@ -118,16 +118,27 @@ export interface WaitlistEntry {
+ 
+ // --- Личный кабинет сотрудника ---
+ 
++// Модель ЗП у каждого сотрудника своя и назначается руководителем:
++// фиксированная ставка за смену, либо процент от выручки смены.
++export type SalaryModelType = "fixed" | "percent";
++
++export interface SalaryModel {
++  type: SalaryModelType;
++  value: number; // fixed: ₽ за смену; percent: % от выручки смены
++}
++
+ export interface StaffProfile {
+   id: string;
+   name: string;
+   photoUrl?: string;
++  // Телефон приходит из Telegram (шаринг контакта), почта и медкнижка —
++  // заполняются руководителем. Сотрудник эти поля не редактирует.
+   phone?: string;
+   email?: string;
+   medicalBookNumber?: string;
+-  medicalBookExpiry?: string; // ISO-дата окончания действия медкнижки
++  medicalBookExpiry?: string; // ISO-дата, до какого числа действует медкнижка
+   hiredAt: string; // ISO-дата трудоустройства, отсюда считается выслуга лет
+-  salaryModel: string; // текстовое описание модели ЗП, например "оклад 2500/смена + 5% от выручки"
++  salaryModel: SalaryModel;
+ }
+ 
+ export interface ShiftPayrollEntry {
+@@ -135,7 +146,15 @@ export interface ShiftPayrollEntry {
+   date: string; // ISO-дата смены
+   revenue: number; // выручка за смену, ₽
+   salary: number; // начислено сотруднику за смену, ₽
+-  paid: boolean;
++}
++
++// Выплаты происходят не по сменам, а за период (например раз в две недели) —
++// отдельная запись на каждую фактическую выплату.
++export interface PayoutRecord {
++  id: string;
++  date: string; // ISO-дата выплаты
++  amount: number;
++  note?: string; // например "за первую половину августа"
+ }
+ 
+ export type AdjustmentType = "fine" | "bonus";
+-- 
+2.43.0
+

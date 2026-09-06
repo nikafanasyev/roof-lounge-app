@@ -118,16 +118,27 @@ export interface WaitlistEntry {
 
 // --- Личный кабинет сотрудника ---
 
+// Модель ЗП у каждого сотрудника своя и назначается руководителем:
+// фиксированная ставка за смену, либо процент от выручки смены.
+export type SalaryModelType = "fixed" | "percent";
+
+export interface SalaryModel {
+  type: SalaryModelType;
+  value: number; // fixed: ₽ за смену; percent: % от выручки смены
+}
+
 export interface StaffProfile {
   id: string;
   name: string;
   photoUrl?: string;
+  // Телефон приходит из Telegram (шаринг контакта), почта и медкнижка —
+  // заполняются руководителем. Сотрудник эти поля не редактирует.
   phone?: string;
   email?: string;
   medicalBookNumber?: string;
-  medicalBookExpiry?: string; // ISO-дата окончания действия медкнижки
+  medicalBookExpiry?: string; // ISO-дата, до какого числа действует медкнижка
   hiredAt: string; // ISO-дата трудоустройства, отсюда считается выслуга лет
-  salaryModel: string; // текстовое описание модели ЗП, например "оклад 2500/смена + 5% от выручки"
+  salaryModel: SalaryModel;
 }
 
 export interface ShiftPayrollEntry {
@@ -135,7 +146,15 @@ export interface ShiftPayrollEntry {
   date: string; // ISO-дата смены
   revenue: number; // выручка за смену, ₽
   salary: number; // начислено сотруднику за смену, ₽
-  paid: boolean;
+}
+
+// Выплаты происходят не по сменам, а за период (например раз в две недели) —
+// отдельная запись на каждую фактическую выплату.
+export interface PayoutRecord {
+  id: string;
+  date: string; // ISO-дата выплаты
+  amount: number;
+  note?: string; // например "за первую половину августа"
 }
 
 export type AdjustmentType = "fine" | "bonus";

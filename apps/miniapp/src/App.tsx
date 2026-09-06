@@ -41,6 +41,9 @@ function EmployeeNav() {
       <NavLink to="/employee/shift" className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">✅</span>Смена
       </NavLink>
+      <NavLink to="/employee/calls" className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🔔</span>Вызовы
+      </NavLink>
       <NavLink to="/employee/more" className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">☰</span>Ещё
       </NavLink>
@@ -100,6 +103,7 @@ function RoleShell() {
         <Route path="/employee/guests/:guestId/mix" element={<MixBuilder />} />
         <Route path="/employee/mix/:mixId" element={<MixView />} />
         <Route path="/employee/shift" element={<Shift />} />
+        <Route path="/employee/calls" element={<ServiceCalls />} />
         <Route path="/employee/problems" element={<Problems />} />
         <Route path="/employee/tasks" element={<Tasks />} />
         <Route path="/employee/more" element={<More />} />
