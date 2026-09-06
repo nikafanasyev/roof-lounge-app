@@ -21,6 +21,36 @@ interface ShiftPhotoEvent {
  * table_id, а не номер стола напрямую — здесь держим маленький кэш
  * restaurant_tables, чтобы не ходить в БД на каждое уведомление.
  */
+// Supabase Realtime иногда молча роняет websocket-соединение (например, после
+// сетевого сбоя или рестарта контейнера) — без явной ошибки, просто канал
+// переходит в CLOSED/TIMED_OUT/CHANNEL_ERROR и больше никогда не пришлёт
+// событие. .subscribe() без обработки этих статусов выглядит "живым" в логах
+// (одна строка про SUBSCRIBED при старте) и после такого обрыва тихо
+// перестаёт работать. Поэтому логируем каждый статус и переподписываемся
+// заново при разрыве, вместо того чтобы полагаться на то, что соединение
+// сама себя восстановит.
+function resubscribable(label: string, createChannel: () => ReturnType<ReturnType<typeof createClient>["channel"]>) {
+  let attempt = 0;
+  function connect() {
+    const channel = createChannel();
+    channel.subscribe((status: string) => {
+      if (status === "SUBSCRIBED") {
+        attempt = 0;
+        console.log(`Подписка на ${label} активна.`);
+        return;
+      }
+      if (status === "CLOSED" || status === "TIMED_OUT" || status === "CHANNEL_ERROR") {
+        attempt += 1;
+        const delayMs = Math.min(30_000, 1_000 * 2 ** attempt);
+        console.error(`Подписка на ${label} прервалась (${status}), переподключаюсь через ${delayMs}мс.`);
+        channel.unsubscribe();
+        setTimeout(connect, delayMs);
+      }
+    });
+  }
+  connect();
+}
+
 export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Promise<void>) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   const tableNumberById = new Map<string, number>();
@@ -41,9 +71,8 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
   // Столы меняются редко — обновляем кэш раз в 5 минут, не на каждый вызов.
   setInterval(refreshTablesCache, 5 * 60_000);
 
-  supabase
-    .channel("service_calls_inserts")
-    .on(
+  resubscribable("service_calls", () =>
+    supabase.channel(`service_calls_inserts_${Date.now()}`).on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "service_calls" },
       async (payload) => {
@@ -51,12 +80,8 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
         const tableNumber = tableNumberById.get(row.table_id) ?? 0;
         await onCall({ type: row.type, table_number: tableNumber });
       },
-    )
-    .subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        console.log("Подписка на service_calls активна.");
-      }
-    });
+    ),
+  );
 }
 
 /**
@@ -70,9 +95,8 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
 export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Promise<void>) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-  supabase
-    .channel("shift_photo_uploads_inserts")
-    .on(
+  resubscribable("shift_photo_uploads", () =>
+    supabase.channel(`shift_photo_uploads_inserts_${Date.now()}`).on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "shift_photo_uploads" },
       async (payload) => {
@@ -98,10 +122,6 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
           await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
         }
       },
-    )
-    .subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        console.log("Подписка на shift_photo_uploads активна.");
-      }
-    });
+    ),
+  );
 }
