@@ -164,6 +164,25 @@ function isOperatingHours(date: Date, startHour: number, endHour: number): boole
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseClient = any;
 
+// Те же пункты, что и в дефолтной заготовке apps/miniapp/src/data/seed.ts
+// (seedShift.openChecklist/closeChecklist) — держать в синхроне вручную,
+// общего пакета между miniapp и bot сейчас нет. Новую строку смены создаём
+// сразу с этими пунктами (done: false), а не пустыми массивами: иначе
+// мини-апп при первой загрузке подставлял бы то, что случайно было в его
+// локальном сторе (например, уже отмеченный чек-лист с прошлой смены), и
+// экран открытия мог бы решить, что чек-лист уже пройден.
+const DEFAULT_OPEN_CHECKLIST = [
+  { id: "oc1", label: "Зал готов к приёму гостей", done: false },
+  { id: "oc2", label: "Оборудование проверено", done: false },
+  { id: "oc3", label: "Касса и терминалы работают", done: false },
+  { id: "oc4", label: "Санузлы убраны", done: false },
+  { id: "oc5", label: "Расходники на месте", done: false },
+];
+const DEFAULT_CLOSE_CHECKLIST = [
+  { id: "cc1", label: "Зал приведён в порядок", done: false },
+  { id: "cc2", label: "Касса сверена", done: false },
+];
+
 // Сотрудник привязывается к staff по telegram_id — это то же самое значение,
 // что и telegramId в Quick Resto (поле руками заполняется в карточке
 // сотрудника при найме). Роль не трогаем, если запись уже есть — иначе
@@ -221,7 +240,12 @@ async function openVenueShift(supabase: SupabaseClient, employee: QuickRestoEmpl
   const staffId = await upsertStaffForEmployee(supabase, employee);
   const { data, error } = await supabase
     .from("shifts")
-    .insert({ opened_by: staffId, opened_at: openedAt.toISOString(), open_checklist: [], close_checklist: [] })
+    .insert({
+      opened_by: staffId,
+      opened_at: openedAt.toISOString(),
+      open_checklist: DEFAULT_OPEN_CHECKLIST,
+      close_checklist: DEFAULT_CLOSE_CHECKLIST,
+    })
     .select("id")
     .single();
   if (error) {
