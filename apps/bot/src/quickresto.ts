@@ -152,8 +152,13 @@ async function fetchShiftRecords(employeeId: number): Promise<WorkshiftStatement
   return (data.ds ?? []).map((d) => d.object).sort((a, b) => a.startTime - b.startTime);
 }
 
+// Часы работы заведения (QR_POLL_START_HOUR/END_HOUR) заданы в московском
+// времени, а Railway крутит контейнер в UTC — date.getHours() без явной
+// таймзоны сверял бы их с UTC-часом и мог включать/выключать опрос не тогда.
 function isOperatingHours(date: Date, startHour: number, endHour: number): boolean {
-  const hour = date.getHours();
+  const hour = Number(
+    new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", hour12: false, timeZone: "Europe/Moscow" }).format(date),
+  );
   if (startHour === endHour) return true; // 0 = не ограничиваем
   if (startHour < endHour) return hour >= startHour && hour < endHour;
   return hour >= startHour || hour < endHour; // диапазон через полночь, например 10..4
@@ -385,7 +390,9 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
     if (events.length) {
       console.log(
         `Quick Resto: обнаружены переходы (${events.length}): ` +
-          events.map((e) => `${e.type} — ${e.employee.name} @ ${new Date(e.at).toLocaleTimeString("ru-RU")}`).join("; ") +
+          events
+            .map((e) => `${e.type} — ${e.employee.name} @ ${new Date(e.at).toLocaleTimeString("ru-RU", { timeZone: "Europe/Moscow" })}`)
+            .join("; ") +
           `; сейчас на смене: ${openEmployeeIds.size ? [...openEmployeeIds].join(", ") : "никого"}; строка смены заведения: ${currentShiftRowId ?? "нет"}`,
       );
     }
