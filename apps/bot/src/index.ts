@@ -72,7 +72,9 @@ async function main() {
     const qrChatId = env.QR_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
     watchQuickRestoShifts(async (event) => {
       const label = event.type === "opened" ? "Смена открыта" : "Смена закрыта";
-      const time = event.at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      // Railway крутит контейнер в UTC — без явной таймзоны время в
+      // уведомлении отличалось бы от московского на 3 часа.
+      const time = event.at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" });
       console.log(`Quick Resto: ${label.toLowerCase()} — ${event.employee.name}, ${time}`);
       if (qrChatId) {
         await bot.api.sendMessage(qrChatId, `${label} (Quick Resto)\n${event.employee.name}, ${time}`);
