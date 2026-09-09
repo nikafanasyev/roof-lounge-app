@@ -22,7 +22,9 @@ export default function KnowledgeArticleScreen() {
         {article.category}
       </div>
       <h1>{article.title}</h1>
-      <div className="card">{article.body}</div>
+      <div className="card" style={{ whiteSpace: "pre-wrap" }}>
+        {article.body}
+      </div>
     </div>
   );
 }
