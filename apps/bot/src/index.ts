@@ -69,7 +69,7 @@ async function main() {
   // ручное открытие/закрытие смены в мини-аппе, см. README и
   // claude/quickresto-shift-integration.md в проекте.
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.QR_LOGIN && env.QR_PASSWORD) {
-    const qrChatId = env.STAFF_CHAT_ID;
+    const qrChatId = env.QR_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
     watchQuickRestoShifts(async (event) => {
       const label = event.type === "opened" ? "Смена открыта" : "Смена закрыта";
       const time = event.at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
