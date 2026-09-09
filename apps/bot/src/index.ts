@@ -55,9 +55,10 @@ async function main() {
     watchShiftPhotos(async (event) => {
       const buffer = await event.downloadPhoto();
       if (!buffer) return;
-      const label = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
+      const kindLabel = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
+      const roleLabel = event.role === "bar" ? "Бар" : "Кальяны";
       await bot.api.sendPhoto(shiftPhotosChatId, new InputFile(buffer, "shift.jpg"), {
-        caption: `${label}${event.staffName ? ` — ${event.staffName}` : ""}`,
+        caption: `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}`,
       });
     });
     console.log("Слушаю shift_photo_uploads через Supabase Realtime — пересылка фото смен включена.");

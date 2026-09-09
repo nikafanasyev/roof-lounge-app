@@ -64,19 +64,35 @@ export interface ChecklistItem {
   id: string;
   label: string;
   done: boolean;
+  section?: string; // заголовок группы пунктов внутри чек-листа, например "Открытие рабочей зоны"
 }
 
 export type ShiftStatus = "closed" | "open";
+
+// Смена одна на заведение (венью-статус приходит из Quick Resto), но с двумя
+// одновременными "универсалами" на смене у каждого — свой чек-лист:
+// один отвечает за бар, второй за кальянную зону. См.
+// claude/quickresto-shift-integration.md и роли ниже.
+export type StaffRole = "bar" | "hookah";
+
+export interface RoleChecklists {
+  openChecklist: ChecklistItem[];
+  closeChecklist: ChecklistItem[];
+  openedBy?: string;
+  openedAt?: string;
+  closedBy?: string;
+  closedAt?: string;
+}
 
 export interface Shift {
   id: string;
   status: ShiftStatus;
   openedBy?: string;
   openedAt?: string;
-  openChecklist: ChecklistItem[];
   closedBy?: string;
   closedAt?: string;
-  closeChecklist: ChecklistItem[];
+  bar: RoleChecklists;
+  hookah: RoleChecklists;
   handoverNote?: string;
   // Фото открытия/закрытия смены НЕ хранится в этой записи — оно загружается
   // в Storage, бот пересылает его руководителю в Telegram и сразу удаляет
