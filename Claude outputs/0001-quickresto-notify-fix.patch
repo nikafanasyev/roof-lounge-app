@@ -1,0 +1,200 @@
+From 62efcd192e21e2324692fda3dd100287adb795c9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Wed, 9 Sep 2026 10:15:17 +0000
+Subject: [PATCH] =?UTF-8?q?fix:=20=D0=BD=D0=B5=20=D1=82=D0=B5=D1=80=D1=8F?=
+ =?UTF-8?q?=D1=82=D1=8C=20=D0=B1=D1=8B=D1=81=D1=82=D1=80=D1=8B=D0=B5=20?=
+ =?UTF-8?q?=D0=BE=D1=82=D0=BA=D1=80=D1=8B=D1=82=D0=B8=D0=B5/=D0=B7=D0=B0?=
+ =?UTF-8?q?=D0=BA=D1=80=D1=8B=D1=82=D0=B8=D0=B5=20=D1=81=D0=BC=D0=B5=D0=BD?=
+ =?UTF-8?q?=D1=8B,=20=D1=81=D0=BB=D0=B0=D1=82=D1=8C=20=D1=83=D0=B2=D0=B5?=
+ =?UTF-8?q?=D0=B4=D0=BE=D0=BC=D0=BB=D0=B5=D0=BD=D0=B8=D0=B5=20=D0=B2=20?=
+ =?UTF-8?q?=D0=BB=D0=B8=D1=87=D0=BA=D1=83?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+1. Раньше переход ловился сравнением булева "было открыто/стало открыто"
+   между двумя опросами — если сотрудник успевал открыть и закрыть смену
+   быстрее интервала опроса (90 сек), оба события просто терялись. Теперь
+   отслеживаем саму запись смены (по startTime), а не только флаг: новая
+   запись — открытие; если она уже закрыта на момент опроса — сразу же и
+   закрытие, оба события не теряются.
+2. Ошибка отправки уведомления (например, sendMessage) больше не может
+   помешать остальному опросу — обёрнуто в safeNotify, само событие в shifts
+   к этому моменту уже записано независимо от исхода уведомления.
+3. Уведомления по умолчанию идут в SHIFT_PHOTOS_CHAT_ID (пока личка для
+   обкатки) вместо общего STAFF_CHAT_ID — можно переопределить QR_CHAT_ID.
+---
+ apps/bot/.env.example      |  3 ++
+ apps/bot/src/env.ts        |  4 ++
+ apps/bot/src/index.ts      |  2 +-
+ apps/bot/src/quickresto.ts | 88 ++++++++++++++++++++++++--------------
+ 4 files changed, 64 insertions(+), 33 deletions(-)
+
+diff --git a/apps/bot/.env.example b/apps/bot/.env.example
+index 5715f50..b3587f5 100644
+--- a/apps/bot/.env.example
++++ b/apps/bot/.env.example
+@@ -13,6 +13,9 @@ SHIFT_PHOTOS_CHAT_ID=
+ QR_HOST=hu554.quickresto.ru
+ QR_LOGIN=
+ QR_PASSWORD=
++# Необязательно: куда слать уведомления об открытии/закрытии смены.
++# Если не задать — используется SHIFT_PHOTOS_CHAT_ID, а если и его нет — STAFF_CHAT_ID.
++QR_CHAT_ID=
+ QR_POLL_START_HOUR=10
+ QR_POLL_END_HOUR=8
+ QR_POLL_INTERVAL_MS=90000
+diff --git a/apps/bot/src/env.ts b/apps/bot/src/env.ts
+index 9865dc2..c60d64d 100644
+--- a/apps/bot/src/env.ts
++++ b/apps/bot/src/env.ts
+@@ -22,6 +22,10 @@ export const env = {
+   QR_HOST: process.env.QR_HOST ?? "hu554.quickresto.ru",
+   QR_LOGIN: process.env.QR_LOGIN ?? "",
+   QR_PASSWORD: process.env.QR_PASSWORD ?? "",
++  // Куда слать уведомления об открытии/закрытии смены. Если не задано —
++  // используется SHIFT_PHOTOS_CHAT_ID (пока обкатываем — личка), а если и его
++  // нет — общий STAFF_CHAT_ID.
++  QR_CHAT_ID: process.env.QR_CHAT_ID ?? "",
+   // Опрашиваем только в часы работы заведения, чтобы не дёргать Quick Resto
+   // впустую днём. Диапазон переходит через полночь (10..8) — с запасом на
+   // продления вечера до 6-7 утра, а не жёстко до 4:00.
+diff --git a/apps/bot/src/index.ts b/apps/bot/src/index.ts
+index 92cf475..367e72d 100644
+--- a/apps/bot/src/index.ts
++++ b/apps/bot/src/index.ts
+@@ -69,7 +69,7 @@ async function main() {
+   // ручное открытие/закрытие смены в мини-аппе, см. README и
+   // claude/quickresto-shift-integration.md в проекте.
+   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.QR_LOGIN && env.QR_PASSWORD) {
+-    const qrChatId = env.STAFF_CHAT_ID;
++    const qrChatId = env.QR_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
+     watchQuickRestoShifts(async (event) => {
+       const label = event.type === "opened" ? "Смена открыта" : "Смена закрыта";
+       const time = event.at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+diff --git a/apps/bot/src/quickresto.ts b/apps/bot/src/quickresto.ts
+index 28e9cee..3b6d6f7 100644
+--- a/apps/bot/src/quickresto.ts
++++ b/apps/bot/src/quickresto.ts
+@@ -253,12 +253,33 @@ async function closeVenueShift(supabase: SupabaseClient, shiftRowId: string, emp
+  * кто-нибудь не закроет её вручную в бэк-офисе — это ограничение источника
+  * данных, не самого опроса.
+  */
++interface LastKnownRecord {
++  startTime: number;
++  endTime: number;
++  isOpen: boolean;
++}
++
++async function safeNotify(onEvent: (event: QuickRestoShiftEvent) => void | Promise<void>, event: QuickRestoShiftEvent) {
++  try {
++    await onEvent(event);
++  } catch (err) {
++    // Ошибка отправки уведомления (например, sendMessage) не должна мешать
++    // остальному опросу — строка в shifts к этому моменту уже записана.
++    console.error("Quick Resto: не удалось обработать событие смены:", err);
++  }
++}
++
+ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => void | Promise<void>) {
+   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+ 
+   let employees: QuickRestoEmployee[] = [];
+   let employeesLoadedAt = 0;
+-  const openState = new Map<number, boolean>();
++  // Следим не за булевым "открыто/закрыто", а за самой записью смены
++  // (startTime как её идентификатор). Так не теряем переход, если сотрудник
++  // успел и открыть, и закрыть смену быстрее, чем между двумя опросами —
++  // булево сравнение "было/стало" такое просто не заметило бы.
++  const lastRecord = new Map<number, LastKnownRecord>();
++  const openEmployeeIds = new Set<number>();
+   let currentShiftRowId: string | null = null;
+   let warmedUp = false; // первый проход только запоминает состояние, событий не шлёт
+ 
+@@ -280,48 +301,51 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) =>
+       currentShiftRowId = await loadOpenShiftRowId(supabase);
+     }
+ 
+-    let anyOpenNow = false;
+-    let transitionToOpen: { employee: QuickRestoEmployee; at: number } | undefined;
+-    let transitionToClosed: { employee: QuickRestoEmployee; at: number } | undefined;
++    const events: { type: "opened" | "closed"; employee: QuickRestoEmployee; at: number }[] = [];
+ 
+     for (const employee of employees) {
+-      let status: Awaited<ReturnType<typeof fetchShiftStatus>>;
++      let current: Awaited<ReturnType<typeof fetchShiftStatus>>;
+       try {
+-        status = await fetchShiftStatus(employee.id);
++        current = await fetchShiftStatus(employee.id);
+       } catch (err) {
+         console.error(`Quick Resto: ошибка получения смены сотрудника ${employee.id}:`, err);
+         continue;
+       }
+-      const wasOpen = openState.get(employee.id) ?? false;
+-      const isOpen = status?.isOpen ?? false;
+-      openState.set(employee.id, isOpen);
+-
+-      if (isOpen) {
+-        anyOpenNow = true;
+-        if (!wasOpen && warmedUp) transitionToOpen = { employee, at: status!.startTime };
+-      } else if (wasOpen && warmedUp) {
+-        transitionToClosed = { employee, at: status?.endTime ?? Date.now() };
++      if (!current) continue;
++
++      const prior = lastRecord.get(employee.id);
++      if (warmedUp) {
++        if (!prior || prior.startTime !== current.startTime) {
++          // Новая запись смены с прошлого опроса — сотрудник открыл смену.
++          if (current.isOpen) {
++            events.push({ type: "opened", employee, at: current.startTime });
++          } else {
++            // Успел и открыть, и закрыть между двумя опросами — не теряем
++            // ни то, ни другое, оба события просто приходятся на этот тик.
++            events.push({ type: "opened", employee, at: current.startTime });
++            events.push({ type: "closed", employee, at: current.endTime });
++          }
++        } else if (prior.isOpen && !current.isOpen) {
++          events.push({ type: "closed", employee, at: current.endTime });
++        }
+       }
+-    }
+ 
+-    if (warmedUp && anyOpenNow && !currentShiftRowId && transitionToOpen) {
+-      currentShiftRowId = await openVenueShift(supabase, transitionToOpen.employee, new Date(transitionToOpen.at));
+-      await onEvent({
+-        type: "opened",
+-        employee: transitionToOpen.employee,
+-        at: new Date(transitionToOpen.at),
+-      });
++      lastRecord.set(employee.id, { startTime: current.startTime, endTime: current.endTime, isOpen: current.isOpen });
++      if (current.isOpen) openEmployeeIds.add(employee.id);
++      else openEmployeeIds.delete(employee.id);
+     }
+ 
+-    if (warmedUp && !anyOpenNow && currentShiftRowId && transitionToClosed) {
+-      const rowId = currentShiftRowId;
+-      currentShiftRowId = null;
+-      await closeVenueShift(supabase, rowId, transitionToClosed.employee, new Date(transitionToClosed.at));
+-      await onEvent({
+-        type: "closed",
+-        employee: transitionToClosed.employee,
+-        at: new Date(transitionToClosed.at),
+-      });
++    events.sort((a, b) => a.at - b.at);
++    for (const event of events) {
++      if (event.type === "opened" && !currentShiftRowId) {
++        currentShiftRowId = await openVenueShift(supabase, event.employee, new Date(event.at));
++        await safeNotify(onEvent, { type: "opened", employee: event.employee, at: new Date(event.at) });
++      } else if (event.type === "closed" && currentShiftRowId && openEmployeeIds.size === 0) {
++        const rowId = currentShiftRowId;
++        currentShiftRowId = null;
++        await closeVenueShift(supabase, rowId, event.employee, new Date(event.at));
++        await safeNotify(onEvent, { type: "closed", employee: event.employee, at: new Date(event.at) });
++      }
+     }
+ 
+     warmedUp = true;
+-- 
+2.43.0
+

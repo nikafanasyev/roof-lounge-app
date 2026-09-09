@@ -1,0 +1,90 @@
+From 0f0bacf252672e59ea5abb05a3d5f5391d7630db Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Sun, 6 Sep 2026 18:04:30 +0000
+Subject: [PATCH 1/2] =?UTF-8?q?fix:=20=D0=BD=D0=B5=20=D1=81=D0=BB=D0=B0?=
+ =?UTF-8?q?=D1=82=D1=8C=20web=5Fapp-=D0=BA=D0=BD=D0=BE=D0=BF=D0=BA=D1=83?=
+ =?UTF-8?q?=20=D0=B2=20=D0=B3=D1=80=D1=83=D0=BF=D0=BF=D0=B0=D1=85=20(BUTTO?=
+ =?UTF-8?q?N=5FTYPE=5FINVALID)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Telegram разрешает inline-кнопку типа web_app только в личных сообщениях
+с ботом. /start, вызванный в групповом чате персонала, падал с
+400 BUTTON_TYPE_INVALID. Теперь в группах бот присылает обычную ссылку
+на личку, а кнопку открытия мини-аппа — только один на один.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BhZ45j4FFAfvtAGo4A4vw
+---
+ apps/bot/src/index.ts | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/apps/bot/src/index.ts b/apps/bot/src/index.ts
+index b971dca..0ff478b 100644
+--- a/apps/bot/src/index.ts
++++ b/apps/bot/src/index.ts
+@@ -5,7 +5,14 @@ import { watchServiceCalls, watchShiftPhotos } from "./notify";
+ const bot = new Bot(env.BOT_TOKEN);
+ 
+ bot.command("start", async (ctx) => {
+-  const keyboard = new InlineKeyboard().webApp("Открыть Roof Lounge", env.MINI_APP_URL);
++  // Кнопка типа web_app (открытие мини-аппа прямо в Telegram) разрешена Telegram
++  // только в личных сообщениях с ботом — в группах API отвечает BUTTON_TYPE_INVALID.
++  // Поэтому в группах даём обычную ссылку в личку с ботом, а мини-апп открываем
++  // кнопкой web_app только один на один.
++  const isPrivate = ctx.chat.type === "private";
++  const keyboard = isPrivate
++    ? new InlineKeyboard().webApp("Открыть Roof Lounge", env.MINI_APP_URL)
++    : new InlineKeyboard().url("Написать боту в личку", `https://t.me/${ctx.me.username}?start=open`);
+   await ctx.reply(
+     "Добро пожаловать в Roof Lounge.\n\nЗдесь — сервис за столом и рабочие инструменты для персонала. Заказ и оплата — в основном боте заведения.",
+     { reply_markup: keyboard },
+-- 
+2.43.0
+
+
+From 40b334f836bdab55f4897578b51f5aabb05067ec Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Sun, 6 Sep 2026 18:34:10 +0000
+Subject: [PATCH 2/2] =?UTF-8?q?fix:=20=D1=83=D0=B1=D1=80=D0=B0=D1=82=D1=8C?=
+ =?UTF-8?q?=20=D0=B4=D1=83=D0=B1=D0=BB=D0=B8=D1=80=D1=83=D1=8E=D1=89=D0=B8?=
+ =?UTF-8?q?=D0=B9=20=D0=BF=D1=83=D0=BD=D0=BA=D1=82=20=D1=87=D0=B5=D0=BA-?=
+ =?UTF-8?q?=D0=BB=D0=B8=D1=81=D1=82=D0=B0=20=C2=AB=D0=A4=D0=BE=D1=82=D0=BE?=
+ =?UTF-8?q?=20=D0=BA=D0=BE=D0=BD=D1=82=D1=80=D0=BE=D0=BB=D1=8C=D0=BD=D1=8B?=
+ =?UTF-8?q?=D1=85=20=D0=B7=D0=BE=D0=BD=20=D1=81=D0=B4=D0=B5=D0=BB=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=BE=C2=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Пункт был отдельным ручным чекбоксом, никак не связанным с реальной
+съёмкой фото через камеру — из-за одинакового названия сотрудник не
+понимал, что нужно отметить его вручную дополнительно к самой съёмке,
+кнопка «Закрыть смену» оставалась недоступна. Фото по-прежнему
+обязательно для закрытия смены — это гарантирует состояние closePhoto
+в Shift.tsx, отдельный пункт чек-листа был просто избыточен.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BhZ45j4FFAfvtAGo4A4vw
+---
+ apps/miniapp/src/data/seed.ts | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/apps/miniapp/src/data/seed.ts b/apps/miniapp/src/data/seed.ts
+index 835eaf6..ef43ee1 100644
+--- a/apps/miniapp/src/data/seed.ts
++++ b/apps/miniapp/src/data/seed.ts
+@@ -110,7 +110,6 @@ export const seedShift: Shift = {
+   closeChecklist: [
+     { id: "cc1", label: "Зал приведён в порядок", done: false },
+     { id: "cc2", label: "Касса сверена", done: false },
+-    { id: "cc3", label: "Фото контрольных зон сделано", done: false },
+   ],
+ };
+ 
+-- 
+2.43.0
+
