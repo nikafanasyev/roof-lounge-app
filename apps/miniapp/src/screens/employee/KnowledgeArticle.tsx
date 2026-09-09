@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router-dom";
 import { getKnowledgeArticle } from "@/data/repo";
+import KnowledgeBody from "@/components/KnowledgeBody";
 
 export default function KnowledgeArticleScreen() {
   const { articleId = "" } = useParams();
@@ -22,9 +23,7 @@ export default function KnowledgeArticleScreen() {
         {article.category}
       </div>
       <h1>{article.title}</h1>
-      <div className="card" style={{ whiteSpace: "pre-wrap" }}>
-        {article.body}
-      </div>
+      <KnowledgeBody body={article.body} />
     </div>
   );
 }
