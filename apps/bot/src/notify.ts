@@ -8,6 +8,7 @@ interface ServiceCallEvent {
 
 interface ShiftPhotoEvent {
   kind: "open" | "close";
+  role: "bar" | "hookah";
   staffName: string | null;
   /** Скачивает байты фото из Storage. Вызывающий сам решает, что с ними делать. */
   downloadPhoto: () => Promise<Buffer | null>;
@@ -115,10 +116,17 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "shift_photo_uploads" },
       async (payload) => {
-        const row = payload.new as { id: string; kind: "open" | "close"; storage_path: string; staff_name: string | null };
+        const row = payload.new as {
+          id: string;
+          kind: "open" | "close";
+          role: "bar" | "hookah";
+          storage_path: string;
+          staff_name: string | null;
+        };
         try {
           await onEvent({
             kind: row.kind,
+            role: row.role,
             staffName: row.staff_name,
             downloadPhoto: async () => {
               const { data, error } = await supabase.storage.from("shift-photos").download(row.storage_path);

@@ -9,30 +9,88 @@ import {
   toggleOpenChecklistItem,
 } from "@/data/repo";
 import CameraCapture from "@/components/CameraCapture";
+import type { ChecklistItem, StaffRole } from "@/types";
 
 const CURRENT_STAFF_NAME = "Никита Афанасьев"; // заглушка до подключения Telegram-авторизации
+
+// Пока нет привязки роли к сотруднику через График — сотрудник выбирает сам,
+// за что отвечает в эту смену (бар или кальяны), и это запоминается на
+// устройстве. Когда появится распределение ролей в Графике — заменить на
+// значение оттуда.
+const ROLE_STORAGE_KEY = "roofLounge.staffRole";
+const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
+
+function loadStoredRole(): StaffRole {
+  const stored = localStorage.getItem(ROLE_STORAGE_KEY);
+  return stored === "bar" || stored === "hookah" ? stored : "bar";
+}
 
 interface CapturedPhoto {
   url: string;
   blob: Blob;
 }
 
+/** Чек-лист с пунктами, сгруппированными по секции (если она задана в данных). */
+function ChecklistGroups({
+  items,
+  onToggle,
+}: {
+  items: ChecklistItem[];
+  onToggle: (itemId: string) => void;
+}) {
+  const groups: { section?: string; items: ChecklistItem[] }[] = [];
+  for (const item of items) {
+    const last = groups[groups.length - 1];
+    if (last && last.section === item.section) {
+      last.items.push(item);
+    } else {
+      groups.push({ section: item.section, items: [item] });
+    }
+  }
+  return (
+    <>
+      {groups.map((group, idx) => (
+        <div key={idx}>
+          {group.section && (
+            <div className="eyebrow" style={{ marginTop: idx === 0 ? 0 : 12 }}>
+              {group.section}
+            </div>
+          )}
+          {group.items.map((item) => (
+            <label key={item.id} className="card card-row" style={{ cursor: "pointer" }}>
+              <span>{item.label}</span>
+              <input type="checkbox" checked={item.done} onChange={() => onToggle(item.id)} />
+            </label>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function Shift() {
   const shift = useStore(shiftStore);
+  const [role, setRole] = useState<StaffRole>(loadStoredRole);
   const [handoverNote, setHandoverNote] = useState("");
   const [openPhoto, setOpenPhoto] = useState<CapturedPhoto | undefined>();
   const [closePhoto, setClosePhoto] = useState<CapturedPhoto | undefined>();
 
-  const openReady = isChecklistComplete(shift.openChecklist) && !!openPhoto;
-  const closeReady = isChecklistComplete(shift.closeChecklist) && !!closePhoto;
+  const roleShift = role === "bar" ? shift.bar : shift.hookah;
 
-  // Статус смены теперь приходит из Quick Resto (ПИН на терминале) и
-  // становится "открыта" сразу, как только сотрудник вошёл — то есть до того,
-  // как он успевает отметить чек-лист открытия в приложении. Поэтому какой
-  // чек-лист показывать решаем не по одному статусу, а ещё и по тому, отмечен
-  // ли уже чек-лист открытия: пока не отмечен — показываем открытие, даже
-  // если Quick Resto уже считает смену открытой.
-  const openChecklistDone = isChecklistComplete(shift.openChecklist);
+  function selectRole(next: StaffRole) {
+    setRole(next);
+    localStorage.setItem(ROLE_STORAGE_KEY, next);
+  }
+
+  const openReady = isChecklistComplete(roleShift.openChecklist) && !!openPhoto;
+  const closeReady = isChecklistComplete(roleShift.closeChecklist) && !!closePhoto;
+
+  // Статус смены приходит из Quick Resto (ПИН на терминале) и становится
+  // "открыта" сразу, как только кто-то из сотрудников вошёл — то есть до
+  // того, как каждый успевает отметить свой чек-лист открытия в приложении.
+  // Поэтому какой чек-лист показывать решаем не по одному статусу, а ещё и
+  // по тому, отмечен ли уже чек-лист открытия выбранной роли.
+  const openChecklistDone = isChecklistComplete(roleShift.openChecklist);
   const showOpenChecklist = shift.status === "closed" || !openChecklistDone;
 
   return (
@@ -54,15 +112,26 @@ export default function Shift() {
         )}
       </div>
 
+      <div className="eyebrow" style={{ marginTop: 4 }}>
+        Моя зона на этой смене
+      </div>
+      <div className="card-row" style={{ gap: 8 }}>
+        {(Object.keys(ROLE_LABELS) as StaffRole[]).map((r) => (
+          <button
+            key={r}
+            className={`btn ${role === r ? "primary" : ""}`}
+            style={{ flex: 1 }}
+            onClick={() => selectRole(r)}
+          >
+            {ROLE_LABELS[r]}
+          </button>
+        ))}
+      </div>
+
       {showOpenChecklist && (
         <>
-          <h2>Чек-лист открытия</h2>
-          {shift.openChecklist.map((item) => (
-            <label key={item.id} className="card card-row" style={{ cursor: "pointer" }}>
-              <span>{item.label}</span>
-              <input type="checkbox" checked={item.done} onChange={() => toggleOpenChecklistItem(item.id)} />
-            </label>
-          ))}
+          <h2>Чек-лист открытия — {ROLE_LABELS[role]}</h2>
+          <ChecklistGroups items={roleShift.openChecklist} onToggle={(id) => toggleOpenChecklistItem(role, id)} />
 
           <div className="eyebrow" style={{ marginTop: 8 }}>
             Фото на месте (со штампом даты и времени, уходит руководителю в Telegram)
@@ -78,24 +147,19 @@ export default function Shift() {
             style={{ marginTop: 12 }}
             disabled={!openReady}
             onClick={() => {
-              openShift(CURRENT_STAFF_NAME, openPhoto?.blob);
+              openShift(role, CURRENT_STAFF_NAME, openPhoto?.blob);
               setOpenPhoto(undefined);
             }}
           >
-            {openReady ? "Отправить" : !isChecklistComplete(shift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+            {openReady ? "Отправить" : !isChecklistComplete(roleShift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
           </button>
         </>
       )}
 
       {shift.status === "open" && !showOpenChecklist && (
         <>
-          <h2>Чек-лист закрытия</h2>
-          {shift.closeChecklist.map((item) => (
-            <label key={item.id} className="card card-row" style={{ cursor: "pointer" }}>
-              <span>{item.label}</span>
-              <input type="checkbox" checked={item.done} onChange={() => toggleCloseChecklistItem(item.id)} />
-            </label>
-          ))}
+          <h2>Чек-лист закрытия — {ROLE_LABELS[role]}</h2>
+          <ChecklistGroups items={roleShift.closeChecklist} onToggle={(id) => toggleCloseChecklistItem(role, id)} />
 
           <div className="eyebrow" style={{ marginTop: 8 }}>
             Фото контрольных зон (со штампом даты и времени, уходит руководителю в Telegram)
@@ -120,12 +184,12 @@ export default function Shift() {
             className="btn primary"
             disabled={!closeReady}
             onClick={() => {
-              closeShift(CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto?.blob);
+              closeShift(role, CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto?.blob);
               setClosePhoto(undefined);
               setHandoverNote("");
             }}
           >
-            {closeReady ? "Отправить" : !isChecklistComplete(shift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+            {closeReady ? "Отправить" : !isChecklistComplete(roleShift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
           </button>
         </>
       )}

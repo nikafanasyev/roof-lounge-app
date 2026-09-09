@@ -28,12 +28,14 @@ import type {
   PayoutRecord,
   Problem,
   ProblemCategory,
+  RoleChecklists,
   ScheduleEntry,
   ServiceCall,
   ServiceCallType,
   Shift,
   ShiftPayrollEntry,
   StaffProfile,
+  StaffRole,
   Task,
 } from "@/types";
 import {
@@ -257,15 +259,30 @@ async function loadShift() {
     .maybeSingle();
   if (error) return logSyncError("loadShift", error);
   if (!data) return; // смен ещё не было — оставляем закрытую заготовку из seed
+  const prev = shiftStore.get();
   shiftStore.set({
     id: data.id,
     status: data.closed_at ? "closed" : data.opened_at ? "open" : "closed",
     openedBy: data.opened_by ? staffNameById.get(data.opened_by) ?? DEMO_STAFF_NAME : undefined,
     openedAt: data.opened_at ?? undefined,
-    openChecklist: data.open_checklist?.length ? data.open_checklist : shiftStore.get().openChecklist,
     closedBy: data.closed_by ? staffNameById.get(data.closed_by) ?? DEMO_STAFF_NAME : undefined,
     closedAt: data.closed_at ?? undefined,
-    closeChecklist: data.close_checklist?.length ? data.close_checklist : shiftStore.get().closeChecklist,
+    bar: {
+      openChecklist: data.bar_open_checklist?.length ? data.bar_open_checklist : prev.bar.openChecklist,
+      closeChecklist: data.bar_close_checklist?.length ? data.bar_close_checklist : prev.bar.closeChecklist,
+      openedBy: data.bar_opened_by ? staffNameById.get(data.bar_opened_by) ?? DEMO_STAFF_NAME : undefined,
+      openedAt: data.bar_opened_at ?? undefined,
+      closedBy: data.bar_closed_by ? staffNameById.get(data.bar_closed_by) ?? DEMO_STAFF_NAME : undefined,
+      closedAt: data.bar_closed_at ?? undefined,
+    },
+    hookah: {
+      openChecklist: data.hookah_open_checklist?.length ? data.hookah_open_checklist : prev.hookah.openChecklist,
+      closeChecklist: data.hookah_close_checklist?.length ? data.hookah_close_checklist : prev.hookah.closeChecklist,
+      openedBy: data.hookah_opened_by ? staffNameById.get(data.hookah_opened_by) ?? DEMO_STAFF_NAME : undefined,
+      openedAt: data.hookah_opened_at ?? undefined,
+      closedBy: data.hookah_closed_by ? staffNameById.get(data.hookah_closed_by) ?? DEMO_STAFF_NAME : undefined,
+      closedAt: data.hookah_closed_at ?? undefined,
+    },
     handoverNote: data.handover_note ?? undefined,
   });
 }
@@ -553,11 +570,15 @@ export function getShift(): Shift {
 // проекте. Отсюда мы больше НЕ пишем opened_by/opened_at/closed_by/closed_at,
 // чтобы не перезатирать то, что записал бот, — только чек-листы и заметку
 // передачи смены, точечными update по id уже существующей строки.
-function syncChecklist(field: "open_checklist" | "close_checklist", items: ChecklistItem[]) {
+function roleChecklistColumn(role: StaffRole, kind: "open" | "close"): string {
+  return `${role}_${kind}_checklist`;
+}
+
+function syncChecklist(role: StaffRole, kind: "open" | "close", items: ChecklistItem[]) {
   if (!isSupabaseConfigured || !supabase) return;
   supabase
     .from("shifts")
-    .update({ [field]: items })
+    .update({ [roleChecklistColumn(role, kind)]: items })
     .eq("id", shiftStore.get().id)
     .then(({ error }) => error && logSyncError("syncChecklist", error));
 }
@@ -577,10 +598,10 @@ function syncHandoverNote(note: string) {
  * её через Realtime, пересылает фото руководителю в Telegram и сразу удаляет и
  * файл, и запись. Без Supabase — просто no-op, фото живёт только в памяти вкладки.
  */
-function uploadAndNotifyShiftPhoto(kind: "open" | "close", blob: Blob, staffName: string) {
+function uploadAndNotifyShiftPhoto(role: StaffRole, kind: "open" | "close", blob: Blob, staffName: string) {
   if (!isSupabaseConfigured || !supabase) return;
   const shiftId = shiftStore.get().id;
-  const path = `${shiftId}/${kind}-${Date.now()}.jpg`;
+  const path = `${shiftId}/${role}-${kind}-${Date.now()}.jpg`;
   supabase.storage
     .from("shift-photos")
     .upload(path, blob, { contentType: "image/jpeg" })
@@ -588,25 +609,39 @@ function uploadAndNotifyShiftPhoto(kind: "open" | "close", blob: Blob, staffName
       if (uploadError) return logSyncError("uploadShiftPhoto", uploadError);
       supabase!
         .from("shift_photo_uploads")
-        .insert({ shift_id: shiftId, kind, storage_path: path, staff_name: staffName })
+        .insert({ shift_id: shiftId, kind, role, storage_path: path, staff_name: staffName })
         .then(({ error }) => error && logSyncError("shiftPhotoUpload:insert", error));
     });
 }
 
-export function toggleOpenChecklistItem(itemId: string) {
-  shiftStore.update((shift) => ({
-    ...shift,
-    openChecklist: shift.openChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
-  }));
-  syncChecklist("open_checklist", shiftStore.get().openChecklist);
+function roleChecklists(shift: Shift, role: StaffRole): RoleChecklists {
+  return role === "bar" ? shift.bar : shift.hookah;
 }
 
-export function toggleCloseChecklistItem(itemId: string) {
+export function toggleOpenChecklistItem(role: StaffRole, itemId: string) {
   shiftStore.update((shift) => ({
     ...shift,
-    closeChecklist: shift.closeChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
+    [role]: {
+      ...roleChecklists(shift, role),
+      openChecklist: roleChecklists(shift, role).openChecklist.map((i) =>
+        i.id === itemId ? { ...i, done: !i.done } : i,
+      ),
+    },
   }));
-  syncChecklist("close_checklist", shiftStore.get().closeChecklist);
+  syncChecklist(role, "open", roleChecklists(shiftStore.get(), role).openChecklist);
+}
+
+export function toggleCloseChecklistItem(role: StaffRole, itemId: string) {
+  shiftStore.update((shift) => ({
+    ...shift,
+    [role]: {
+      ...roleChecklists(shift, role),
+      closeChecklist: roleChecklists(shift, role).closeChecklist.map((i) =>
+        i.id === itemId ? { ...i, done: !i.done } : i,
+      ),
+    },
+  }));
+  syncChecklist(role, "close", roleChecklists(shiftStore.get(), role).closeChecklist);
 }
 
 /**
@@ -614,19 +649,19 @@ export function toggleCloseChecklistItem(itemId: string) {
  * Теперь статус смены целиком приходит из Quick Resto (см. комментарий у
  * syncChecklist выше) — здесь только отправляем фото открытия руководителю в
  * Telegram, чек-лист уже сохранён поштучно через toggleOpenChecklistItem.
- * Название и сигнатура оставлены как есть, чтобы не трогать Shift.tsx.
+ * Теперь принимает роль (бар/кальяны), т.к. у каждой роли свой чек-лист и своё фото.
  */
-export function openShift(openedBy: string, photoBlob?: Blob) {
-  if (photoBlob) uploadAndNotifyShiftPhoto("open", photoBlob, openedBy);
+export function openShift(role: StaffRole, openedBy: string, photoBlob?: Blob) {
+  if (photoBlob) uploadAndNotifyShiftPhoto(role, "open", photoBlob, openedBy);
 }
 
 /** Аналогично openShift — статус закрытия смены тоже теперь из Quick Resto. */
-export function closeShift(closedBy: string, handoverNote?: string, photoBlob?: Blob) {
+export function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlob?: Blob) {
   if (handoverNote) {
     shiftStore.update((shift) => ({ ...shift, handoverNote }));
     syncHandoverNote(handoverNote);
   }
-  if (photoBlob) uploadAndNotifyShiftPhoto("close", photoBlob, closedBy);
+  if (photoBlob) uploadAndNotifyShiftPhoto(role, "close", photoBlob, closedBy);
 }
 
 export function isChecklistComplete(items: ChecklistItem[]): boolean {

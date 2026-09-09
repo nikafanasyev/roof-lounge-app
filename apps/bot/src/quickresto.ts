@@ -172,23 +172,84 @@ function isOperatingHours(date: Date, startHour: number, endHour: number): boole
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseClient = any;
 
-// Те же пункты, что и в дефолтной заготовке apps/miniapp/src/data/seed.ts
-// (seedShift.openChecklist/closeChecklist) — держать в синхроне вручную,
-// общего пакета между miniapp и bot сейчас нет. Новую строку смены создаём
-// сразу с этими пунктами (done: false), а не пустыми массивами: иначе
-// мини-апп при первой загрузке подставлял бы то, что случайно было в его
-// локальном сторе (например, уже отмеченный чек-лист с прошлой смены), и
-// экран открытия мог бы решить, что чек-лист уже пройден.
-const DEFAULT_OPEN_CHECKLIST = [
-  { id: "oc1", label: "Зал готов к приёму гостей", done: false },
-  { id: "oc2", label: "Оборудование проверено", done: false },
-  { id: "oc3", label: "Касса и терминалы работают", done: false },
-  { id: "oc4", label: "Санузлы убраны", done: false },
-  { id: "oc5", label: "Расходники на месте", done: false },
+// Те же пункты, что и в дефолтных заготовках apps/miniapp/src/data/seed.ts
+// (BAR_OPEN_CHECKLIST/BAR_CLOSE_CHECKLIST/HOOKAH_OPEN_CHECKLIST/HOOKAH_CLOSE_CHECKLIST)
+// — держать в синхроне вручную, общего пакета между miniapp и bot сейчас нет.
+// Новую строку смены создаём сразу с этими пунктами по каждой роли (done:
+// false), а не пустыми массивами: иначе мини-апп при первой загрузке
+// подставлял бы то, что случайно было в его локальном сторе (например, уже
+// отмеченный чек-лист с прошлой смены), и экран открытия мог бы решить, что
+// чек-лист уже пройден. Полный текст пунктов — см. seed.ts, здесь только id
+// и label, чтобы файл не раздувался; главное, чтобы id совпадали построчно.
+const DEFAULT_BAR_OPEN_CHECKLIST = [
+  { id: "bar-o-1", section: "Подготовка зала", label: "Включить свет, вытяжку, приток, термопот, кофемашину, музыку (отрегулировать громкость во втором зале), лампочки, стены во 2 зале", done: false },
+  { id: "bar-o-2", section: "Подготовка зала", label: "Проверить закрытие предыдущей смены (чистота диванов, столов, меню, ламп и т.д.), убрать все недочёты", done: false },
+  { id: "bar-o-3", section: "Подготовка зала", label: "Проверить часы и распределить по подразделениям", done: false },
+  { id: "bar-o-4", section: "Подготовка зала", label: "Протереть столы на веранде", done: false },
+  { id: "bar-o-5", section: "Открытие кассовой смены", label: "Пересчитать наличные в кассе", done: false },
+  { id: "bar-o-6", section: "Открытие кассовой смены", label: "Открыть кассовую смену на планшете", done: false },
+  { id: "bar-o-7", section: "Открытие рабочей зоны", label: "Проверка рабочей техники: льдогенератор, холодильник, кофемашина, термопот", done: false },
+  { id: "bar-o-8", section: "Открытие рабочей зоны", label: "Пополнить всё необходимое для смены: пюре, сиропы, фрукты, алкоголь, чай и т.д.", done: false },
+  { id: "bar-o-9", section: "Открытие рабочей зоны", label: "Проверить заполнение холодильника с напитками", done: false },
+  { id: "bar-o-10", section: "Открытие рабочей зоны", label: "Подготовить сервировку (салфетки для зала, минажи для веранды, приборы)", done: false },
+  { id: "bar-o-11", section: "Открытие рабочей зоны", label: "Составить заказ на Сбер", done: false },
+  { id: "bar-o-12", section: "Контроль бронирований", label: "Проверить рабочий телефон (звук, уведомления, работу ВПН)", done: false },
+  { id: "bar-o-13", section: "Контроль бронирований", label: "Проверить планшет с системой бронирования", done: false },
+  { id: "bar-o-14", section: "Контроль бронирований", label: "Подтвердить новые брони, внести все бронирования в систему", done: false },
+  { id: "bar-o-15", section: "Выполнение тех. задач", label: "Выполнить техническую задачу по графику дня (пн — морозилка, вт — термопот, ср — холодильник/ледген, чт — полки с посудой, пт — верхние полки, вс — барная станция/разморозить морозилку; каждый второй день — зарядка лампочек) и отправить фото в чат", done: false },
 ];
-const DEFAULT_CLOSE_CHECKLIST = [
-  { id: "cc1", label: "Зал приведён в порядок", done: false },
-  { id: "cc2", label: "Касса сверена", done: false },
+const DEFAULT_BAR_CLOSE_CHECKLIST = [
+  { id: "bar-c-1", section: "Закрытие рабочей зоны", label: "Заполнить термопот", done: false },
+  { id: "bar-c-2", section: "Закрытие рабочей зоны", label: "Замыть кофемашину", done: false },
+  { id: "bar-c-3", section: "Закрытие рабочей зоны", label: "Замыть весь рабочий инвентарь", done: false },
+  { id: "bar-c-4", section: "Закрытие рабочей зоны", label: "Протереть холодильник, ледогенератор, кофемашину и т.д.", done: false },
+  { id: "bar-c-5", section: "Закрытие рабочей зоны", label: "Замыть раковину, барную станцию", done: false },
+  { id: "bar-c-6", section: "Закрытие рабочей зоны", label: "Выполнить тех. задачу дня", done: false },
+  { id: "bar-c-7", section: "Закрытие рабочей зоны", label: "Сфотографировать рабочую зону и отправить в чат", done: false },
+  { id: "bar-c-8", section: "Проверка закрытия зала", label: "Диваны чистые", done: false },
+  { id: "bar-c-9", section: "Проверка закрытия зала", label: "Столы чистые", done: false },
+  { id: "bar-c-10", section: "Проверка закрытия зала", label: "Салфетницы заполнены", done: false },
+  { id: "bar-c-11", section: "Проверка закрытия зала", label: "Холодильник заполнен", done: false },
+  { id: "bar-c-12", section: "Закрытие кассовой смены", label: "Сверить данные терминала и ФР2", done: false },
+  { id: "bar-c-13", section: "Закрытие кассовой смены", label: "Пересчитать наличные в кассе", done: false },
+  { id: "bar-c-14", section: "Закрытие кассовой смены", label: "Провести сверку итогов", done: false },
+  { id: "bar-c-15", section: "Закрытие кассовой смены", label: "Закрыть кассовую смену на планшете", done: false },
+  { id: "bar-c-16", section: "Закрытие кассовой смены", label: "Отправить отчёт по смене с внесением всех расходов (фото отчётов по ФР2 и виртуалке, сверка итогов, текстовая часть: дата, выручка, безналичные, наличные, расходы, внесение, наличные в кассе)", done: false },
+  { id: "bar-c-17", section: "Поставить технику на зарядку", label: "Телефон", done: false },
+  { id: "bar-c-18", section: "Поставить технику на зарядку", label: "2 планшета", done: false },
+  { id: "bar-c-19", section: "Поставить технику на зарядку", label: "Часы зал / веранда", done: false },
+  { id: "bar-c-20", section: "Поставить технику на зарядку", label: "Лампы (каждый второй день)", done: false },
+  { id: "bar-c-21", section: "Закрытие заведения", label: "Выключить приток, вытяжку", done: false },
+  { id: "bar-c-22", section: "Закрытие заведения", label: "Выключить лампочки, стены в зале", done: false },
+  { id: "bar-c-23", section: "Закрытие заведения", label: "Выключить музыку", done: false },
+  { id: "bar-c-24", section: "Закрытие заведения", label: "Выключить свет в щитке", done: false },
+  { id: "bar-c-25", section: "Закрытие заведения", label: "Закрыть заведение и оставить ключ", done: false },
+];
+const DEFAULT_HOOKAH_OPEN_CHECKLIST = [
+  { id: "hookah-o-1", label: "Плита включена", done: false },
+  { id: "hookah-o-2", label: "Кальянная станция/калауды чистые, по необходимости — исправить", done: false },
+  { id: "hookah-o-3", label: "Проверить количество углей/мундштуков и т.п.", done: false },
+  { id: "hookah-o-4", label: "Распаковать угли в достаточном количестве", done: false },
+  { id: "hookah-o-5", label: "Мундштуки на столах заполнены", done: false },
+  { id: "hookah-o-6", label: "Распаковать табаки по контейнерам (в случае необходимости)", done: false },
+  { id: "hookah-o-7", label: "Проверить количество фруктов (минимальный остаток — 2 грейпфрута)", done: false },
+  { id: "hookah-o-8", label: "Опустошить ведро с использованными углями по необходимости", done: false },
+];
+const DEFAULT_HOOKAH_CLOSE_CHECKLIST = [
+  { id: "hookah-c-1", label: "Плита для углей выключена", done: false },
+  { id: "hookah-c-2", label: "Расставить кальяны по местам", done: false },
+  { id: "hookah-c-3", label: "Протереть все поверхности кальянной станции влажной тряпкой, затем сухой — без разводов", done: false },
+  { id: "hookah-c-4", label: "Промыть и просушить щипцы/ножи/шила/кадила", done: false },
+  { id: "hookah-c-5", label: "Протереть печь для углей", done: false },
+  { id: "hookah-c-6", label: "Протереть полки/контейнеры с табаком", done: false },
+  { id: "hookah-c-7", label: "Сложить пустые контейнеры на их место", done: false },
+  { id: "hookah-c-8", label: "Расставить чаши по форме на резинку для чаш", done: false },
+  { id: "hookah-c-9", label: "Вымыть раковину и зону вокруг неё", done: false },
+  { id: "hookah-c-10", label: "Промыть все шланги с мундштуками, протереть их без разводов", done: false },
+  { id: "hookah-c-11", label: "Залить водой использованные угли так, чтобы не осталось ни одного угля в ведре", done: false },
+  { id: "hookah-c-12", label: "Заполнить мундштучницы", done: false },
+  { id: "hookah-c-13", label: "Выбросить весь накопившийся мусор", done: false },
+  { id: "hookah-c-14", label: "Отправить фотоотчёт в чат о закрытии смены", done: false },
 ];
 
 // Сотрудник привязывается к staff по telegram_id — это то же самое значение,
@@ -251,8 +312,10 @@ async function openVenueShift(supabase: SupabaseClient, employee: QuickRestoEmpl
     .insert({
       opened_by: staffId,
       opened_at: openedAt.toISOString(),
-      open_checklist: DEFAULT_OPEN_CHECKLIST,
-      close_checklist: DEFAULT_CLOSE_CHECKLIST,
+      bar_open_checklist: DEFAULT_BAR_OPEN_CHECKLIST,
+      bar_close_checklist: DEFAULT_BAR_CLOSE_CHECKLIST,
+      hookah_open_checklist: DEFAULT_HOOKAH_OPEN_CHECKLIST,
+      hookah_close_checklist: DEFAULT_HOOKAH_CLOSE_CHECKLIST,
     })
     .select("id")
     .single();
