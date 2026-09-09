@@ -141,12 +141,15 @@ async function fetchEmployees(): Promise<QuickRestoEmployee[]> {
 
 // Признак открытой смены — startTime === endTime (Quick Resto дублирует старт
 // в конец, пока сотрудник не закрыл смену на терминале; не null, не "сейчас").
-async function fetchShiftStatus(employeeId: number): Promise<{ isOpen: boolean; startTime: number; endTime: number } | null> {
+//
+// Возвращаем ВЕСЬ список записей (отсортированный по возрастанию startTime),
+// а не только последнюю: если сотрудник успел открыть и закрыть смену
+// несколько раз подряд быстрее интервала опроса, на очередном тике видна
+// только эта история целиком — единственный способ не потерять промежуточные
+// переходы (сравнение "было/стало" по одной последней записи их тихо теряет).
+async function fetchShiftRecords(employeeId: number): Promise<WorkshiftStatementRaw[]> {
   const data = await qrFetchJson<{ ds?: { object: WorkshiftStatementRaw }[] }>(workshiftPath(employeeId));
-  const shifts = (data.ds ?? []).map((d) => d.object);
-  const last = shifts[shifts.length - 1];
-  if (!last) return null;
-  return { isOpen: last.startTime === last.endTime, startTime: last.startTime, endTime: last.endTime };
+  return (data.ds ?? []).map((d) => d.object).sort((a, b) => a.startTime - b.startTime);
 }
 
 function isOperatingHours(date: Date, startHour: number, endHour: number): boolean {
@@ -277,12 +280,6 @@ async function closeVenueShift(supabase: SupabaseClient, shiftRowId: string, emp
  * кто-нибудь не закроет её вручную в бэк-офисе — это ограничение источника
  * данных, не самого опроса.
  */
-interface LastKnownRecord {
-  startTime: number;
-  endTime: number;
-  isOpen: boolean;
-}
-
 async function safeNotify(onEvent: (event: QuickRestoShiftEvent) => void | Promise<void>, event: QuickRestoShiftEvent) {
   try {
     await onEvent(event);
@@ -298,11 +295,13 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
 
   let employees: QuickRestoEmployee[] = [];
   let employeesLoadedAt = 0;
-  // Следим не за булевым "открыто/закрыто", а за самой записью смены
-  // (startTime как её идентификатор). Так не теряем переход, если сотрудник
-  // успел и открыть, и закрыть смену быстрее, чем между двумя опросами —
-  // булево сравнение "было/стало" такое просто не заметило бы.
-  const lastRecord = new Map<number, LastKnownRecord>();
+  // Для каждого сотрудника помним startTime последней уже обработанной
+  // записи смены. На каждом тике сверяем это не с "последней" записью
+  // Quick Resto, а со ВСЕЙ историей: если сотрудник успел открыть и закрыть
+  // смену несколько раз за один интервал опроса, между двумя тиками
+  // накопится сразу несколько новых записей — сравнение только "было/стало"
+  // по последней из них потеряло бы все промежуточные переходы.
+  const lastProcessedStartTime = new Map<number, number>();
   const openEmployeeIds = new Set<number>();
   let currentShiftRowId: string | null = null;
   let warmedUp = false; // первый проход только запоминает состояние, событий не шлёт
@@ -339,34 +338,40 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
     const events: { type: "opened" | "closed"; employee: QuickRestoEmployee; at: number }[] = [];
 
     for (const employee of employees) {
-      let current: Awaited<ReturnType<typeof fetchShiftStatus>>;
+      let records: WorkshiftStatementRaw[];
       try {
-        current = await fetchShiftStatus(employee.id);
+        records = await fetchShiftRecords(employee.id);
       } catch (err) {
         console.error(`Quick Resto: ошибка получения смены сотрудника ${employee.id}:`, err);
         continue;
       }
-      if (!current) continue;
+      if (!records.length) continue;
 
-      const prior = lastRecord.get(employee.id);
-      if (warmedUp) {
-        if (!prior || prior.startTime !== current.startTime) {
-          // Новая запись смены с прошлого опроса — сотрудник открыл смену.
-          if (current.isOpen) {
-            events.push({ type: "opened", employee, at: current.startTime });
-          } else {
-            // Успел и открыть, и закрыть между двумя опросами — не теряем
-            // ни то, ни другое, оба события просто приходятся на этот тик.
-            events.push({ type: "opened", employee, at: current.startTime });
-            events.push({ type: "closed", employee, at: current.endTime });
-          }
-        } else if (prior.isOpen && !current.isOpen) {
-          events.push({ type: "closed", employee, at: current.endTime });
+      const lastProcessed = lastProcessedStartTime.get(employee.id);
+      // Все записи с прошлого опроса, которые ещё не обрабатывали — не только
+      // последняя. Если между тиками сотрудник открыл-закрыл смену несколько
+      // раз, здесь окажется сразу несколько записей, и все они должны попасть
+      // в events по порядку, а не только самая последняя.
+      const newRecords = warmedUp
+        ? records.filter((r) => lastProcessed === undefined || r.startTime > lastProcessed)
+        : [];
+
+      for (const record of newRecords) {
+        const isOpen = record.startTime === record.endTime;
+        events.push({ type: "opened", employee, at: record.startTime });
+        if (!isOpen) {
+          // Эта запись уже закрыта — либо сотрудник успел закрыть смену
+          // за то же время, что мы не опрашивали, либо (для более старых из
+          // нескольких новых записей на этом тике) она в принципе уже в
+          // прошлом. В обоих случаях закрытие тоже нужно отразить.
+          events.push({ type: "closed", employee, at: record.endTime });
         }
       }
 
-      lastRecord.set(employee.id, { startTime: current.startTime, endTime: current.endTime, isOpen: current.isOpen });
-      if (current.isOpen) openEmployeeIds.add(employee.id);
+      const last = records[records.length - 1];
+      lastProcessedStartTime.set(employee.id, last.startTime);
+      const stillOpen = last.startTime === last.endTime;
+      if (stillOpen) openEmployeeIds.add(employee.id);
       else openEmployeeIds.delete(employee.id);
     }
 
