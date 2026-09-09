@@ -253,12 +253,33 @@ async function closeVenueShift(supabase: SupabaseClient, shiftRowId: string, emp
  * кто-нибудь не закроет её вручную в бэк-офисе — это ограничение источника
  * данных, не самого опроса.
  */
+interface LastKnownRecord {
+  startTime: number;
+  endTime: number;
+  isOpen: boolean;
+}
+
+async function safeNotify(onEvent: (event: QuickRestoShiftEvent) => void | Promise<void>, event: QuickRestoShiftEvent) {
+  try {
+    await onEvent(event);
+  } catch (err) {
+    // Ошибка отправки уведомления (например, sendMessage) не должна мешать
+    // остальному опросу — строка в shifts к этому моменту уже записана.
+    console.error("Quick Resto: не удалось обработать событие смены:", err);
+  }
+}
+
 export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => void | Promise<void>) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
   let employees: QuickRestoEmployee[] = [];
   let employeesLoadedAt = 0;
-  const openState = new Map<number, boolean>();
+  // Следим не за булевым "открыто/закрыто", а за самой записью смены
+  // (startTime как её идентификатор). Так не теряем переход, если сотрудник
+  // успел и открыть, и закрыть смену быстрее, чем между двумя опросами —
+  // булево сравнение "было/стало" такое просто не заметило бы.
+  const lastRecord = new Map<number, LastKnownRecord>();
+  const openEmployeeIds = new Set<number>();
   let currentShiftRowId: string | null = null;
   let warmedUp = false; // первый проход только запоминает состояние, событий не шлёт
 
@@ -280,48 +301,51 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
       currentShiftRowId = await loadOpenShiftRowId(supabase);
     }
 
-    let anyOpenNow = false;
-    let transitionToOpen: { employee: QuickRestoEmployee; at: number } | undefined;
-    let transitionToClosed: { employee: QuickRestoEmployee; at: number } | undefined;
+    const events: { type: "opened" | "closed"; employee: QuickRestoEmployee; at: number }[] = [];
 
     for (const employee of employees) {
-      let status: Awaited<ReturnType<typeof fetchShiftStatus>>;
+      let current: Awaited<ReturnType<typeof fetchShiftStatus>>;
       try {
-        status = await fetchShiftStatus(employee.id);
+        current = await fetchShiftStatus(employee.id);
       } catch (err) {
         console.error(`Quick Resto: ошибка получения смены сотрудника ${employee.id}:`, err);
         continue;
       }
-      const wasOpen = openState.get(employee.id) ?? false;
-      const isOpen = status?.isOpen ?? false;
-      openState.set(employee.id, isOpen);
+      if (!current) continue;
 
-      if (isOpen) {
-        anyOpenNow = true;
-        if (!wasOpen && warmedUp) transitionToOpen = { employee, at: status!.startTime };
-      } else if (wasOpen && warmedUp) {
-        transitionToClosed = { employee, at: status?.endTime ?? Date.now() };
+      const prior = lastRecord.get(employee.id);
+      if (warmedUp) {
+        if (!prior || prior.startTime !== current.startTime) {
+          // Новая запись смены с прошлого опроса — сотрудник открыл смену.
+          if (current.isOpen) {
+            events.push({ type: "opened", employee, at: current.startTime });
+          } else {
+            // Успел и открыть, и закрыть между двумя опросами — не теряем
+            // ни то, ни другое, оба события просто приходятся на этот тик.
+            events.push({ type: "opened", employee, at: current.startTime });
+            events.push({ type: "closed", employee, at: current.endTime });
+          }
+        } else if (prior.isOpen && !current.isOpen) {
+          events.push({ type: "closed", employee, at: current.endTime });
+        }
       }
+
+      lastRecord.set(employee.id, { startTime: current.startTime, endTime: current.endTime, isOpen: current.isOpen });
+      if (current.isOpen) openEmployeeIds.add(employee.id);
+      else openEmployeeIds.delete(employee.id);
     }
 
-    if (warmedUp && anyOpenNow && !currentShiftRowId && transitionToOpen) {
-      currentShiftRowId = await openVenueShift(supabase, transitionToOpen.employee, new Date(transitionToOpen.at));
-      await onEvent({
-        type: "opened",
-        employee: transitionToOpen.employee,
-        at: new Date(transitionToOpen.at),
-      });
-    }
-
-    if (warmedUp && !anyOpenNow && currentShiftRowId && transitionToClosed) {
-      const rowId = currentShiftRowId;
-      currentShiftRowId = null;
-      await closeVenueShift(supabase, rowId, transitionToClosed.employee, new Date(transitionToClosed.at));
-      await onEvent({
-        type: "closed",
-        employee: transitionToClosed.employee,
-        at: new Date(transitionToClosed.at),
-      });
+    events.sort((a, b) => a.at - b.at);
+    for (const event of events) {
+      if (event.type === "opened" && !currentShiftRowId) {
+        currentShiftRowId = await openVenueShift(supabase, event.employee, new Date(event.at));
+        await safeNotify(onEvent, { type: "opened", employee: event.employee, at: new Date(event.at) });
+      } else if (event.type === "closed" && currentShiftRowId && openEmployeeIds.size === 0) {
+        const rowId = currentShiftRowId;
+        currentShiftRowId = null;
+        await closeVenueShift(supabase, rowId, event.employee, new Date(event.at));
+        await safeNotify(onEvent, { type: "closed", employee: event.employee, at: new Date(event.at) });
+      }
     }
 
     warmedUp = true;

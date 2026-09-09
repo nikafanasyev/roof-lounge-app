@@ -22,6 +22,10 @@ export const env = {
   QR_HOST: process.env.QR_HOST ?? "hu554.quickresto.ru",
   QR_LOGIN: process.env.QR_LOGIN ?? "",
   QR_PASSWORD: process.env.QR_PASSWORD ?? "",
+  // Куда слать уведомления об открытии/закрытии смены. Если не задано —
+  // используется SHIFT_PHOTOS_CHAT_ID (пока обкатываем — личка), а если и его
+  // нет — общий STAFF_CHAT_ID.
+  QR_CHAT_ID: process.env.QR_CHAT_ID ?? "",
   // Опрашиваем только в часы работы заведения, чтобы не дёргать Quick Resto
   // впустую днём. Диапазон переходит через полночь (10..8) — с запасом на
   // продления вечера до 6-7 утра, а не жёстко до 4:00.
