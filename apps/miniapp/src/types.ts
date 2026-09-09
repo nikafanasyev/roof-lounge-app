@@ -158,19 +158,23 @@ export interface StaffProfile {
   medicalBookExpiry?: string; // ISO-дата, до какого числа действует медкнижка
   hiredAt: string; // ISO-дата трудоустройства, отсюда считается выслуга лет
   salaryModel: SalaryModel;
+  role?: StaffRole; // основная зона ответственности на смене (бар/кальяны), для карточки в разделе "Сотрудники" у руководителя
 }
 
 export interface ShiftPayrollEntry {
   id: string;
+  staffId: string; // на чей счёт эта смена — раньше зарплата считалась только "для себя", теперь на сотрудника
   date: string; // ISO-дата смены
   revenue: number; // выручка за смену, ₽
   salary: number; // начислено сотруднику за смену, ₽
+  role?: StaffRole; // за какую зону отвечал в эту смену (для отображения в разделе "Сотрудники")
 }
 
 // Выплаты происходят не по сменам, а за период (например раз в две недели) —
 // отдельная запись на каждую фактическую выплату.
 export interface PayoutRecord {
   id: string;
+  staffId: string;
   date: string; // ISO-дата выплаты
   amount: number;
   note?: string; // например "за первую половину августа"
@@ -180,6 +184,7 @@ export type AdjustmentType = "fine" | "bonus";
 
 export interface Adjustment {
   id: string;
+  staffId: string;
   type: AdjustmentType;
   amount: number; // ₽, всегда положительное число
   reason: string;
