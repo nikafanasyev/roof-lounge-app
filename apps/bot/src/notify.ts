@@ -33,18 +33,33 @@ function resubscribable(label: string, createChannel: () => ReturnType<ReturnTyp
   let attempt = 0;
   function connect() {
     const channel = createChannel();
+    // Once we've decided to reconnect for THIS channel instance, ignore any
+    // further status callbacks it fires — calling channel.unsubscribe()
+    // synchronously from inside this callback re-triggers a CLOSED event on
+    // the same tick, which re-enters this same callback and recurses until
+    // the stack overflows. `settled` stops that re-entrancy, and the actual
+    // unsubscribe/reconnect happens later, outside this call stack.
+    let settled = false;
     channel.subscribe((status: string) => {
+      if (settled) return;
       if (status === "SUBSCRIBED") {
         attempt = 0;
         console.log(`Подписка на ${label} активна.`);
         return;
       }
       if (status === "CLOSED" || status === "TIMED_OUT" || status === "CHANNEL_ERROR") {
+        settled = true;
         attempt += 1;
         const delayMs = Math.min(30_000, 1_000 * 2 ** attempt);
         console.error(`Подписка на ${label} прервалась (${status}), переподключаюсь через ${delayMs}мс.`);
-        channel.unsubscribe();
-        setTimeout(connect, delayMs);
+        setTimeout(() => {
+          try {
+            channel.unsubscribe();
+          } catch (err) {
+            console.error(`Не удалось отписаться от старого канала ${label}:`, err);
+          }
+          connect();
+        }, delayMs);
       }
     });
   }
