@@ -295,13 +295,15 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
 
   let employees: QuickRestoEmployee[] = [];
   let employeesLoadedAt = 0;
-  // Для каждого сотрудника помним startTime последней уже обработанной
-  // записи смены. На каждом тике сверяем это не с "последней" записью
-  // Quick Resto, а со ВСЕЙ историей: если сотрудник успел открыть и закрыть
-  // смену несколько раз за один интервал опроса, между двумя тиками
-  // накопится сразу несколько новых записей — сравнение только "было/стало"
-  // по последней из них потеряло бы все промежуточные переходы.
-  const lastProcessedStartTime = new Map<number, number>();
+  // Для каждого сотрудника помним startTime и isOpen последней уже виденной
+  // записи смены. На каждом тике нужно поймать оба вида переходов:
+  //  1) та же самая запись (тот же startTime) сама закрылась — endTime стал
+  //     реальным, startTime не изменился;
+  //  2) появились новые записи (новый startTime) — сотрудник успел открыть
+  //     (и, может, уже закрыть) смену один или несколько раз с прошлого
+  //     опроса; при быстрых повторных ПИН-входах их может быть сразу
+  //     несколько, и все они должны попасть в events по порядку.
+  const lastKnown = new Map<number, { startTime: number; isOpen: boolean }>();
   const openEmployeeIds = new Set<number>();
   let currentShiftRowId: string | null = null;
   let warmedUp = false; // первый проход только запоминает состояние, событий не шлёт
@@ -347,30 +349,35 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
       }
       if (!records.length) continue;
 
-      const lastProcessed = lastProcessedStartTime.get(employee.id);
-      // Все записи с прошлого опроса, которые ещё не обрабатывали — не только
-      // последняя. Если между тиками сотрудник открыл-закрыл смену несколько
-      // раз, здесь окажется сразу несколько записей, и все они должны попасть
-      // в events по порядку, а не только самая последняя.
-      const newRecords = warmedUp
-        ? records.filter((r) => lastProcessed === undefined || r.startTime > lastProcessed)
-        : [];
+      const prior = lastKnown.get(employee.id);
 
-      for (const record of newRecords) {
-        const isOpen = record.startTime === record.endTime;
-        events.push({ type: "opened", employee, at: record.startTime });
-        if (!isOpen) {
-          // Эта запись уже закрыта — либо сотрудник успел закрыть смену
-          // за то же время, что мы не опрашивали, либо (для более старых из
-          // нескольких новых записей на этом тике) она в принципе уже в
-          // прошлом. В обоих случаях закрытие тоже нужно отразить.
-          events.push({ type: "closed", employee, at: record.endTime });
+      if (warmedUp) {
+        // 1) Та самая запись, что была открыта на прошлом опросе, могла
+        // закрыться сама по себе (startTime тот же, endTime стал реальным) —
+        // это не появится ни в какой "новой" записи, поэтому проверяем
+        // отдельно, до фильтрации по startTime.
+        if (prior?.isOpen) {
+          const same = records.find((r) => r.startTime === prior.startTime);
+          if (same && same.startTime !== same.endTime) {
+            events.push({ type: "closed", employee, at: same.endTime });
+          }
+        }
+
+        // 2) Любые записи новее прежней — один или несколько циклов
+        // открытие/закрытие, случившихся с прошлого опроса.
+        const newer = records.filter((r) => !prior || r.startTime > prior.startTime);
+        for (const record of newer) {
+          const isOpen = record.startTime === record.endTime;
+          events.push({ type: "opened", employee, at: record.startTime });
+          if (!isOpen) {
+            events.push({ type: "closed", employee, at: record.endTime });
+          }
         }
       }
 
       const last = records[records.length - 1];
-      lastProcessedStartTime.set(employee.id, last.startTime);
       const stillOpen = last.startTime === last.endTime;
+      lastKnown.set(employee.id, { startTime: last.startTime, isOpen: stillOpen });
       if (stillOpen) openEmployeeIds.add(employee.id);
       else openEmployeeIds.delete(employee.id);
     }
