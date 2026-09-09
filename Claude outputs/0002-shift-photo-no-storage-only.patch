@@ -1,0 +1,486 @@
+From 3d48aafe172a414dd3bdb89c25156a589dc764f5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Sun, 6 Sep 2026 14:34:38 +0000
+Subject: [PATCH] =?UTF-8?q?feat:=20=D1=84=D0=BE=D1=82=D0=BE=20=D1=81=D0=BC?=
+ =?UTF-8?q?=D0=B5=D0=BD=D1=8B=20=D0=BD=D0=B5=20=D1=85=D1=80=D0=B0=D0=BD?=
+ =?UTF-8?q?=D0=B8=D1=82=D1=81=D1=8F=20=E2=80=94=20=D0=BF=D0=B5=D1=80=D0=B5?=
+ =?UTF-8?q?=D1=81=D1=8B=D0=BB=D0=B0=D0=B5=D1=82=D1=81=D1=8F=20=D1=80=D1=83?=
+ =?UTF-8?q?=D0=BA=D0=BE=D0=B2=D0=BE=D0=B4=D0=B8=D1=82=D0=B5=D0=BB=D1=8E=20?=
+ =?UTF-8?q?=D0=B2=20Telegram=20=D0=B8=20=D1=83=D0=B4=D0=B0=D0=BB=D1=8F?=
+ =?UTF-8?q?=D0=B5=D1=82=D1=81=D1=8F?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Переделал схему хранения фото открытия/закрытия смены по фидбеку:
+вместо колонки в таблице shifts — Storage-бакет shift-photos +
+служебная таблица shift_photo_uploads. Бот подписан на неё через
+Supabase Realtime: скачивает фото, отправляет руководителю (или в
+отдельный чат — SHIFT_PHOTOS_CHAT_ID) через bot.api.sendPhoto, и сразу
+удаляет и файл, и запись — в базе не остаётся ничего, кроме самого
+факта пересылки в переписке Telegram.
+
+Миграция 0002 обновлена (бакет + таблица вместо колонок на shifts).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BhZ45j4FFAfvtAGo4A4vw
+---
+ README.md                                     |  8 +--
+ apps/bot/.env.example                         |  3 ++
+ apps/bot/src/env.ts                           |  2 +
+ apps/bot/src/index.ts                         | 21 +++++++-
+ apps/bot/src/notify.ts                        | 54 +++++++++++++++++++
+ apps/miniapp/src/components/CameraCapture.tsx | 25 ++++++---
+ apps/miniapp/src/data/repo.ts                 | 42 +++++++++------
+ apps/miniapp/src/screens/staff/Shift.tsx      | 38 +++++++------
+ apps/miniapp/src/types.ts                     |  5 +-
+ supabase/migrations/0002_shift_photos.sql     | 34 ++++++++++--
+ 10 files changed, 180 insertions(+), 52 deletions(-)
+
+diff --git a/README.md b/README.md
+index af99061..0a046ea 100644
+--- a/README.md
++++ b/README.md
+@@ -57,15 +57,17 @@ npm run dev
+ ## Что нужно от тебя, чтобы включить это
+ 
+ 1. **Проект в Supabase** (supabase.com, есть бесплатный тариф) — после создания:
+-   - выполнить `supabase/migrations/0001_init.sql` (через SQL Editor в дашборде или Supabase CLI);
++   - выполнить `supabase/migrations/0001_init.sql`, затем `0002_shift_photos.sql` (через SQL Editor в дашборде или Supabase CLI) — второй файл создаёт Storage-бакет `shift-photos` и служебную таблицу `shift_photo_uploads` для пересылки фото открытия/закрытия смены (см. ниже);
+    - взять `Project URL` и `anon public key` → в `apps/miniapp/.env` (см. `.env.example`) — как только они заданы, приложение само переключится в режим реальных данных;
+    - взять `service_role key` → в `apps/bot/.env` (см. `apps/bot/.env.example`) — этот ключ не должен попасть в мини-апп/фронтенд.
+-   - **Важно про RLS**: миграция включает Row Level Security на ключевых таблицах, но политик пока нет (см. комментарий в конце файла миграции) — с анонимным ключом без политик Supabase будет отклонять запросы. Для пилота на одном заведении проще всего временно отключить RLS на этих таблицах (`alter table ... disable row level security;` в SQL Editor) и вернуться к нормальным политикам перед тем, как в приложении появится настоящая авторизация гостей/персонала.
++   - **Важно про RLS**: миграция `0001` включает Row Level Security на ключевых таблицах, но политик пока нет (см. комментарий в конце файла) — с анонимным ключом без политик Supabase будет отклонять запросы. Для пилота на одном заведении проще всего временно отключить RLS на этих таблицах (`alter table ... disable row level security;` в SQL Editor) и вернуться к нормальным политикам перед тем, как в приложении появится настоящая авторизация гостей/персонала.
+ 2. **Токен Telegram-бота** от @BotFather (`/newbot`, если бота ещё нет) → `BOT_TOKEN` в `apps/bot/.env`.
+ 3. **Публичный URL мини-аппа** после деплоя (см. ниже) → `MINI_APP_URL` в `apps/bot/.env`, и туда же указать этот URL в настройках бота через @BotFather (`/mybots` → Bot Settings → Menu Button или Mini App).
+-4. **ID чата персонала** (группа в Telegram, куда должны падать уведомления о QR-вызовах) → `STAFF_CHAT_ID`.
++4. **ID чата персонала** (группа в Telegram, куда должны падать уведомления о QR-вызовах) → `STAFF_CHAT_ID`. Опционально: отдельный `SHIFT_PHOTOS_CHAT_ID`, если фото открытия/закрытия смены должны падать не в общий чат персонала, а руководителю лично или в отдельный чат — без него используется `STAFF_CHAT_ID`.
+ 5. **Доступ к API Quick Resto** — открытый вопрос из архитектурного документа (раздел 1.2): если у Roof Lounge есть интеграционный модуль Quick Resto, сводку руководителя можно будет пополнить выручкой/средним чеком автоматически.
+ 
++**Фото смены никогда не хранится**: миниапп загружает снимок в Storage-бакет `shift-photos`, бот (`apps/bot`) подхватывает его через Supabase Realtime, пересылает в Telegram и сразу удаляет и файл, и служебную запись — без запущенного бота фото просто зависнет в бакете до следующего запуска (не страшно, но лучше не оставлять бота выключенным надолго).
++
+ ## Деплой (ориентир, см. раздел 3 архитектурного документа)
+ 
+ - **apps/miniapp** → Vercel (или Netlify): `npm run build`, раздать `dist/`. Важно: настроить SPA-фолбэк (все пути → `index.html`), иначе прямые ссылки вида `/table/table-7` из QR-кодов будут отдавать 404 — на Vercel это `rewrites` в `vercel.json`, на Netlify — `_redirects`.
+diff --git a/apps/bot/.env.example b/apps/bot/.env.example
+index 2228f11..124c1c4 100644
+--- a/apps/bot/.env.example
++++ b/apps/bot/.env.example
+@@ -3,3 +3,6 @@ MINI_APP_URL=https://your-miniapp-domain.example
+ SUPABASE_URL=
+ SUPABASE_SERVICE_ROLE_KEY=
+ STAFF_CHAT_ID=
++# Необязательно: отдельный чат для фото открытия/закрытия смены.
++# Если не задать — фото падают в STAFF_CHAT_ID.
++SHIFT_PHOTOS_CHAT_ID=
+diff --git a/apps/bot/src/env.ts b/apps/bot/src/env.ts
+index 9944f28..7bc5a5b 100644
+--- a/apps/bot/src/env.ts
++++ b/apps/bot/src/env.ts
+@@ -12,4 +12,6 @@ export const env = {
+   SUPABASE_URL: process.env.SUPABASE_URL ?? "",
+   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+   STAFF_CHAT_ID: process.env.STAFF_CHAT_ID ?? "", // куда падают уведомления о QR-вызовах
++  // Куда пересылать фото открытия/закрытия смены. Если не задано — падают в STAFF_CHAT_ID.
++  SHIFT_PHOTOS_CHAT_ID: process.env.SHIFT_PHOTOS_CHAT_ID ?? "",
+ };
+diff --git a/apps/bot/src/index.ts b/apps/bot/src/index.ts
+index b083ccd..b971dca 100644
+--- a/apps/bot/src/index.ts
++++ b/apps/bot/src/index.ts
+@@ -1,6 +1,6 @@
+-import { Bot, InlineKeyboard } from "grammy";
++import { Bot, InlineKeyboard, InputFile } from "grammy";
+ import { env } from "./env";
+-import { watchServiceCalls } from "./notify";
++import { watchServiceCalls, watchShiftPhotos } from "./notify";
+ 
+ const bot = new Bot(env.BOT_TOKEN);
+ 
+@@ -40,6 +40,23 @@ async function main() {
+     console.log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STAFF_CHAT_ID не заданы — уведомления о вызовах выключены.");
+   }
+ 
++  // Фото открытия/закрытия смены: пересылаем руководителю (или в отдельный чат,
++  // если задан SHIFT_PHOTOS_CHAT_ID) и сразу стираем из Storage — не храним.
++  const shiftPhotosChatId = env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
++  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && shiftPhotosChatId) {
++    watchShiftPhotos(async (event) => {
++      const buffer = await event.downloadPhoto();
++      if (!buffer) return;
++      const label = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
++      await bot.api.sendPhoto(shiftPhotosChatId, new InputFile(buffer, "shift.jpg"), {
++        caption: `${label}${event.staffName ? ` — ${event.staffName}` : ""}`,
++      });
++    });
++    console.log("Слушаю shift_photo_uploads через Supabase Realtime — пересылка фото смен включена.");
++  } else {
++    console.log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STAFF_CHAT_ID (или SHIFT_PHOTOS_CHAT_ID) не заданы — пересылка фото смен выключена.");
++  }
++
+   await bot.start();
+ }
+ 
+diff --git a/apps/bot/src/notify.ts b/apps/bot/src/notify.ts
+index 35dcc64..1486c49 100644
+--- a/apps/bot/src/notify.ts
++++ b/apps/bot/src/notify.ts
+@@ -6,6 +6,13 @@ interface ServiceCallEvent {
+   table_number: number;
+ }
+ 
++interface ShiftPhotoEvent {
++  kind: "open" | "close";
++  staffName: string | null;
++  /** Скачивает байты фото из Storage. Вызывающий сам решает, что с ними делать. */
++  downloadPhoto: () => Promise<Buffer | null>;
++}
++
+ /**
+  * Подписывается на новые записи в service_calls через Supabase Realtime
+  * и вызывает onCall с уже подставленным номером стола.
+@@ -51,3 +58,50 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
+       }
+     });
+ }
++
++/**
++ * Подписывается на новые записи в shift_photo_uploads (миниапп кладёт туда
++ * строку сразу после загрузки фото в Storage-бакет shift-photos — см.
++ * supabase/migrations/0002_shift_photos.sql). Мы намеренно НЕ храним фото:
++ * onEvent должен переслать его (например, в Telegram), а после этого — вне
++ * зависимости от результата — файл и запись удаляются, чтобы фото нигде не
++ * оседало постоянно.
++ */
++export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Promise<void>) {
++  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
++
++  supabase
++    .channel("shift_photo_uploads_inserts")
++    .on(
++      "postgres_changes",
++      { event: "INSERT", schema: "public", table: "shift_photo_uploads" },
++      async (payload) => {
++        const row = payload.new as { id: string; kind: "open" | "close"; storage_path: string; staff_name: string | null };
++        try {
++          await onEvent({
++            kind: row.kind,
++            staffName: row.staff_name,
++            downloadPhoto: async () => {
++              const { data, error } = await supabase.storage.from("shift-photos").download(row.storage_path);
++              if (error || !data) {
++                console.error("Не удалось скачать фото смены:", error?.message);
++                return null;
++              }
++              return Buffer.from(await data.arrayBuffer());
++            },
++          });
++        } catch (err) {
++          console.error("Ошибка при обработке фото смены:", err);
++        } finally {
++          // Удаляем в любом случае — фото не должно оставаться ни в Storage, ни в таблице.
++          await supabase.storage.from("shift-photos").remove([row.storage_path]);
++          await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
++        }
++      },
++    )
++    .subscribe((status) => {
++      if (status === "SUBSCRIBED") {
++        console.log("Подписка на shift_photo_uploads активна.");
++      }
++    });
++}
+diff --git a/apps/miniapp/src/components/CameraCapture.tsx b/apps/miniapp/src/components/CameraCapture.tsx
+index 4a0d489..b238272 100644
+--- a/apps/miniapp/src/components/CameraCapture.tsx
++++ b/apps/miniapp/src/components/CameraCapture.tsx
+@@ -3,15 +3,17 @@ import { useRef, useState } from "react";
+ // Открывает камеру устройства (атрибут capture — на мобильных сразу запускает
+ // системную камеру, а не выбор файла) и вшивает дату/время съёмки прямо в
+ // пиксели фото (штамп в углу), чтобы его нельзя было просто подменить старым
+-// снимком из галереи.
++// снимком из галереи. Отдаёт наружу и превью (object URL, только для показа
++// в интерфейсе), и сам Blob — вызывающий код отправляет его дальше и нигде
++// не сохраняет постоянно (см. data/repo.ts uploadAndNotifyShiftPhoto).
+ 
+ interface Props {
+-  photoUrl?: string;
+-  onCapture: (dataUrl: string) => void;
++  previewUrl?: string;
++  onCapture: (previewUrl: string, blob: Blob) => void;
+   label?: string;
+ }
+ 
+-export default function CameraCapture({ photoUrl, onCapture, label = "Сделать фото" }: Props) {
++export default function CameraCapture({ previewUrl, onCapture, label = "Сделать фото" }: Props) {
+   const inputRef = useRef<HTMLInputElement>(null);
+   const [busy, setBusy] = useState(false);
+ 
+@@ -57,8 +59,15 @@ export default function CameraCapture({ photoUrl, onCapture, label = "Сдела
+         ctx.textBaseline = "middle";
+         ctx.fillText(stamp, canvas.width - boxWidth - margin + paddingX, canvas.height - margin - boxHeight / 2);
+ 
+-        onCapture(canvas.toDataURL("image/jpeg", 0.85));
+-        setBusy(false);
++        canvas.toBlob(
++          (blob) => {
++            setBusy(false);
++            if (!blob) return;
++            onCapture(URL.createObjectURL(blob), blob);
++          },
++          "image/jpeg",
++          0.85,
++        );
+       };
+       img.src = String(reader.result);
+     };
+@@ -75,9 +84,9 @@ export default function CameraCapture({ photoUrl, onCapture, label = "Сдела
+         onChange={handleFile}
+         style={{ display: "none" }}
+       />
+-      {photoUrl ? (
++      {previewUrl ? (
+         <div className="card" style={{ padding: 8 }}>
+-          <img src={photoUrl} alt="" style={{ width: "100%", borderRadius: 8, display: "block" }} />
++          <img src={previewUrl} alt="" style={{ width: "100%", borderRadius: 8, display: "block" }} />
+           <button
+             className="btn secondary"
+             style={{ width: "100%", marginTop: 8 }}
+diff --git a/apps/miniapp/src/data/repo.ts b/apps/miniapp/src/data/repo.ts
+index fb6d37c..7a0d316 100644
+--- a/apps/miniapp/src/data/repo.ts
++++ b/apps/miniapp/src/data/repo.ts
+@@ -549,9 +549,6 @@ export function getShift(): Shift {
+ 
+ function syncShift(shift: Shift) {
+   if (!isSupabaseConfigured || !supabase) return;
+-  // MVP: фото хранится как data URL прямо в текстовой колонке. Перед реальным
+-  // продакшеном стоит перенести в Supabase Storage (bucket + публичная/подписанная
+-  // ссылка) — так дешевле по трафику и не раздувает таблицу.
+   supabase
+     .from("shifts")
+     .upsert({
+@@ -559,16 +556,36 @@ function syncShift(shift: Shift) {
+       opened_by: shift.openedBy ? DEMO_STAFF_ID : null,
+       opened_at: shift.openedAt ?? null,
+       open_checklist: shift.openChecklist,
+-      open_photo_url: shift.openPhotoUrl ?? null,
+       closed_by: shift.closedBy ? DEMO_STAFF_ID : null,
+       closed_at: shift.closedAt ?? null,
+       close_checklist: shift.closeChecklist,
+-      close_photo_url: shift.closePhotoUrl ?? null,
+       handover_note: shift.handoverNote ?? null,
+     })
+     .then(({ error }) => error && logSyncError("syncShift", error));
+ }
+ 
++/**
++ * Фото открытия/закрытия смены НЕ сохраняется у нас: загружаем в Storage-бакет
++ * shift-photos и кладём строку в shift_photo_uploads — бот (apps/bot) подхватывает
++ * её через Realtime, пересылает фото руководителю в Telegram и сразу удаляет и
++ * файл, и запись. Без Supabase — просто no-op, фото живёт только в памяти вкладки.
++ */
++function uploadAndNotifyShiftPhoto(kind: "open" | "close", blob: Blob, staffName: string) {
++  if (!isSupabaseConfigured || !supabase) return;
++  const shiftId = shiftStore.get().id;
++  const path = `${shiftId}/${kind}-${Date.now()}.jpg`;
++  supabase.storage
++    .from("shift-photos")
++    .upload(path, blob, { contentType: "image/jpeg" })
++    .then(({ error: uploadError }) => {
++      if (uploadError) return logSyncError("uploadShiftPhoto", uploadError);
++      supabase!
++        .from("shift_photo_uploads")
++        .insert({ shift_id: shiftId, kind, storage_path: path, staff_name: staffName })
++        .then(({ error }) => error && logSyncError("shiftPhotoUpload:insert", error));
++    });
++}
++
+ export function toggleOpenChecklistItem(itemId: string) {
+   shiftStore.update((shift) => ({
+     ...shift,
+@@ -585,27 +602,22 @@ export function toggleCloseChecklistItem(itemId: string) {
+   syncShift(shiftStore.get());
+ }
+ 
+-export function openShift(openedBy: string, photoUrl?: string) {
+-  shiftStore.update((shift) => ({
+-    ...shift,
+-    status: "open",
+-    openedBy,
+-    openedAt: new Date().toISOString(),
+-    openPhotoUrl: photoUrl,
+-  }));
++export function openShift(openedBy: string, photoBlob?: Blob) {
++  shiftStore.update((shift) => ({ ...shift, status: "open", openedBy, openedAt: new Date().toISOString() }));
+   syncShift(shiftStore.get());
++  if (photoBlob) uploadAndNotifyShiftPhoto("open", photoBlob, openedBy);
+ }
+ 
+-export function closeShift(closedBy: string, handoverNote?: string, photoUrl?: string) {
++export function closeShift(closedBy: string, handoverNote?: string, photoBlob?: Blob) {
+   shiftStore.update((shift) => ({
+     ...shift,
+     status: "closed",
+     closedBy,
+     closedAt: new Date().toISOString(),
+     handoverNote,
+-    closePhotoUrl: photoUrl,
+   }));
+   syncShift(shiftStore.get());
++  if (photoBlob) uploadAndNotifyShiftPhoto("close", photoBlob, closedBy);
+ }
+ 
+ export function isChecklistComplete(items: ChecklistItem[]): boolean {
+diff --git a/apps/miniapp/src/screens/staff/Shift.tsx b/apps/miniapp/src/screens/staff/Shift.tsx
+index 40148e7..0c2fb95 100644
+--- a/apps/miniapp/src/screens/staff/Shift.tsx
++++ b/apps/miniapp/src/screens/staff/Shift.tsx
+@@ -12,11 +12,16 @@ import CameraCapture from "@/components/CameraCapture";
+ 
+ const CURRENT_STAFF_NAME = "Никита Афанасьев"; // заглушка до подключения Telegram-авторизации
+ 
++interface CapturedPhoto {
++  url: string;
++  blob: Blob;
++}
++
+ export default function Shift() {
+   const shift = useStore(shiftStore);
+   const [handoverNote, setHandoverNote] = useState("");
+-  const [openPhoto, setOpenPhoto] = useState<string | undefined>();
+-  const [closePhoto, setClosePhoto] = useState<string | undefined>();
++  const [openPhoto, setOpenPhoto] = useState<CapturedPhoto | undefined>();
++  const [closePhoto, setClosePhoto] = useState<CapturedPhoto | undefined>();
+ 
+   const openReady = isChecklistComplete(shift.openChecklist) && !!openPhoto;
+   const closeReady = isChecklistComplete(shift.closeChecklist) && !!closePhoto;
+@@ -51,16 +56,20 @@ export default function Shift() {
+           ))}
+ 
+           <div className="eyebrow" style={{ marginTop: 8 }}>
+-            Фото на месте (со штампом даты и времени)
++            Фото на месте (со штампом даты и времени, уходит руководителю в Telegram)
+           </div>
+-          <CameraCapture photoUrl={openPhoto} onCapture={setOpenPhoto} label="Сфотографироваться в заведении" />
++          <CameraCapture
++            previewUrl={openPhoto?.url}
++            onCapture={(url, blob) => setOpenPhoto({ url, blob })}
++            label="Сфотографироваться в заведении"
++          />
+ 
+           <button
+             className="btn primary"
+             style={{ marginTop: 12 }}
+             disabled={!openReady}
+             onClick={() => {
+-              openShift(CURRENT_STAFF_NAME, openPhoto);
++              openShift(CURRENT_STAFF_NAME, openPhoto?.blob);
+               setOpenPhoto(undefined);
+             }}
+           >
+@@ -80,9 +89,13 @@ export default function Shift() {
+           ))}
+ 
+           <div className="eyebrow" style={{ marginTop: 8 }}>
+-            Фото контрольных зон (со штампом даты и времени)
++            Фото контрольных зон (со штампом даты и времени, уходит руководителю в Telegram)
+           </div>
+-          <CameraCapture photoUrl={closePhoto} onCapture={setClosePhoto} label="Сфотографировать зал" />
++          <CameraCapture
++            previewUrl={closePhoto?.url}
++            onCapture={(url, blob) => setClosePhoto({ url, blob })}
++            label="Сфотографировать зал"
++          />
+ 
+           <div className="eyebrow" style={{ marginTop: 12 }}>
+             Передача смены (заметка для следующей)
+@@ -98,7 +111,7 @@ export default function Shift() {
+             className="btn primary"
+             disabled={!closeReady}
+             onClick={() => {
+-              closeShift(CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto);
++              closeShift(CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto?.blob);
+               setClosePhoto(undefined);
+               setHandoverNote("");
+             }}
+@@ -116,15 +129,6 @@ export default function Shift() {
+           <div className="card muted">{shift.handoverNote}</div>
+         </>
+       )}
+-
+-      {shift.status === "closed" && shift.closePhotoUrl && (
+-        <>
+-          <div className="eyebrow" style={{ marginTop: 12 }}>
+-            Фото прошлого закрытия
+-          </div>
+-          <img src={shift.closePhotoUrl} alt="" style={{ width: "100%", borderRadius: 10 }} />
+-        </>
+-      )}
+     </div>
+   );
+ }
+diff --git a/apps/miniapp/src/types.ts b/apps/miniapp/src/types.ts
+index 36b40ce..ec5c004 100644
+--- a/apps/miniapp/src/types.ts
++++ b/apps/miniapp/src/types.ts
+@@ -74,12 +74,13 @@ export interface Shift {
+   openedBy?: string;
+   openedAt?: string;
+   openChecklist: ChecklistItem[];
+-  openPhotoUrl?: string; // фото сотрудника в заведении при открытии смены, со штампом даты/времени
+   closedBy?: string;
+   closedAt?: string;
+   closeChecklist: ChecklistItem[];
+-  closePhotoUrl?: string;
+   handoverNote?: string;
++  // Фото открытия/закрытия смены НЕ хранится в этой записи — оно загружается
++  // в Storage, бот пересылает его руководителю в Telegram и сразу удаляет
++  // (см. data/repo.ts uploadAndNotifyShiftPhoto и supabase/migrations/0002).
+ }
+ 
+ export type ProblemCategory =
+diff --git a/supabase/migrations/0002_shift_photos.sql b/supabase/migrations/0002_shift_photos.sql
+index 2b30929..734636b 100644
+--- a/supabase/migrations/0002_shift_photos.sql
++++ b/supabase/migrations/0002_shift_photos.sql
+@@ -1,6 +1,30 @@
+--- Фото сотрудника при открытии смены и фото контрольных зон при закрытии —
+--- MVP хранит их как data URL прямо в текстовой колонке (см. комментарий в
+--- data/repo.ts). Перед продакшеном стоит перенести в Supabase Storage.
++-- Фото сотрудника при открытии смены и фото контрольных зон при закрытии.
++-- Осознанно НЕ храним их постоянно: миниапп загружает снимок в Storage и
++-- кладёт строку в shift_photo_uploads, бот подхватывает её через Realtime,
++-- пересылает фото руководителю в Telegram — и сразу удаляет и файл, и саму
++-- строку. В базе не остаётся ничего, кроме самого факта пересылки в чате.
+ 
+-alter table shifts add column if not exists open_photo_url text;
+-alter table shifts add column if not exists close_photo_url text;
++insert into storage.buckets (id, name, public)
++values ('shift-photos', 'shift-photos', false)
++on conflict (id) do nothing;
++
++-- Пилот на одном заведении: разрешаем анонимному ключу класть/читать/удалять
++-- файлы в этом бакете (как и с RLS на обычных таблицах в 0001_init.sql —
++-- перед реальным продакшеном это нужно сузить до authenticated/service-role).
++create policy "shift-photos anon all (pilot)" on storage.objects
++  for all
++  to anon
++  using (bucket_id = 'shift-photos')
++  with check (bucket_id = 'shift-photos');
++
++create table shift_photo_uploads (
++  id uuid primary key default gen_random_uuid(),
++  shift_id uuid not null,
++  kind text not null check (kind in ('open', 'close')),
++  storage_path text not null,
++  staff_name text,
++  created_at timestamptz not null default now()
++);
++
++-- Живёт секунды (пока бот не заберёт и не удалит запись) — RLS не включаем,
++-- как и бакет выше это часть пилотного упрощения.
+-- 
+2.43.0
+

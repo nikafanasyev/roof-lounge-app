@@ -1,0 +1,123 @@
+From aa9ac10bc581c545e50f5d477a328c64500bd246 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Sun, 6 Sep 2026 18:58:05 +0000
+Subject: [PATCH] =?UTF-8?q?fix:=20=D0=BF=D0=B5=D1=80=D0=B5=D0=BF=D0=BE?=
+ =?UTF-8?q?=D0=B4=D0=BA=D0=BB=D1=8E=D1=87=D0=B0=D1=82=D1=8C=D1=81=D1=8F=20?=
+ =?UTF-8?q?=D0=BF=D1=80=D0=B8=20=D0=BE=D0=B1=D1=80=D1=8B=D0=B2=D0=B5=20Sup?=
+ =?UTF-8?q?abase=20Realtime-=D0=BA=D0=B0=D0=BD=D0=B0=D0=BB=D0=B0?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+.subscribe() логировал только успешный статус SUBSCRIBED. При обрыве
+соединения (CLOSED/TIMED_OUT/CHANNEL_ERROR — например, после конфликта
+двух getUpdates и рестарта контейнера) канал молча переставал получать
+события, без единой строки в логах: бот выглядел живым и подписанным,
+но фото открытия/закрытия смены переставали доходить. Теперь любой
+статус логируется, а при разрыве бот пересоздаёт канал с экспоненциальной
+паузой (до 30с) вместо того, чтобы полагаться на то, что клиент сам
+восстановит соединение.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017BhZ45j4FFAfvtAGo4A4vw
+---
+ apps/bot/src/notify.ts | 56 ++++++++++++++++++++++++++++--------------
+ 1 file changed, 38 insertions(+), 18 deletions(-)
+
+diff --git a/apps/bot/src/notify.ts b/apps/bot/src/notify.ts
+index 1486c49..2a9e37f 100644
+--- a/apps/bot/src/notify.ts
++++ b/apps/bot/src/notify.ts
+@@ -21,6 +21,36 @@ interface ShiftPhotoEvent {
+  * table_id, а не номер стола напрямую — здесь держим маленький кэш
+  * restaurant_tables, чтобы не ходить в БД на каждое уведомление.
+  */
++// Supabase Realtime иногда молча роняет websocket-соединение (например, после
++// сетевого сбоя или рестарта контейнера) — без явной ошибки, просто канал
++// переходит в CLOSED/TIMED_OUT/CHANNEL_ERROR и больше никогда не пришлёт
++// событие. .subscribe() без обработки этих статусов выглядит "живым" в логах
++// (одна строка про SUBSCRIBED при старте) и после такого обрыва тихо
++// перестаёт работать. Поэтому логируем каждый статус и переподписываемся
++// заново при разрыве, вместо того чтобы полагаться на то, что соединение
++// сама себя восстановит.
++function resubscribable(label: string, createChannel: () => ReturnType<ReturnType<typeof createClient>["channel"]>) {
++  let attempt = 0;
++  function connect() {
++    const channel = createChannel();
++    channel.subscribe((status: string) => {
++      if (status === "SUBSCRIBED") {
++        attempt = 0;
++        console.log(`Подписка на ${label} активна.`);
++        return;
++      }
++      if (status === "CLOSED" || status === "TIMED_OUT" || status === "CHANNEL_ERROR") {
++        attempt += 1;
++        const delayMs = Math.min(30_000, 1_000 * 2 ** attempt);
++        console.error(`Подписка на ${label} прервалась (${status}), переподключаюсь через ${delayMs}мс.`);
++        channel.unsubscribe();
++        setTimeout(connect, delayMs);
++      }
++    });
++  }
++  connect();
++}
++
+ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Promise<void>) {
+   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+   const tableNumberById = new Map<string, number>();
+@@ -41,9 +71,8 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
+   // Столы меняются редко — обновляем кэш раз в 5 минут, не на каждый вызов.
+   setInterval(refreshTablesCache, 5 * 60_000);
+ 
+-  supabase
+-    .channel("service_calls_inserts")
+-    .on(
++  resubscribable("service_calls", () =>
++    supabase.channel(`service_calls_inserts_${Date.now()}`).on(
+       "postgres_changes",
+       { event: "INSERT", schema: "public", table: "service_calls" },
+       async (payload) => {
+@@ -51,12 +80,8 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
+         const tableNumber = tableNumberById.get(row.table_id) ?? 0;
+         await onCall({ type: row.type, table_number: tableNumber });
+       },
+-    )
+-    .subscribe((status) => {
+-      if (status === "SUBSCRIBED") {
+-        console.log("Подписка на service_calls активна.");
+-      }
+-    });
++    ),
++  );
+ }
+ 
+ /**
+@@ -70,9 +95,8 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
+ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Promise<void>) {
+   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+ 
+-  supabase
+-    .channel("shift_photo_uploads_inserts")
+-    .on(
++  resubscribable("shift_photo_uploads", () =>
++    supabase.channel(`shift_photo_uploads_inserts_${Date.now()}`).on(
+       "postgres_changes",
+       { event: "INSERT", schema: "public", table: "shift_photo_uploads" },
+       async (payload) => {
+@@ -98,10 +122,6 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
+           await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
+         }
+       },
+-    )
+-    .subscribe((status) => {
+-      if (status === "SUBSCRIBED") {
+-        console.log("Подписка на shift_photo_uploads активна.");
+-      }
+-    });
++    ),
++  );
+ }
+-- 
+2.43.0
+

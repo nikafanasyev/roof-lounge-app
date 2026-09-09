@@ -1,0 +1,654 @@
+From 2301ae6f785a4a0f095403babc884ceb056b26ab Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Wed, 9 Sep 2026 09:45:45 +0000
+Subject: [PATCH 1/2] =?UTF-8?q?feat:=20=D1=81=D1=82=D0=B0=D1=82=D1=83?=
+ =?UTF-8?q?=D1=81=20=D1=81=D0=BC=D0=B5=D0=BD=D1=8B=20=D0=B8=D0=B7=20Quick?=
+ =?UTF-8?q?=20Resto=20=D0=B2=D0=BC=D0=B5=D1=81=D1=82=D0=BE=20=D1=80=D1=83?=
+ =?UTF-8?q?=D1=87=D0=BD=D0=BE=D0=B9=20=D0=BA=D0=BD=D0=BE=D0=BF=D0=BA=D0=B8?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Бот периодически опрашивает внутренний API бэк-офиса Quick Resto
+(personnel.employee/select + personnel.salary.workshift_statement/select) —
+официального вебхука на это событие у Quick Resto нет, проверено. Признак
+открытой смены: startTime === endTime у последней записи сотрудника.
+
+Опрос идёт только в часы работы заведения (по умолчанию 10..4), "смена
+заведения" считается открытой, пока хотя бы один сотрудник вошёл по ПИН-коду
+на терминале. Переходы пишутся в таблицу shifts, сотрудник автоматически
+привязывается к staff по telegram_id (то же значение, что и поле Telegram ID
+в карточке сотрудника Quick Resto).
+
+Кнопка "Открыть/закрыть смену" в мини-аппе (Shift.tsx не тронут структурно)
+больше не выставляет статус сама — только подтверждает чек-лист и отправляет
+фото; текст сменён на "Отправить". syncShift, писавший opened_by/closed_by
+как DEMO_STAFF_ID, заменён на точечные update чек-листа/заметки, чтобы не
+затирать то, что записал бот.
+
+Подробности механики — claude/quickresto-shift-integration.md в проекте.
+---
+ README.md                                |   3 +-
+ apps/bot/.env.example                    |  10 +
+ apps/bot/src/env.ts                      |  13 +
+ apps/bot/src/index.ts                    |  19 ++
+ apps/bot/src/quickresto.ts               | 334 +++++++++++++++++++++++
+ apps/miniapp/src/data/repo.ts            |  57 ++--
+ apps/miniapp/src/screens/staff/Shift.tsx |   4 +-
+ 7 files changed, 413 insertions(+), 27 deletions(-)
+ create mode 100644 apps/bot/src/quickresto.ts
+
+diff --git a/README.md b/README.md
+index 0a046ea..29eaf9a 100644
+--- a/README.md
++++ b/README.md
+@@ -64,7 +64,8 @@ npm run dev
+ 2. **Токен Telegram-бота** от @BotFather (`/newbot`, если бота ещё нет) → `BOT_TOKEN` в `apps/bot/.env`.
+ 3. **Публичный URL мини-аппа** после деплоя (см. ниже) → `MINI_APP_URL` в `apps/bot/.env`, и туда же указать этот URL в настройках бота через @BotFather (`/mybots` → Bot Settings → Menu Button или Mini App).
+ 4. **ID чата персонала** (группа в Telegram, куда должны падать уведомления о QR-вызовах) → `STAFF_CHAT_ID`. Опционально: отдельный `SHIFT_PHOTOS_CHAT_ID`, если фото открытия/закрытия смены должны падать не в общий чат персонала, а руководителю лично или в отдельный чат — без него используется `STAFF_CHAT_ID`.
+-5. **Доступ к API Quick Resto** — открытый вопрос из архитектурного документа (раздел 1.2): если у Roof Lounge есть интеграционный модуль Quick Resto, сводку руководителя можно будет пополнить выручкой/средним чеком автоматически.
++5. **Статус смены из Quick Resto** (`apps/bot/src/quickresto.ts`) — вместо ручной кнопки "Открыть/закрыть смену" статус берётся из того, что сотрудник вошёл по ПИН-коду на терминале в заведении. В `apps/bot/.env` задать `QR_LOGIN`/`QR_PASSWORD` (логин/пароль от бэк-офиса `hu554.quickresto.ru`, тот же, под которым заходишь в веб-панель); без них интеграция просто не запускается, всё остальное продолжает работать как раньше. Опционально: `QR_HOST` (по умолчанию `hu554.quickresto.ru`), `QR_POLL_START_HOUR`/`QR_POLL_END_HOUR` (часы работы, в которые вообще имеет смысл опрашивать — по умолчанию 10..4, диапазон через полночь), `QR_POLL_INTERVAL_MS` (по умолчанию 90 секунд). Подробности механики (какие эндпоинты, как определяется "смена открыта", почему это опрос, а не вебхук) — в `claude/quickresto-shift-integration.md` в проекте Roof Lounge.
++   - **Важно:** чтобы сотрудник попал в нашу таблицу `staff` автоматически (и его имя корректно отображалось как "открыл/закрыл смену"), у него в карточке сотрудника Quick Resto (Персонал → Сотрудники → карточка → поле "Telegram ID") должен быть заполнен настоящий числовой Telegram ID. Без этого поля смена всё равно откроется/закроется корректно, но без привязки к конкретному сотруднику в нашей базе.
+ 
+ **Фото смены никогда не хранится**: миниапп загружает снимок в Storage-бакет `shift-photos`, бот (`apps/bot`) подхватывает его через Supabase Realtime, пересылает в Telegram и сразу удаляет и файл, и служебную запись — без запущенного бота фото просто зависнет в бакете до следующего запуска (не страшно, но лучше не оставлять бота выключенным надолго).
+ 
+diff --git a/apps/bot/.env.example b/apps/bot/.env.example
+index 124c1c4..018b5bd 100644
+--- a/apps/bot/.env.example
++++ b/apps/bot/.env.example
+@@ -6,3 +6,13 @@ STAFF_CHAT_ID=
+ # Необязательно: отдельный чат для фото открытия/закрытия смены.
+ # Если не задать — фото падают в STAFF_CHAT_ID.
+ SHIFT_PHOTOS_CHAT_ID=
++
++# Необязательно: статус смены заведения из Quick Resto (ПИН-вход сотрудника
++# на терминале) вместо ручной кнопки "Открыть/закрыть смену" в приложении.
++# Без QR_LOGIN/QR_PASSWORD интеграция просто не запускается.
++QR_HOST=hu554.quickresto.ru
++QR_LOGIN=
++QR_PASSWORD=
++QR_POLL_START_HOUR=10
++QR_POLL_END_HOUR=4
++QR_POLL_INTERVAL_MS=90000
+diff --git a/apps/bot/src/env.ts b/apps/bot/src/env.ts
+index 7bc5a5b..c7e30f5 100644
+--- a/apps/bot/src/env.ts
++++ b/apps/bot/src/env.ts
+@@ -14,4 +14,17 @@ export const env = {
+   STAFF_CHAT_ID: process.env.STAFF_CHAT_ID ?? "", // куда падают уведомления о QR-вызовах
+   // Куда пересылать фото открытия/закрытия смены. Если не задано — падают в STAFF_CHAT_ID.
+   SHIFT_PHOTOS_CHAT_ID: process.env.SHIFT_PHOTOS_CHAT_ID ?? "",
++
++  // Интеграция с Quick Resto (статус смены заведения по ПИН-входу сотрудников
++  // на терминале) — см. apps/bot/src/quickresto.ts и
++  // claude/quickresto-shift-integration.md в проекте. Если QR_LOGIN/QR_PASSWORD
++  // не заданы — интеграция просто не запускается.
++  QR_HOST: process.env.QR_HOST ?? "hu554.quickresto.ru",
++  QR_LOGIN: process.env.QR_LOGIN ?? "",
++  QR_PASSWORD: process.env.QR_PASSWORD ?? "",
++  // Опрашиваем только в часы работы заведения, чтобы не дёргать Quick Resto
++  // впустую ночью/утром. Диапазон может переходить через полночь (10..4).
++  QR_POLL_START_HOUR: Number(process.env.QR_POLL_START_HOUR ?? 10),
++  QR_POLL_END_HOUR: Number(process.env.QR_POLL_END_HOUR ?? 4),
++  QR_POLL_INTERVAL_MS: Number(process.env.QR_POLL_INTERVAL_MS ?? 90_000),
+ };
+diff --git a/apps/bot/src/index.ts b/apps/bot/src/index.ts
+index 0ff478b..92cf475 100644
+--- a/apps/bot/src/index.ts
++++ b/apps/bot/src/index.ts
+@@ -1,6 +1,7 @@
+ import { Bot, InlineKeyboard, InputFile } from "grammy";
+ import { env } from "./env";
+ import { watchServiceCalls, watchShiftPhotos } from "./notify";
++import { watchQuickRestoShifts } from "./quickresto";
+ 
+ const bot = new Bot(env.BOT_TOKEN);
+ 
+@@ -64,6 +65,24 @@ async function main() {
+     console.log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STAFF_CHAT_ID (или SHIFT_PHOTOS_CHAT_ID) не заданы — пересылка фото смен выключена.");
+   }
+ 
++  // Статус смены заведения из Quick Resto (ПИН-код на терминале) — заменяет
++  // ручное открытие/закрытие смены в мини-аппе, см. README и
++  // claude/quickresto-shift-integration.md в проекте.
++  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.QR_LOGIN && env.QR_PASSWORD) {
++    const qrChatId = env.STAFF_CHAT_ID;
++    watchQuickRestoShifts(async (event) => {
++      const label = event.type === "opened" ? "Смена открыта" : "Смена закрыта";
++      const time = event.at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
++      console.log(`Quick Resto: ${label.toLowerCase()} — ${event.employee.name}, ${time}`);
++      if (qrChatId) {
++        await bot.api.sendMessage(qrChatId, `${label} (Quick Resto)\n${event.employee.name}, ${time}`);
++      }
++    });
++    console.log("Слушаю статус смены через Quick Resto (ПИН на терминале).");
++  } else {
++    console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
++  }
++
+   await bot.start();
+ }
+ 
+diff --git a/apps/bot/src/quickresto.ts b/apps/bot/src/quickresto.ts
+new file mode 100644
+index 0000000..28e9cee
+--- /dev/null
++++ b/apps/bot/src/quickresto.ts
+@@ -0,0 +1,334 @@
++import { createClient } from "@supabase/supabase-js";
++import { env } from "./env";
++
++// Интеграция со внутренним (недокументированным) API бэк-офиса Quick Resto —
++// тем же, которым пользуется веб-панель hu554.quickresto.ru. Официального
++// вебхука на события "смена открыта/закрыта" у Quick Resto нет (проверено —
++// список поддерживаемых триггеров у сторонних интеграторов ограничен заказами
++// и счетами), поэтому единственный способ узнать об открытии смены —
++// периодически опрашивать тот же эндпоинт, который дёргает браузер.
++//
++// Что именно опрашиваем и почему это работает — см.
++// claude/quickresto-shift-integration.md в проекте (там же тестовый скрипт,
++// которым это было проверено на реальных данных).
++
++interface QuickRestoEmployeeRaw {
++  id: number;
++  pin?: string;
++  telegramId?: string;
++  firstName?: string;
++  lastName?: string;
++}
++
++interface QuickRestoEmployee {
++  id: number;
++  pin: string;
++  telegramId: string | null;
++  name: string;
++}
++
++interface WorkshiftStatementRaw {
++  startTime: number;
++  endTime: number;
++}
++
++export interface QuickRestoShiftEvent {
++  type: "opened" | "closed";
++  employee: { id: number; name: string; telegramId: string | null };
++  at: Date;
++}
++
++const EMPLOYEES_PATH =
++  "/platform/data/personnel.employee/select?start=0&count=150&groupField%5B%5D=role&groupDir%5B%5D=asc&businessDayOffsetInMs=43200000&timeZone=-180";
++
++function workshiftPath(employeeId: number) {
++  return (
++    `/platform/data/personnel.salary.workshift_statement/select?start=0&count=150&mode=currentPeriod` +
++    `&ownerContextId=${employeeId}&ownerContextClassName=ru.edgex.quickresto.modules.personnel.employee.Employee` +
++    `&businessDayOffsetInMs=43200000&timeZone=-180`
++  );
++}
++
++// --- HTTP-клиент с ручной cookie-jar (fetch в Node не хранит cookies сам) ---
++
++const cookieJar = new Map<string, string>();
++let loggedIn = false;
++
++function storeCookies(res: Response) {
++  const setCookie =
++    typeof (res.headers as { getSetCookie?: () => string[] }).getSetCookie === "function"
++      ? (res.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
++      : res.headers.get("set-cookie")
++        ? [res.headers.get("set-cookie")!]
++        : [];
++  for (const raw of setCookie) {
++    const pair = raw.split(";")[0];
++    const idx = pair.indexOf("=");
++    if (idx === -1) continue;
++    cookieJar.set(pair.slice(0, idx).trim(), pair.slice(idx + 1).trim());
++  }
++}
++
++function cookieHeader() {
++  return [...cookieJar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
++}
++
++async function qrFetch(path: string, init: RequestInit = {}) {
++  const res = await fetch(`https://${env.QR_HOST}${path}`, {
++    ...init,
++    headers: {
++      Accept: "application/json, text/plain, */*",
++      ...(init.headers ?? {}),
++      Cookie: cookieHeader(),
++    },
++  });
++  storeCookies(res);
++  return res;
++}
++
++async function login() {
++  const body = new URLSearchParams({
++    j_username: env.QR_LOGIN,
++    j_password: env.QR_PASSWORD,
++    j_rememberme: "true",
++  }).toString();
++  const res = await qrFetch("/platform/j_spring_security_check", {
++    method: "POST",
++    headers: { "Content-Type": "application/x-www-form-urlencoded" },
++    body,
++  });
++  if (!res.ok) {
++    throw new Error(`Quick Resto: логин не удался (HTTP ${res.status})`);
++  }
++  loggedIn = true;
++}
++
++// Сессия Quick Resto может протухнуть в любой момент — тогда вместо JSON
++// приходит HTML-страница логина (со статусом 200). Ловим это через неудачный
++// JSON.parse, а не только по HTTP-статусу, и перелогиниваемся один раз.
++async function qrFetchJson<T>(path: string): Promise<T> {
++  if (!loggedIn) await login();
++
++  let res = await qrFetch(path);
++  let text = await res.text();
++
++  const looksExpired = res.status === 401 || res.status === 403 || !text.trim().startsWith("{");
++  if (looksExpired) {
++    loggedIn = false;
++    await login();
++    res = await qrFetch(path);
++    text = await res.text();
++  }
++
++  if (!res.ok) {
++    throw new Error(`Quick Resto: HTTP ${res.status} на ${path}`);
++  }
++  return JSON.parse(text) as T;
++}
++
++async function fetchEmployees(): Promise<QuickRestoEmployee[]> {
++  const data = await qrFetchJson<{ ds?: { object: QuickRestoEmployeeRaw }[] }>(EMPLOYEES_PATH);
++  return (data.ds ?? [])
++    .map((d) => d.object)
++    .filter((e): e is QuickRestoEmployeeRaw & { pin: string } => !!e.pin) // без ПИНа — служебные записи, не сотрудники на терминале
++    .map((e) => ({
++      id: e.id,
++      pin: e.pin,
++      telegramId: e.telegramId?.trim() || null,
++      name: `${e.lastName ?? ""} ${e.firstName ?? ""}`.trim() || `Сотрудник #${e.id}`,
++    }));
++}
++
++// Признак открытой смены — startTime === endTime (Quick Resto дублирует старт
++// в конец, пока сотрудник не закрыл смену на терминале; не null, не "сейчас").
++async function fetchShiftStatus(employeeId: number): Promise<{ isOpen: boolean; startTime: number; endTime: number } | null> {
++  const data = await qrFetchJson<{ ds?: { object: WorkshiftStatementRaw }[] }>(workshiftPath(employeeId));
++  const shifts = (data.ds ?? []).map((d) => d.object);
++  const last = shifts[shifts.length - 1];
++  if (!last) return null;
++  return { isOpen: last.startTime === last.endTime, startTime: last.startTime, endTime: last.endTime };
++}
++
++function isOperatingHours(date: Date, startHour: number, endHour: number): boolean {
++  const hour = date.getHours();
++  if (startHour === endHour) return true; // 0 = не ограничиваем
++  if (startHour < endHour) return hour >= startHour && hour < endHour;
++  return hour >= startHour || hour < endHour; // диапазон через полночь, например 10..4
++}
++
++// --- Синхронизация с нашей БД (staff + shifts, см. supabase/migrations/0001_init.sql) ---
++
++// В проекте нет сгенерированных Database-типов для Supabase (см. notify.ts —
++// там та же ситуация), поэтому без явной типизации схемы .insert()/.update()
++// на новых для бота таблицах (staff, shifts) TypeScript выводит их как never.
++// eslint-disable-next-line @typescript-eslint/no-explicit-any
++type SupabaseClient = any;
++
++// Сотрудник привязывается к staff по telegram_id — это то же самое значение,
++// что и telegramId в Quick Resto (поле руками заполняется в карточке
++// сотрудника при найме). Роль не трогаем, если запись уже есть — иначе
++// каждый опрос сбрасывал бы вручную выставленную роль "manager"/"master"
++// обратно на дефолтную "staff".
++async function upsertStaffForEmployee(supabase: SupabaseClient, employee: QuickRestoEmployee): Promise<string | null> {
++  if (!employee.telegramId) return null;
++  const telegramId = Number(employee.telegramId);
++  if (!Number.isFinite(telegramId)) return null;
++
++  const { data: existing, error: selectError } = await supabase
++    .from("staff")
++    .select("id, name")
++    .eq("telegram_id", telegramId)
++    .maybeSingle();
++  if (selectError) {
++    console.error("Quick Resto: не удалось прочитать staff:", selectError.message);
++    return null;
++  }
++  if (existing) {
++    if (existing.name !== employee.name) {
++      await supabase.from("staff").update({ name: employee.name }).eq("id", existing.id as string);
++    }
++    return existing.id as string;
++  }
++
++  const { data: inserted, error: insertError } = await supabase
++    .from("staff")
++    .insert({ telegram_id: telegramId, name: employee.name, role: "staff" })
++    .select("id")
++    .single();
++  if (insertError) {
++    console.error("Quick Resto: не удалось создать запись в staff:", insertError.message);
++    return null;
++  }
++  return inserted.id as string;
++}
++
++async function loadOpenShiftRowId(supabase: SupabaseClient): Promise<string | null> {
++  const { data, error } = await supabase
++    .from("shifts")
++    .select("id, closed_at")
++    .order("created_at", { ascending: false })
++    .limit(1)
++    .maybeSingle();
++  if (error) {
++    console.error("Quick Resto: не удалось прочитать текущую смену:", error.message);
++    return null;
++  }
++  if (data && !data.closed_at) return data.id as string;
++  return null;
++}
++
++async function openVenueShift(supabase: SupabaseClient, employee: QuickRestoEmployee, openedAt: Date): Promise<string | null> {
++  const staffId = await upsertStaffForEmployee(supabase, employee);
++  const { data, error } = await supabase
++    .from("shifts")
++    .insert({ opened_by: staffId, opened_at: openedAt.toISOString(), open_checklist: [], close_checklist: [] })
++    .select("id")
++    .single();
++  if (error) {
++    console.error("Quick Resto: не удалось создать строку смены:", error.message);
++    return null;
++  }
++  return data.id as string;
++}
++
++async function closeVenueShift(supabase: SupabaseClient, shiftRowId: string, employee: QuickRestoEmployee, closedAt: Date) {
++  const staffId = await upsertStaffForEmployee(supabase, employee);
++  const { error } = await supabase
++    .from("shifts")
++    .update({ closed_by: staffId, closed_at: closedAt.toISOString() })
++    .eq("id", shiftRowId);
++  if (error) console.error("Quick Resto: не удалось закрыть строку смены:", error.message);
++}
++
++/**
++ * Опрашивает Quick Resto и синхронизирует статус смены заведения в таблицу
++ * `shifts` (Shift.tsx читает её как есть, ничего в самом экране менять не
++ * нужно). Модель: "смена заведения" считается открытой, пока хотя бы один
++ * сотрудник числится вошедшим по ПИН-коду на терминале, и закрывается, когда
++ * последний из вошедших закрывает смену. onEvent вызывается на каждом таком
++ * переходе — для уведомления в Telegram.
++ *
++ * Важно про пропуски: если сотрудник забудет закрыть смену на терминале,
++ * для нас (и для Quick Resto) она будет считаться открытой до тех пор, пока
++ * кто-нибудь не закроет её вручную в бэк-офисе — это ограничение источника
++ * данных, не самого опроса.
++ */
++export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => void | Promise<void>) {
++  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
++
++  let employees: QuickRestoEmployee[] = [];
++  let employeesLoadedAt = 0;
++  const openState = new Map<number, boolean>();
++  let currentShiftRowId: string | null = null;
++  let warmedUp = false; // первый проход только запоминает состояние, событий не шлёт
++
++  async function tick() {
++    const now = new Date();
++    if (!isOperatingHours(now, env.QR_POLL_START_HOUR, env.QR_POLL_END_HOUR)) return;
++
++    if (!employees.length || Date.now() - employeesLoadedAt > 30 * 60_000) {
++      try {
++        employees = await fetchEmployees();
++        employeesLoadedAt = Date.now();
++      } catch (err) {
++        console.error("Quick Resto: не удалось обновить список сотрудников:", err);
++        return;
++      }
++    }
++
++    if (!warmedUp) {
++      currentShiftRowId = await loadOpenShiftRowId(supabase);
++    }
++
++    let anyOpenNow = false;
++    let transitionToOpen: { employee: QuickRestoEmployee; at: number } | undefined;
++    let transitionToClosed: { employee: QuickRestoEmployee; at: number } | undefined;
++
++    for (const employee of employees) {
++      let status: Awaited<ReturnType<typeof fetchShiftStatus>>;
++      try {
++        status = await fetchShiftStatus(employee.id);
++      } catch (err) {
++        console.error(`Quick Resto: ошибка получения смены сотрудника ${employee.id}:`, err);
++        continue;
++      }
++      const wasOpen = openState.get(employee.id) ?? false;
++      const isOpen = status?.isOpen ?? false;
++      openState.set(employee.id, isOpen);
++
++      if (isOpen) {
++        anyOpenNow = true;
++        if (!wasOpen && warmedUp) transitionToOpen = { employee, at: status!.startTime };
++      } else if (wasOpen && warmedUp) {
++        transitionToClosed = { employee, at: status?.endTime ?? Date.now() };
++      }
++    }
++
++    if (warmedUp && anyOpenNow && !currentShiftRowId && transitionToOpen) {
++      currentShiftRowId = await openVenueShift(supabase, transitionToOpen.employee, new Date(transitionToOpen.at));
++      await onEvent({
++        type: "opened",
++        employee: transitionToOpen.employee,
++        at: new Date(transitionToOpen.at),
++      });
++    }
++
++    if (warmedUp && !anyOpenNow && currentShiftRowId && transitionToClosed) {
++      const rowId = currentShiftRowId;
++      currentShiftRowId = null;
++      await closeVenueShift(supabase, rowId, transitionToClosed.employee, new Date(transitionToClosed.at));
++      await onEvent({
++        type: "closed",
++        employee: transitionToClosed.employee,
++        at: new Date(transitionToClosed.at),
++      });
++    }
++
++    warmedUp = true;
++  }
++
++  tick().catch((err) => console.error("Quick Resto: ошибка первого опроса:", err));
++  setInterval(() => {
++    tick().catch((err) => console.error("Quick Resto: ошибка опроса:", err));
++  }, env.QR_POLL_INTERVAL_MS);
++}
+diff --git a/apps/miniapp/src/data/repo.ts b/apps/miniapp/src/data/repo.ts
+index 7a0d316..fbad507 100644
+--- a/apps/miniapp/src/data/repo.ts
++++ b/apps/miniapp/src/data/repo.ts
+@@ -547,21 +547,28 @@ export function getShift(): Shift {
+   return shiftStore.get();
+ }
+ 
+-function syncShift(shift: Shift) {
++// Статус смены (открыта/закрыта, кем и когда) теперь выставляет бот через
++// интеграцию с Quick Resto (apps/bot/src/quickresto.ts, по ПИН-входу
++// сотрудника на терминале) — см. claude/quickresto-shift-integration.md в
++// проекте. Отсюда мы больше НЕ пишем opened_by/opened_at/closed_by/closed_at,
++// чтобы не перезатирать то, что записал бот, — только чек-листы и заметку
++// передачи смены, точечными update по id уже существующей строки.
++function syncChecklist(field: "open_checklist" | "close_checklist", items: ChecklistItem[]) {
+   if (!isSupabaseConfigured || !supabase) return;
+   supabase
+     .from("shifts")
+-    .upsert({
+-      id: shift.id,
+-      opened_by: shift.openedBy ? DEMO_STAFF_ID : null,
+-      opened_at: shift.openedAt ?? null,
+-      open_checklist: shift.openChecklist,
+-      closed_by: shift.closedBy ? DEMO_STAFF_ID : null,
+-      closed_at: shift.closedAt ?? null,
+-      close_checklist: shift.closeChecklist,
+-      handover_note: shift.handoverNote ?? null,
+-    })
+-    .then(({ error }) => error && logSyncError("syncShift", error));
++    .update({ [field]: items })
++    .eq("id", shiftStore.get().id)
++    .then(({ error }) => error && logSyncError("syncChecklist", error));
++}
++
++function syncHandoverNote(note: string) {
++  if (!isSupabaseConfigured || !supabase) return;
++  supabase
++    .from("shifts")
++    .update({ handover_note: note })
++    .eq("id", shiftStore.get().id)
++    .then(({ error }) => error && logSyncError("syncHandoverNote", error));
+ }
+ 
+ /**
+@@ -591,7 +598,7 @@ export function toggleOpenChecklistItem(itemId: string) {
+     ...shift,
+     openChecklist: shift.openChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
+   }));
+-  syncShift(shiftStore.get());
++  syncChecklist("open_checklist", shiftStore.get().openChecklist);
+ }
+ 
+ export function toggleCloseChecklistItem(itemId: string) {
+@@ -599,24 +606,26 @@ export function toggleCloseChecklistItem(itemId: string) {
+     ...shift,
+     closeChecklist: shift.closeChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
+   }));
+-  syncShift(shiftStore.get());
++  syncChecklist("close_checklist", shiftStore.get().closeChecklist);
+ }
+ 
++/**
++ * Раньше эта функция сама выставляла shift.status = "open" по нажатию кнопки.
++ * Теперь статус смены целиком приходит из Quick Resto (см. комментарий у
++ * syncChecklist выше) — здесь только отправляем фото открытия руководителю в
++ * Telegram, чек-лист уже сохранён поштучно через toggleOpenChecklistItem.
++ * Название и сигнатура оставлены как есть, чтобы не трогать Shift.tsx.
++ */
+ export function openShift(openedBy: string, photoBlob?: Blob) {
+-  shiftStore.update((shift) => ({ ...shift, status: "open", openedBy, openedAt: new Date().toISOString() }));
+-  syncShift(shiftStore.get());
+   if (photoBlob) uploadAndNotifyShiftPhoto("open", photoBlob, openedBy);
+ }
+ 
++/** Аналогично openShift — статус закрытия смены тоже теперь из Quick Resto. */
+ export function closeShift(closedBy: string, handoverNote?: string, photoBlob?: Blob) {
+-  shiftStore.update((shift) => ({
+-    ...shift,
+-    status: "closed",
+-    closedBy,
+-    closedAt: new Date().toISOString(),
+-    handoverNote,
+-  }));
+-  syncShift(shiftStore.get());
++  if (handoverNote) {
++    shiftStore.update((shift) => ({ ...shift, handoverNote }));
++    syncHandoverNote(handoverNote);
++  }
+   if (photoBlob) uploadAndNotifyShiftPhoto("close", photoBlob, closedBy);
+ }
+ 
+diff --git a/apps/miniapp/src/screens/staff/Shift.tsx b/apps/miniapp/src/screens/staff/Shift.tsx
+index 0c2fb95..3a16662 100644
+--- a/apps/miniapp/src/screens/staff/Shift.tsx
++++ b/apps/miniapp/src/screens/staff/Shift.tsx
+@@ -73,7 +73,7 @@ export default function Shift() {
+               setOpenPhoto(undefined);
+             }}
+           >
+-            {openReady ? "Открыть смену" : !isChecklistComplete(shift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
++            {openReady ? "Отправить" : !isChecklistComplete(shift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+           </button>
+         </>
+       )}
+@@ -116,7 +116,7 @@ export default function Shift() {
+               setHandoverNote("");
+             }}
+           >
+-            {closeReady ? "Закрыть смену" : !isChecklistComplete(shift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
++            {closeReady ? "Отправить" : !isChecklistComplete(shift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+           </button>
+         </>
+       )}
+-- 
+2.43.0
+
+
+From b2adcaa45f4f2a902cca3e5eb6b72e463c765d8f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9D=D0=B8=D0=BA=D0=B8=D1=82=D0=B0=20=D0=90=D1=84=D0=B0?=
+ =?UTF-8?q?=D0=BD=D0=B0=D1=81=D1=8C=D0=B5=D0=B2?= <afanasyev984@gmail.com>
+Date: Wed, 9 Sep 2026 09:47:44 +0000
+Subject: [PATCH 2/2] =?UTF-8?q?fix:=20=D1=81=D0=B4=D0=B2=D0=B8=D0=BD=D1=83?=
+ =?UTF-8?q?=D1=82=D1=8C=20=D0=B2=D0=B5=D1=80=D1=85=D0=BD=D1=8E=D1=8E=20?=
+ =?UTF-8?q?=D0=B3=D1=80=D0=B0=D0=BD=D0=B8=D1=86=D1=83=20=D0=BE=D0=BF=D1=80?=
+ =?UTF-8?q?=D0=BE=D1=81=D0=B0=20Quick=20Resto=20=D1=81=204:00=20=D0=B4?=
+ =?UTF-8?q?=D0=BE=208:00?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Бывают продления вечера до 6-7 утра — со старым дефолтом (10..4) опрос
+Quick Resto прекращался бы раньше, чем реально заканчивается смена.
+---
+ README.md             | 2 +-
+ apps/bot/.env.example | 2 +-
+ apps/bot/src/env.ts   | 5 +++--
+ 3 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index 29eaf9a..16009bb 100644
+--- a/README.md
++++ b/README.md
+@@ -64,7 +64,7 @@ npm run dev
+ 2. **Токен Telegram-бота** от @BotFather (`/newbot`, если бота ещё нет) → `BOT_TOKEN` в `apps/bot/.env`.
+ 3. **Публичный URL мини-аппа** после деплоя (см. ниже) → `MINI_APP_URL` в `apps/bot/.env`, и туда же указать этот URL в настройках бота через @BotFather (`/mybots` → Bot Settings → Menu Button или Mini App).
+ 4. **ID чата персонала** (группа в Telegram, куда должны падать уведомления о QR-вызовах) → `STAFF_CHAT_ID`. Опционально: отдельный `SHIFT_PHOTOS_CHAT_ID`, если фото открытия/закрытия смены должны падать не в общий чат персонала, а руководителю лично или в отдельный чат — без него используется `STAFF_CHAT_ID`.
+-5. **Статус смены из Quick Resto** (`apps/bot/src/quickresto.ts`) — вместо ручной кнопки "Открыть/закрыть смену" статус берётся из того, что сотрудник вошёл по ПИН-коду на терминале в заведении. В `apps/bot/.env` задать `QR_LOGIN`/`QR_PASSWORD` (логин/пароль от бэк-офиса `hu554.quickresto.ru`, тот же, под которым заходишь в веб-панель); без них интеграция просто не запускается, всё остальное продолжает работать как раньше. Опционально: `QR_HOST` (по умолчанию `hu554.quickresto.ru`), `QR_POLL_START_HOUR`/`QR_POLL_END_HOUR` (часы работы, в которые вообще имеет смысл опрашивать — по умолчанию 10..4, диапазон через полночь), `QR_POLL_INTERVAL_MS` (по умолчанию 90 секунд). Подробности механики (какие эндпоинты, как определяется "смена открыта", почему это опрос, а не вебхук) — в `claude/quickresto-shift-integration.md` в проекте Roof Lounge.
++5. **Статус смены из Quick Resto** (`apps/bot/src/quickresto.ts`) — вместо ручной кнопки "Открыть/закрыть смену" статус берётся из того, что сотрудник вошёл по ПИН-коду на терминале в заведении. В `apps/bot/.env` задать `QR_LOGIN`/`QR_PASSWORD` (логин/пароль от бэк-офиса `hu554.quickresto.ru`, тот же, под которым заходишь в веб-панель); без них интеграция просто не запускается, всё остальное продолжает работать как раньше. Опционально: `QR_HOST` (по умолчанию `hu554.quickresto.ru`), `QR_POLL_START_HOUR`/`QR_POLL_END_HOUR` (часы работы, в которые вообще имеет смысл опрашивать — по умолчанию 10..8, диапазон через полночь, с запасом на продления вечера до 6-7 утра), `QR_POLL_INTERVAL_MS` (по умолчанию 90 секунд). Подробности механики (какие эндпоинты, как определяется "смена открыта", почему это опрос, а не вебхук) — в `claude/quickresto-shift-integration.md` в проекте Roof Lounge.
+    - **Важно:** чтобы сотрудник попал в нашу таблицу `staff` автоматически (и его имя корректно отображалось как "открыл/закрыл смену"), у него в карточке сотрудника Quick Resto (Персонал → Сотрудники → карточка → поле "Telegram ID") должен быть заполнен настоящий числовой Telegram ID. Без этого поля смена всё равно откроется/закроется корректно, но без привязки к конкретному сотруднику в нашей базе.
+ 
+ **Фото смены никогда не хранится**: миниапп загружает снимок в Storage-бакет `shift-photos`, бот (`apps/bot`) подхватывает его через Supabase Realtime, пересылает в Telegram и сразу удаляет и файл, и служебную запись — без запущенного бота фото просто зависнет в бакете до следующего запуска (не страшно, но лучше не оставлять бота выключенным надолго).
+diff --git a/apps/bot/.env.example b/apps/bot/.env.example
+index 018b5bd..5715f50 100644
+--- a/apps/bot/.env.example
++++ b/apps/bot/.env.example
+@@ -14,5 +14,5 @@ QR_HOST=hu554.quickresto.ru
+ QR_LOGIN=
+ QR_PASSWORD=
+ QR_POLL_START_HOUR=10
+-QR_POLL_END_HOUR=4
++QR_POLL_END_HOUR=8
+ QR_POLL_INTERVAL_MS=90000
+diff --git a/apps/bot/src/env.ts b/apps/bot/src/env.ts
+index c7e30f5..9865dc2 100644
+--- a/apps/bot/src/env.ts
++++ b/apps/bot/src/env.ts
+@@ -23,8 +23,9 @@ export const env = {
+   QR_LOGIN: process.env.QR_LOGIN ?? "",
+   QR_PASSWORD: process.env.QR_PASSWORD ?? "",
+   // Опрашиваем только в часы работы заведения, чтобы не дёргать Quick Resto
+-  // впустую ночью/утром. Диапазон может переходить через полночь (10..4).
++  // впустую днём. Диапазон переходит через полночь (10..8) — с запасом на
++  // продления вечера до 6-7 утра, а не жёстко до 4:00.
+   QR_POLL_START_HOUR: Number(process.env.QR_POLL_START_HOUR ?? 10),
+-  QR_POLL_END_HOUR: Number(process.env.QR_POLL_END_HOUR ?? 4),
++  QR_POLL_END_HOUR: Number(process.env.QR_POLL_END_HOUR ?? 8),
+   QR_POLL_INTERVAL_MS: Number(process.env.QR_POLL_INTERVAL_MS ?? 90_000),
+ };
+-- 
+2.43.0
+

@@ -282,15 +282,26 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
   const openEmployeeIds = new Set<number>();
   let currentShiftRowId: string | null = null;
   let warmedUp = false; // первый проход только запоминает состояние, событий не шлёт
+  let tickCount = 0;
 
   async function tick() {
     const now = new Date();
     if (!isOperatingHours(now, env.QR_POLL_START_HOUR, env.QR_POLL_END_HOUR)) return;
 
+    tickCount += 1;
+    // Раз в ~10 опросов пишем короткую сводку — чтобы по логам было видно, что
+    // опрос вообще жив и доходит до Quick Resto, даже если переходов не было.
+    if (tickCount % 10 === 0) {
+      console.log(
+        `Quick Resto: опрос жив (тик ${tickCount}), на смене: ${openEmployeeIds.size ? [...openEmployeeIds].join(", ") : "никого"}, строка смены заведения: ${currentShiftRowId ?? "нет"}`,
+      );
+    }
+
     if (!employees.length || Date.now() - employeesLoadedAt > 30 * 60_000) {
       try {
         employees = await fetchEmployees();
         employeesLoadedAt = Date.now();
+        console.log(`Quick Resto: список сотрудников обновлён (${employees.length}): ${employees.map((e) => `${e.name} (id=${e.id})`).join(", ")}`);
       } catch (err) {
         console.error("Quick Resto: не удалось обновить список сотрудников:", err);
         return;
@@ -335,16 +346,32 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
       else openEmployeeIds.delete(employee.id);
     }
 
+    if (events.length) {
+      console.log(
+        `Quick Resto: обнаружены переходы (${events.length}): ` +
+          events.map((e) => `${e.type} — ${e.employee.name} @ ${new Date(e.at).toLocaleTimeString("ru-RU")}`).join("; ") +
+          `; сейчас на смене: ${openEmployeeIds.size ? [...openEmployeeIds].join(", ") : "никого"}; строка смены заведения: ${currentShiftRowId ?? "нет"}`,
+      );
+    }
+
     events.sort((a, b) => a.at - b.at);
     for (const event of events) {
       if (event.type === "opened" && !currentShiftRowId) {
         currentShiftRowId = await openVenueShift(supabase, event.employee, new Date(event.at));
+        console.log(`Quick Resto: строка смены заведения создана — id=${currentShiftRowId ?? "ОШИБКА, см. лог выше"}`);
         await safeNotify(onEvent, { type: "opened", employee: event.employee, at: new Date(event.at) });
       } else if (event.type === "closed" && currentShiftRowId && openEmployeeIds.size === 0) {
         const rowId = currentShiftRowId;
         currentShiftRowId = null;
         await closeVenueShift(supabase, rowId, event.employee, new Date(event.at));
         await safeNotify(onEvent, { type: "closed", employee: event.employee, at: new Date(event.at) });
+      } else if (event.type === "opened") {
+        console.log(`Quick Resto: открытие ${event.employee.name} проигнорировано — смена заведения уже открыта (строка ${currentShiftRowId})`);
+      } else if (event.type === "closed") {
+        console.log(
+          `Quick Resto: закрытие ${event.employee.name} не закрывает смену заведения — ` +
+            (currentShiftRowId ? `ещё открыты: ${[...openEmployeeIds].join(", ") || "—"}` : "строки смены заведения и так нет"),
+        );
       }
     }
 
