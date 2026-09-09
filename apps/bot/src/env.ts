@@ -23,8 +23,9 @@ export const env = {
   QR_LOGIN: process.env.QR_LOGIN ?? "",
   QR_PASSWORD: process.env.QR_PASSWORD ?? "",
   // Опрашиваем только в часы работы заведения, чтобы не дёргать Quick Resto
-  // впустую ночью/утром. Диапазон может переходить через полночь (10..4).
+  // впустую днём. Диапазон переходит через полночь (10..8) — с запасом на
+  // продления вечера до 6-7 утра, а не жёстко до 4:00.
   QR_POLL_START_HOUR: Number(process.env.QR_POLL_START_HOUR ?? 10),
-  QR_POLL_END_HOUR: Number(process.env.QR_POLL_END_HOUR ?? 4),
+  QR_POLL_END_HOUR: Number(process.env.QR_POLL_END_HOUR ?? 8),
   QR_POLL_INTERVAL_MS: Number(process.env.QR_POLL_INTERVAL_MS ?? 90_000),
 };
