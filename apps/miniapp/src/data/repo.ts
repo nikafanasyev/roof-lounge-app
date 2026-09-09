@@ -547,21 +547,28 @@ export function getShift(): Shift {
   return shiftStore.get();
 }
 
-function syncShift(shift: Shift) {
+// Статус смены (открыта/закрыта, кем и когда) теперь выставляет бот через
+// интеграцию с Quick Resto (apps/bot/src/quickresto.ts, по ПИН-входу
+// сотрудника на терминале) — см. claude/quickresto-shift-integration.md в
+// проекте. Отсюда мы больше НЕ пишем opened_by/opened_at/closed_by/closed_at,
+// чтобы не перезатирать то, что записал бот, — только чек-листы и заметку
+// передачи смены, точечными update по id уже существующей строки.
+function syncChecklist(field: "open_checklist" | "close_checklist", items: ChecklistItem[]) {
   if (!isSupabaseConfigured || !supabase) return;
   supabase
     .from("shifts")
-    .upsert({
-      id: shift.id,
-      opened_by: shift.openedBy ? DEMO_STAFF_ID : null,
-      opened_at: shift.openedAt ?? null,
-      open_checklist: shift.openChecklist,
-      closed_by: shift.closedBy ? DEMO_STAFF_ID : null,
-      closed_at: shift.closedAt ?? null,
-      close_checklist: shift.closeChecklist,
-      handover_note: shift.handoverNote ?? null,
-    })
-    .then(({ error }) => error && logSyncError("syncShift", error));
+    .update({ [field]: items })
+    .eq("id", shiftStore.get().id)
+    .then(({ error }) => error && logSyncError("syncChecklist", error));
+}
+
+function syncHandoverNote(note: string) {
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("shifts")
+    .update({ handover_note: note })
+    .eq("id", shiftStore.get().id)
+    .then(({ error }) => error && logSyncError("syncHandoverNote", error));
 }
 
 /**
@@ -591,7 +598,7 @@ export function toggleOpenChecklistItem(itemId: string) {
     ...shift,
     openChecklist: shift.openChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
   }));
-  syncShift(shiftStore.get());
+  syncChecklist("open_checklist", shiftStore.get().openChecklist);
 }
 
 export function toggleCloseChecklistItem(itemId: string) {
@@ -599,24 +606,26 @@ export function toggleCloseChecklistItem(itemId: string) {
     ...shift,
     closeChecklist: shift.closeChecklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)),
   }));
-  syncShift(shiftStore.get());
+  syncChecklist("close_checklist", shiftStore.get().closeChecklist);
 }
 
+/**
+ * Раньше эта функция сама выставляла shift.status = "open" по нажатию кнопки.
+ * Теперь статус смены целиком приходит из Quick Resto (см. комментарий у
+ * syncChecklist выше) — здесь только отправляем фото открытия руководителю в
+ * Telegram, чек-лист уже сохранён поштучно через toggleOpenChecklistItem.
+ * Название и сигнатура оставлены как есть, чтобы не трогать Shift.tsx.
+ */
 export function openShift(openedBy: string, photoBlob?: Blob) {
-  shiftStore.update((shift) => ({ ...shift, status: "open", openedBy, openedAt: new Date().toISOString() }));
-  syncShift(shiftStore.get());
   if (photoBlob) uploadAndNotifyShiftPhoto("open", photoBlob, openedBy);
 }
 
+/** Аналогично openShift — статус закрытия смены тоже теперь из Quick Resto. */
 export function closeShift(closedBy: string, handoverNote?: string, photoBlob?: Blob) {
-  shiftStore.update((shift) => ({
-    ...shift,
-    status: "closed",
-    closedBy,
-    closedAt: new Date().toISOString(),
-    handoverNote,
-  }));
-  syncShift(shiftStore.get());
+  if (handoverNote) {
+    shiftStore.update((shift) => ({ ...shift, handoverNote }));
+    syncHandoverNote(handoverNote);
+  }
   if (photoBlob) uploadAndNotifyShiftPhoto("close", photoBlob, closedBy);
 }
 

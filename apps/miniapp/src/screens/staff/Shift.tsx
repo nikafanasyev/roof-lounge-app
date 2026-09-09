@@ -73,7 +73,7 @@ export default function Shift() {
               setOpenPhoto(undefined);
             }}
           >
-            {openReady ? "Открыть смену" : !isChecklistComplete(shift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+            {openReady ? "Отправить" : !isChecklistComplete(shift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
           </button>
         </>
       )}
@@ -116,7 +116,7 @@ export default function Shift() {
               setHandoverNote("");
             }}
           >
-            {closeReady ? "Закрыть смену" : !isChecklistComplete(shift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+            {closeReady ? "Отправить" : !isChecklistComplete(shift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
           </button>
         </>
       )}
