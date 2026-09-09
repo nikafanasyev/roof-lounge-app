@@ -50,6 +50,7 @@ import {
   seedServiceCalls,
   seedShift,
   seedShiftPayroll,
+  seedStaffDirectory,
   seedStaffProfile,
   seedTasks,
 } from "./seed";
@@ -90,6 +91,7 @@ export const shiftStore = new Store<Shift>(seedShift);
 export const problemsStore = new Store<Problem[]>(seedProblems);
 export const tasksStore = new Store<Task[]>(seedTasks);
 export const staffProfileStore = new Store<StaffProfile>(seedStaffProfile);
+export const staffDirectoryStore = new Store<StaffProfile[]>(seedStaffDirectory);
 export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll);
 export const payoutsStore = new Store<PayoutRecord[]>(seedPayouts);
 export const adjustmentsStore = new Store<Adjustment[]>(seedAdjustments);
@@ -761,6 +763,19 @@ export function updateStaffProfile(patch: Partial<Omit<StaffProfile, "id">>) {
   staffProfileStore.update((profile) => ({ ...profile, ...patch }));
 }
 
+// --- Раздел "Сотрудники" у руководителя ---
+//
+// Список всех сотрудников (не только текущего вошедшего) + начисления по
+// каждому из них. Пока тоже только на моках, как и весь личный кабинет выше.
+
+export function listStaffDirectory(): StaffProfile[] {
+  return staffDirectoryStore.get();
+}
+
+export function getStaffProfileById(staffId: string): StaffProfile | undefined {
+  return staffDirectoryStore.get().find((s) => s.id === staffId);
+}
+
 export function yearsOfService(hiredAt: string): { years: number; months: number } {
   const ms = Date.now() - new Date(hiredAt).getTime();
   const totalMonths = Math.max(0, Math.floor(ms / (86400000 * 30.44)));
@@ -774,13 +789,21 @@ export function formatSalaryModel(profile: StaffProfile): string {
     : `Процент от выручки: ${salaryModel.value}%`;
 }
 
+export function listShiftPayrollForStaff(staffId: string): ShiftPayrollEntry[] {
+  return shiftPayrollStore
+    .get()
+    .filter((s) => s.staffId === staffId)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** Личный кабинет сотрудника — всегда про текущего вошедшего (см. DEMO_STAFF_ID выше). */
 export function listShiftPayroll(): ShiftPayrollEntry[] {
-  return [...shiftPayrollStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+  return listShiftPayrollForStaff(getStaffProfile().id);
 }
 
 /** Смены сгруппированы по месяцу — выплаты идут не по сменам, а за период. */
-export function listShiftPayrollByMonth(): { monthLabel: string; total: number; shifts: ShiftPayrollEntry[] }[] {
-  const shifts = listShiftPayroll();
+export function listShiftPayrollByMonthForStaff(staffId: string): { monthLabel: string; total: number; shifts: ShiftPayrollEntry[] }[] {
+  const shifts = listShiftPayrollForStaff(staffId);
   const groups = new Map<string, ShiftPayrollEntry[]>();
   for (const s of shifts) {
     const key = s.date.slice(0, 7); // YYYY-MM
@@ -795,16 +818,34 @@ export function listShiftPayrollByMonth(): { monthLabel: string; total: number; 
   }));
 }
 
+export function listShiftPayrollByMonth(): { monthLabel: string; total: number; shifts: ShiftPayrollEntry[] }[] {
+  return listShiftPayrollByMonthForStaff(getStaffProfile().id);
+}
+
+export function listPayoutsForStaff(staffId: string): PayoutRecord[] {
+  return payoutsStore
+    .get()
+    .filter((p) => p.staffId === staffId)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export function listPayouts(): PayoutRecord[] {
-  return [...payoutsStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+  return listPayoutsForStaff(getStaffProfile().id);
+}
+
+export function listAdjustmentsForStaff(staffId: string): Adjustment[] {
+  return adjustmentsStore
+    .get()
+    .filter((a) => a.staffId === staffId)
+    .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export function listAdjustments(): Adjustment[] {
-  return [...adjustmentsStore.get()].sort((a, b) => b.date.localeCompare(a.date));
+  return listAdjustmentsForStaff(getStaffProfile().id);
 }
 
-export function addAdjustment(type: AdjustmentType, amount: number, reason: string) {
-  adjustmentsStore.update((list) => [{ id: uid(), type, amount, reason, date: new Date().toISOString() }, ...list]);
+export function addAdjustment(type: AdjustmentType, amount: number, reason: string, staffId: string = getStaffProfile().id) {
+  adjustmentsStore.update((list) => [{ id: uid(), staffId, type, amount, reason, date: new Date().toISOString() }, ...list]);
 }
 
 export interface PayrollSummary {
@@ -815,16 +856,20 @@ export interface PayrollSummary {
   due: number;
 }
 
-export function computePayrollSummary(): PayrollSummary {
-  const shifts = shiftPayrollStore.get();
-  const adjustments = adjustmentsStore.get();
-  const payouts = payoutsStore.get();
+export function computePayrollSummaryForStaff(staffId: string): PayrollSummary {
+  const shifts = listShiftPayrollForStaff(staffId);
+  const adjustments = listAdjustmentsForStaff(staffId);
+  const payouts = listPayoutsForStaff(staffId);
   const fromShifts = shifts.reduce((sum, s) => sum + s.salary, 0);
   const paid = payouts.reduce((sum, p) => sum + p.amount, 0);
   const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
   const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
   const earned = fromShifts + bonuses - fines;
   return { earned, fines, bonuses, paid, due: earned - paid };
+}
+
+export function computePayrollSummary(): PayrollSummary {
+  return computePayrollSummaryForStaff(getStaffProfile().id);
 }
 
 export function listSchedule(): ScheduleEntry[] {
