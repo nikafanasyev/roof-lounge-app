@@ -1,6 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
 import { watchServiceCalls, watchShiftPhotos } from "./notify";
+import { watchQuickRestoShifts } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -62,6 +63,24 @@ async function main() {
     console.log("Слушаю shift_photo_uploads через Supabase Realtime — пересылка фото смен включена.");
   } else {
     console.log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STAFF_CHAT_ID (или SHIFT_PHOTOS_CHAT_ID) не заданы — пересылка фото смен выключена.");
+  }
+
+  // Статус смены заведения из Quick Resto (ПИН-код на терминале) — заменяет
+  // ручное открытие/закрытие смены в мини-аппе, см. README и
+  // claude/quickresto-shift-integration.md в проекте.
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.QR_LOGIN && env.QR_PASSWORD) {
+    const qrChatId = env.STAFF_CHAT_ID;
+    watchQuickRestoShifts(async (event) => {
+      const label = event.type === "opened" ? "Смена открыта" : "Смена закрыта";
+      const time = event.at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      console.log(`Quick Resto: ${label.toLowerCase()} — ${event.employee.name}, ${time}`);
+      if (qrChatId) {
+        await bot.api.sendMessage(qrChatId, `${label} (Quick Resto)\n${event.employee.name}, ${time}`);
+      }
+    });
+    console.log("Слушаю статус смены через Quick Resto (ПИН на терминале).");
+  } else {
+    console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }
 
   await bot.start();
