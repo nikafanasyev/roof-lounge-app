@@ -11,9 +11,11 @@ import type {
   Shift,
   ShiftPayrollEntry,
   StaffProfile,
+  StaffRole,
   Task,
   ServiceCall,
 } from "@/types";
+import { computeShiftSalary } from "@/lib/payroll";
 
 // Примерные данные для демонстрации UI. Отмечены как пример — не реальные гости Roof Lounge.
 // При подключении Supabase этот файл не используется, только data/repo.ts.
@@ -220,7 +222,7 @@ export const seedStaffProfile: StaffProfile = {
   medicalBookNumber: undefined, // заполняет руководитель
   medicalBookExpiry: undefined, // заполняет руководитель
   hiredAt: new Date(Date.now() - 86400000 * 240).toISOString(),
-  salaryModel: { type: "percent", value: 5 },
+  salaryModel: { type: "fixed_plus_percent", base: 1000, percent: 15 },
   role: "hookah",
 };
 
@@ -247,17 +249,28 @@ export const seedStaffDirectory: StaffProfile[] = [
   },
 ];
 
+// Зарплата по смене всегда считается из выручки по формуле модели ЗП
+// сотрудника (computeShiftSalary) — не проставляется вручную, чтобы сумма
+// не могла разойтись с моделью ЗП в профиле (сейчас у Никиты 1000 ₽ + 15%
+// от выручки, см. seedStaffProfile.salaryModel).
+//
 // Выручка по сменам 2.09 и 9.09 — пока приблизительная (Никита прислал даты,
 // точные суммы ещё не назвал), проставлено, чтобы в "Моей зарплате" уже было
-// что показать; поправить, когда будут точные цифры по выручке этих смен.
+// что показать; поправить revenue на реальные цифры, когда будут известны —
+// зарплата пересчитается сама.
+const NIKITA_MODEL = seedStaffProfile.salaryModel;
+function nikitaShift(id: string, staffId: string, date: string, revenue: number, role?: StaffRole): ShiftPayrollEntry {
+  return { id, staffId, role, date, revenue, salary: computeShiftSalary(NIKITA_MODEL, revenue) };
+}
+
 export const seedShiftPayroll: ShiftPayrollEntry[] = [
-  { id: "sp6", staffId: "s1", role: "hookah", date: "2026-09-02T21:00:00.000Z", revenue: 80000, salary: 4000 },
-  { id: "sp7", staffId: "s1", role: "hookah", date: "2026-09-09T21:00:00.000Z", revenue: 80000, salary: 4000 },
-  { id: "sp1", staffId: "s1", date: new Date(Date.now() - 86400000 * 1).toISOString(), revenue: 84000, salary: 4200 },
-  { id: "sp2", staffId: "s1", date: new Date(Date.now() - 86400000 * 3).toISOString(), revenue: 61000, salary: 3050 },
-  { id: "sp3", staffId: "s1", date: new Date(Date.now() - 86400000 * 6).toISOString(), revenue: 97000, salary: 4850 },
-  { id: "sp4", staffId: "s1", date: new Date(Date.now() - 86400000 * 9).toISOString(), revenue: 52000, salary: 2600 },
-  { id: "sp5", staffId: "s1", date: new Date(Date.now() - 86400000 * 33).toISOString(), revenue: 71000, salary: 3550 },
+  nikitaShift("sp6", "s1", "2026-09-02T21:00:00.000Z", 80000, "hookah"),
+  nikitaShift("sp7", "s1", "2026-09-09T21:00:00.000Z", 80000, "hookah"),
+  nikitaShift("sp1", "s1", new Date(Date.now() - 86400000 * 1).toISOString(), 84000),
+  nikitaShift("sp2", "s1", new Date(Date.now() - 86400000 * 3).toISOString(), 61000),
+  nikitaShift("sp3", "s1", new Date(Date.now() - 86400000 * 6).toISOString(), 97000),
+  nikitaShift("sp4", "s1", new Date(Date.now() - 86400000 * 9).toISOString(), 52000),
+  nikitaShift("sp5", "s1", new Date(Date.now() - 86400000 * 33).toISOString(), 71000),
 ];
 
 export const seedPayouts: PayoutRecord[] = [
