@@ -784,10 +784,12 @@ export function yearsOfService(hiredAt: string): { years: number; months: number
 
 export function formatSalaryModel(profile: StaffProfile): string {
   const { salaryModel } = profile;
-  return salaryModel.type === "fixed"
-    ? `Фиксированная ставка: ${salaryModel.value.toLocaleString("ru-RU")} ₽ / смена`
-    : `Процент от выручки: ${salaryModel.value}%`;
+  if (salaryModel.type === "fixed") return `Фиксированная ставка: ${salaryModel.value.toLocaleString("ru-RU")} ₽ / смена`;
+  if (salaryModel.type === "percent") return `Процент от выручки: ${salaryModel.value}%`;
+  return `${salaryModel.base.toLocaleString("ru-RU")} ₽ + ${salaryModel.percent}% от выручки`;
 }
+
+export { computeShiftSalary } from "@/lib/payroll";
 
 export function listShiftPayrollForStaff(staffId: string): ShiftPayrollEntry[] {
   return shiftPayrollStore

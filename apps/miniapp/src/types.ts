@@ -138,13 +138,15 @@ export interface WaitlistEntry {
 // --- Личный кабинет сотрудника ---
 
 // Модель ЗП у каждого сотрудника своя и назначается руководителем:
-// фиксированная ставка за смену, либо процент от выручки смены.
-export type SalaryModelType = "fixed" | "percent";
+// фиксированная ставка за смену, процент от выручки смены, либо
+// комбинация — фиксированная часть + процент от выручки (например,
+// "1000 + 15%").
+export type SalaryModelType = "fixed" | "percent" | "fixed_plus_percent";
 
-export interface SalaryModel {
-  type: SalaryModelType;
-  value: number; // fixed: ₽ за смену; percent: % от выручки смены
-}
+export type SalaryModel =
+  | { type: "fixed"; value: number } // ₽ за смену
+  | { type: "percent"; value: number } // % от выручки смены
+  | { type: "fixed_plus_percent"; base: number; percent: number }; // ₽ за смену + % от выручки
 
 export interface StaffProfile {
   id: string;
