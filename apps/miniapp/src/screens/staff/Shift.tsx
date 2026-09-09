@@ -26,6 +26,15 @@ export default function Shift() {
   const openReady = isChecklistComplete(shift.openChecklist) && !!openPhoto;
   const closeReady = isChecklistComplete(shift.closeChecklist) && !!closePhoto;
 
+  // Статус смены теперь приходит из Quick Resto (ПИН на терминале) и
+  // становится "открыта" сразу, как только сотрудник вошёл — то есть до того,
+  // как он успевает отметить чек-лист открытия в приложении. Поэтому какой
+  // чек-лист показывать решаем не по одному статусу, а ещё и по тому, отмечен
+  // ли уже чек-лист открытия: пока не отмечен — показываем открытие, даже
+  // если Quick Resto уже считает смену открытой.
+  const openChecklistDone = isChecklistComplete(shift.openChecklist);
+  const showOpenChecklist = shift.status === "closed" || !openChecklistDone;
+
   return (
     <div className="screen">
       <h1>Смена</h1>
@@ -45,7 +54,7 @@ export default function Shift() {
         )}
       </div>
 
-      {shift.status === "closed" && (
+      {showOpenChecklist && (
         <>
           <h2>Чек-лист открытия</h2>
           {shift.openChecklist.map((item) => (
@@ -78,7 +87,7 @@ export default function Shift() {
         </>
       )}
 
-      {shift.status === "open" && (
+      {shift.status === "open" && !showOpenChecklist && (
         <>
           <h2>Чек-лист закрытия</h2>
           {shift.closeChecklist.map((item) => (
