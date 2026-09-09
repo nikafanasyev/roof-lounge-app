@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
 import { watchServiceCalls, watchShiftPhotos } from "./notify";
-import { watchQuickRestoShifts } from "./quickresto";
+import { fetchHookahRevenueForDate, watchQuickRestoShifts } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -22,6 +22,31 @@ bot.command("start", async (ctx) => {
 
 // Технический пинг, чтобы быстро проверить, что бот жив после деплоя.
 bot.command("ping", (ctx) => ctx.reply("pong"));
+
+// Выручка по кальянам за конкретный день — тот же отчёт Quick Resto, что и
+// /revenue в roofinfobot, портирован на переиспользуемый логин/куки этого бота
+// (см. quickresto.ts). Формат: /revenue 02.09.2026 (день по МСК, 11:00-11:00).
+bot.command("revenue", async (ctx) => {
+  if (!env.QR_LOGIN || !env.QR_PASSWORD) {
+    await ctx.reply("Интеграция с Quick Resto не настроена (нет QR_LOGIN/QR_PASSWORD).");
+    return;
+  }
+  const arg = ctx.match?.toString().trim();
+  const parsed = arg?.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (!parsed) {
+    await ctx.reply("Формат: /revenue ДД.ММ.ГГГГ, например /revenue 02.09.2026");
+    return;
+  }
+  const [, dd, mm, yyyy] = parsed;
+  const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), 8, 0, 0));
+  try {
+    const revenue = await fetchHookahRevenueForDate(date);
+    await ctx.reply(`Выручка по кальянам за ${dd}.${mm}.${yyyy}: ${Math.round(revenue).toLocaleString("ru-RU")} ₽`);
+  } catch (err) {
+    console.error("Quick Resto: /revenue ошибка:", err);
+    await ctx.reply("Не удалось получить выручку из Quick Resto — см. логи бота.");
+  }
+});
 
 bot.catch((err) => {
   console.error("Необработанная ошибка бота:", err);
