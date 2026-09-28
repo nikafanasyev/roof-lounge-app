@@ -217,13 +217,13 @@ export async function fetchHookahRevenueForDate(date: Date): Promise<number> {
   return fetchRevenueForRange(sinceMs, tillMs);
 }
 
-// Выручка по кальянам И "бар/кухня" (всё остальное) за один бизнес-день —
-// нужна для автоматического начисления ЗП обеим ролям при закрытии смены,
-// см. writePayrollForClosedShift ниже.
-async function fetchRevenueSplitForDate(date: Date): Promise<{ hookah: number; barKitchen: number; isoDate: string }> {
+// Выручка по кальянам, "бар/кухня" (всё остальное) и общая — за один
+// бизнес-день. hookah/barKitchen оставлены для истории и команды /revenue,
+// начисление ЗП (ниже) теперь считается от total у обеих ролей.
+async function fetchRevenueSplitForDate(date: Date): Promise<{ hookah: number; barKitchen: number; total: number; isoDate: string }> {
   const { sinceMs, tillMs, isoDate } = businessDayRangeMs(date);
   const [hookah, total] = await Promise.all([fetchRevenueForRange(sinceMs, tillMs), fetchTotalRevenueForRange(sinceMs, tillMs)]);
-  return { hookah, barKitchen: Math.max(0, total - hookah), isoDate };
+  return { hookah, barKitchen: Math.max(0, total - hookah), total, isoDate };
 }
 
 // --- Начисление ЗП по закрытой смене (см. supabase/migrations/0004_staff_payroll.sql) ---
@@ -233,10 +233,15 @@ type SalaryModel =
   | { type: "percent"; value: number }
   | { type: "fixed_plus_percent"; base: number; percent: number };
 
-// Подтверждённая реальная формула для одиночной смены на кальянах (см.
-// FLAT_ONE/PCT_ONE в hookah_bot/bot.py, уже в проде) — используется, только
-// если у сотрудника ещё не проставлена своя salary_model в Supabase.
-const DEFAULT_HOOKAH_SALARY_MODEL: SalaryModel = { type: "fixed_plus_percent", base: 1000, percent: 15 };
+// Актуальная формула (подтверждена Никитой 28.09.2026): 8,5% от ОБЩЕЙ
+// выручки заведения за бизнес-день (бар+кальяны+кухня, не только категория
+// "Кальян") — каждому сотруднику на смене отдельно, независимо от роли и от
+// того, сколько человек в этот день работали (если на кальянах вдвоём — оба
+// получают по 8,5%, а не половину каждому). Раньше здесь была
+// формула "1000₽+15% от кальянной выручки" (только для роли "кальяны", для
+// бара формулы не было вообще) — заменена этой единой формулой. Используется,
+// только если у сотрудника ещё не проставлена своя salary_model в Supabase.
+const DEFAULT_SALARY_MODEL: SalaryModel = { type: "percent", value: 8.5 };
 
 function computeSalary(model: SalaryModel, revenue: number): number {
   if (model.type === "fixed") return model.value;
@@ -262,8 +267,8 @@ async function writeShiftPayrollForRole(
   isoDate: string,
 ) {
   let model = await fetchStaffSalaryModel(supabase, staffId);
-  if (!model && role === "hookah") model = DEFAULT_HOOKAH_SALARY_MODEL; // для бара формулу не угадываем, см. миграцию 0004
-  const salary = model ? computeSalary(model, revenue) : 0;
+  if (!model) model = DEFAULT_SALARY_MODEL; // 8,5% от общей выручки — дефолт для обеих ролей, см. миграцию 0004
+  const salary = computeSalary(model, revenue);
 
   const { error } = await supabase
     .from("shift_payroll")
@@ -272,7 +277,7 @@ async function writeShiftPayrollForRole(
     console.error(`Quick Resto: не удалось записать начисление (${role}):`, error.message);
   } else {
     console.log(
-      `Quick Resto: начислено ${role === "hookah" ? "кальяны" : "бар/кухня"} — ${salary} ₽ (выручка ${Math.round(revenue)} ₽) за ${isoDate}, staff=${staffId}${model ? "" : " (без salary_model — начислено 0)"}`,
+      `Quick Resto: начислено ${role === "hookah" ? "кальяны" : "бар/кухня"} — ${salary} ₽ (выручка ${Math.round(revenue)} ₽) за ${isoDate}, staff=${staffId}`,
     );
   }
 }
@@ -385,7 +390,7 @@ async function processScheduledDate(
   const { sinceMs, tillMs } = businessDayRangeMs(middayMsk);
   const workedStaffIds = await resolveActualWorkedStaffIds(supabase, employees, sinceMs, tillMs);
 
-  let split: { hookah: number; barKitchen: number };
+  let split: { total: number };
   try {
     split = await fetchRevenueSplitForDate(middayMsk);
   } catch (err) {
@@ -393,8 +398,10 @@ async function processScheduledDate(
     return;
   }
 
+  // Начисление теперь считается от общей выручки заведения (не от
+  // кальянной/барной по отдельности) — см. DEFAULT_SALARY_MODEL выше.
   for (const { staff_id, role } of pendingRoles) {
-    const revenue = role === "hookah" ? split.hookah : split.barKitchen;
+    const revenue = split.total;
     if (workedStaffIds.has(staff_id)) {
       await writeShiftPayrollForRole(supabase, null, staff_id, role, revenue, dateIso);
     } else {
