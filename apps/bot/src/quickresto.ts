@@ -126,6 +126,72 @@ async function qrFetchJson<T>(path: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+// --- Выручка по кальянной категории (перенесено из hookah_bot/quickresto.py,
+// уже работающего в проде для того же заведения — see get_revenue_by_days) ---
+
+const HOOKAH_GROUP_ID = 147;
+const HOOKAH_GROUP_CLASS = "ru.edgex.quickresto.modules.warehouse.nomenclature.dish.DishCategory";
+const REPORT_PATH = "/platform/data/front.reports.orders_by_storecategory/select";
+
+interface QuickRestoReportResponse {
+  ds?: { type?: string; object?: { totalSum?: number } }[];
+  utilityData?: { aggregates?: { totalSum?: number } };
+}
+
+// Тот же отчёт, что использует веб-панель для карточки "Выручка" — отфильтрован
+// по группе товаров "Кальян" (id=147). businessDayOffsetInMs/timeZone — те же
+// магические константы, что и в остальных запросах этого файла (МСК, business
+// day начинается в полдень по UTC).
+async function fetchRevenueForRange(sinceMs: number, tillMs: number): Promise<number> {
+  const params = new URLSearchParams({
+    mode: "dateFilter",
+    chartsEnabled: "true",
+    "extParams[className]": "DateFilter",
+    "extParams[dateRange][start]": String(sinceMs),
+    "extParams[dateRange][end]": String(tillMs),
+    "extParams[dateFrom]": String(sinceMs),
+    "extParams[dateTo]": String(tillMs),
+    "customParams[includeNestedGroups][eq]": "false",
+    "filterField[]": "groupStoreItem",
+    "filterOperator[]": "contains",
+    "filterValue[0][0][branch]": "true",
+    "filterValue[0][0][deleted]": "false",
+    "filterValue[0][0][title]": "Кальян",
+    "filterValue[0][0][id]": String(HOOKAH_GROUP_ID),
+    "filterValue[0][0][className]": HOOKAH_GROUP_CLASS,
+    "filterValue[0][0][_SyntheticId]": `${HOOKAH_GROUP_ID}${HOOKAH_GROUP_CLASS}`,
+    businessDayOffsetInMs: "43200000",
+    timeZone: "-180",
+  });
+
+  const data = await qrFetchJson<QuickRestoReportResponse>(`${REPORT_PATH}?${params.toString()}`);
+
+  const branchItem = (data.ds ?? []).find((item) => item.type === "branchItem");
+  if (branchItem?.object?.totalSum != null) return Number(branchItem.object.totalSum);
+  return Number(data.utilityData?.aggregates?.totalSum ?? 0);
+}
+
+// Выручка по кальянной категории за один бизнес-день: с 11:00 до 11:00
+// следующего дня по московскому времени (то же окно, что использует
+// hookah_bot для дневной сверки — совпадает с businessDayOffsetInMs=12ч).
+export async function fetchHookahRevenueForDate(date: Date): Promise<number> {
+  const msk = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = Number(msk.find((p) => p.type === "year")!.value);
+  const m = Number(msk.find((p) => p.type === "month")!.value);
+  const d = Number(msk.find((p) => p.type === "day")!.value);
+
+  // 11:00 МСК = 08:00 UTC (МСК = UTC+3, без перехода на летнее время).
+  const sinceMs = Date.UTC(y, m - 1, d, 8, 0, 0);
+  const tillMs = sinceMs + 24 * 60 * 60 * 1000;
+
+  return fetchRevenueForRange(sinceMs, tillMs);
+}
+
 async function fetchEmployees(): Promise<QuickRestoEmployee[]> {
   const data = await qrFetchJson<{ ds?: { object: QuickRestoEmployeeRaw }[] }>(EMPLOYEES_PATH);
   return (data.ds ?? [])
