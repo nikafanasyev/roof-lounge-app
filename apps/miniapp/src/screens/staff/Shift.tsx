@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "@/data/useStore";
 import {
   closeShift,
+  getStaffProfile,
   isChecklistComplete,
   openShift,
   shiftStore,
@@ -10,8 +11,6 @@ import {
 } from "@/data/repo";
 import CameraCapture from "@/components/CameraCapture";
 import type { ChecklistItem, StaffRole } from "@/types";
-
-const CURRENT_STAFF_NAME = "Никита Афанасьев"; // заглушка до подключения Telegram-авторизации
 
 // Пока нет привязки роли к сотруднику через График — сотрудник выбирает сам,
 // за что отвечает в эту смену (бар или кальяны), и это запоминается на
@@ -147,7 +146,7 @@ export default function Shift() {
             style={{ marginTop: 12 }}
             disabled={!openReady}
             onClick={() => {
-              openShift(role, CURRENT_STAFF_NAME, openPhoto?.blob);
+              openShift(role, getStaffProfile().name, openPhoto?.blob);
               setOpenPhoto(undefined);
             }}
           >
@@ -184,7 +183,7 @@ export default function Shift() {
             className="btn primary"
             disabled={!closeReady}
             onClick={() => {
-              closeShift(role, CURRENT_STAFF_NAME, handoverNote || undefined, closePhoto?.blob);
+              closeShift(role, getStaffProfile().name, handoverNote || undefined, closePhoto?.blob);
               setClosePhoto(undefined);
               setHandoverNote("");
             }}

@@ -11,10 +11,10 @@
 // в фоне, пишут то же самое в Supabase — экраны об этом не знают, сигнатуры
 // функций не поменялись.
 //
-// Ограничение текущей версии: ещё нет реальной Telegram-авторизации персонала
-// (см. README, п. 4), поэтому все операции "от лица сотрудника" в Supabase
-// записываются на один служебный профиль DEMO_STAFF_ID. Когда появится
-// авторизация — заменить на staff.id из сессии.
+// Текущий сотрудник определяется по Telegram-аккаунту (см. ensureCurrentStaff
+// ниже) — каждый, кто открывает мини-апп через Telegram, получает свою
+// собственную строку staff (или ту, что уже создал бот при входе по ПИН на
+// терминале Quick Resto, см. apps/bot/src/quickresto.ts), а не общую демо-запись.
 
 import type {
   Adjustment,
@@ -29,6 +29,7 @@ import type {
   Problem,
   ProblemCategory,
   RoleChecklists,
+  SalaryModel,
   ScheduleEntry,
   ServiceCall,
   ServiceCallType,
@@ -55,6 +56,7 @@ import {
   seedTasks,
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { getTelegramUser } from "@/lib/telegram";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
 
@@ -102,7 +104,9 @@ const uid = () => crypto.randomUUID();
 
 // --- Синхронизация с Supabase (см. заголовок файла) ---
 
-const DEMO_STAFF_ID = "00000000-0000-4000-8000-000000000001";
+// Фолбэк вне Telegram (обычный браузер при разработке, без initDataUnsafe.user) —
+// см. ensureCurrentStaff ниже. В реальном Telegram-клиенте используется
+// настоящий telegram_id пользователя, отдельно от этого фолбэка.
 const DEMO_STAFF_TELEGRAM_ID = 1;
 const DEMO_STAFF_NAME = "Никита Афанасьев";
 
@@ -122,21 +126,73 @@ export async function initData(): Promise<void> {
   if (!isSupabaseConfigured || !supabase || syncInitialized) return;
   syncInitialized = true;
   try {
-    await ensureDemoStaff();
+    await ensureCurrentStaff();
     await loadTables();
-    await Promise.all([loadFlavors(), loadGuests(), loadMixes(), loadServiceCalls(), loadShift(), loadProblems(), loadTasks()]);
+    await Promise.all([
+      loadFlavors(),
+      loadGuests(),
+      loadMixes(),
+      loadServiceCalls(),
+      loadShift(),
+      loadProblems(),
+      loadTasks(),
+      loadStaffDirectory(),
+      loadShiftPayroll(),
+      loadAdjustments(),
+      loadPayouts(),
+    ]);
     subscribeRealtime();
   } catch (error) {
     logSyncError("initData", error);
   }
 }
 
-async function ensureDemoStaff() {
-  staffNameById.set(DEMO_STAFF_ID, DEMO_STAFF_NAME);
-  const { error } = await supabase!
+/**
+ * Определяет текущего сотрудника по Telegram-аккаунту (initDataUnsafe.user.id,
+ * см. lib/telegram.ts) — раньше здесь всегда была одна служебная демо-запись
+ * DEMO_STAFF_ID, из-за чего все, кто открывал мини-апп, писались "за одного
+ * человека". Вне Telegram (обычный браузер при разработке) getTelegramUser()
+ * вернёт null — тогда используем DEMO_STAFF_TELEGRAM_ID, как и раньше.
+ *
+ * upsert с ignoreDuplicates: строка для этого telegram_id может уже
+ * существовать — её мог создать бот раньше (apps/bot/src/quickresto.ts
+ * upsertStaffForEmployee, при входе по ПИН на терминале Quick Resto). Тогда
+ * ничего не перезаписываем, а просто читаем то, что уже есть (имя из Quick
+ * Resto точнее, чем из Telegram; salary_model и т.д. мог проставить бот).
+ */
+async function ensureCurrentStaff() {
+  const tgUser = getTelegramUser();
+  const telegramId = tgUser?.id ?? DEMO_STAFF_TELEGRAM_ID;
+  const fallbackName = tgUser ? `${tgUser.first_name}${tgUser.last_name ? ` ${tgUser.last_name}` : ""}`.trim() : DEMO_STAFF_NAME;
+
+  const { error: upsertError } = await supabase!
     .from("staff")
-    .upsert({ id: DEMO_STAFF_ID, telegram_id: DEMO_STAFF_TELEGRAM_ID, name: DEMO_STAFF_NAME, role: "master" }, { onConflict: "id" });
-  if (error) logSyncError("ensureDemoStaff", error);
+    .upsert({ telegram_id: telegramId, name: fallbackName, role: "master" }, { onConflict: "telegram_id", ignoreDuplicates: true });
+  if (upsertError) logSyncError("ensureCurrentStaff:upsert", upsertError);
+
+  const { data: row, error: selectError } = await supabase!
+    .from("staff")
+    .select("id, name, work_role, salary_model, photo_url, phone, email, medical_book_number, medical_book_expiry, hired_at")
+    .eq("telegram_id", telegramId)
+    .single();
+  if (selectError || !row) return logSyncError("ensureCurrentStaff:select", selectError);
+
+  staffNameById.set(row.id, row.name ?? fallbackName);
+  staffProfileStore.update((prev) => ({
+    ...prev,
+    id: row.id,
+    name: row.name ?? fallbackName,
+    photoUrl: row.photo_url ?? prev.photoUrl,
+    phone: row.phone ?? prev.phone,
+    email: row.email ?? prev.email,
+    medicalBookNumber: row.medical_book_number ?? prev.medicalBookNumber,
+    medicalBookExpiry: row.medical_book_expiry ?? prev.medicalBookExpiry,
+    hiredAt: row.hired_at ?? prev.hiredAt,
+    // Модель ЗП и роль на смене — из Supabase, если уже проставлены (бот или
+    // руководитель), иначе оставляем заготовку из seed.ts (не пустое поле).
+    salaryModel: (row.salary_model as SalaryModel | null) ?? prev.salaryModel,
+    role: (row.work_role as StaffRole | null) ?? prev.role,
+  }));
 }
 
 async function loadTables() {
@@ -319,6 +375,75 @@ async function loadTasks() {
   );
 }
 
+async function loadStaffDirectory() {
+  const { data, error } = await supabase!.from("staff").select("*");
+  if (error) return logSyncError("loadStaffDirectory", error);
+  for (const r of data ?? []) staffNameById.set(r.id, r.name);
+  staffDirectoryStore.set(
+    (data ?? [])
+      // Без salary_model это ещё не "сотрудник" для карточки в разделе
+      // "Сотрудники" — просто кто-то, кто когда-то вошёл по ПИН/Telegram
+      // (бот создаёт строку staff уже при первом входе на терминал).
+      .filter((r) => r.salary_model)
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        photoUrl: r.photo_url ?? undefined,
+        phone: r.phone ?? undefined,
+        email: r.email ?? undefined,
+        medicalBookNumber: r.medical_book_number ?? undefined,
+        medicalBookExpiry: r.medical_book_expiry ?? undefined,
+        hiredAt: r.hired_at ?? r.created_at,
+        salaryModel: r.salary_model as SalaryModel,
+        role: (r.work_role as StaffRole | null) ?? undefined,
+      })),
+  );
+}
+
+async function loadShiftPayroll() {
+  const { data, error } = await supabase!.from("shift_payroll").select("*").order("date", { ascending: false });
+  if (error) return logSyncError("loadShiftPayroll", error);
+  shiftPayrollStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      staffId: r.staff_id,
+      date: r.date,
+      revenue: Number(r.revenue),
+      salary: Number(r.salary),
+      role: (r.role as StaffRole | null) ?? undefined,
+    })),
+  );
+}
+
+async function loadAdjustments() {
+  const { data, error } = await supabase!.from("adjustments").select("*").order("date", { ascending: false });
+  if (error) return logSyncError("loadAdjustments", error);
+  adjustmentsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      staffId: r.staff_id,
+      type: r.type,
+      amount: Number(r.amount),
+      reason: r.reason,
+      date: r.date,
+    })),
+  );
+}
+
+async function loadPayouts() {
+  const { data, error } = await supabase!.from("payouts").select("*").order("date", { ascending: false });
+  if (error) return logSyncError("loadPayouts", error);
+  payoutsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      staffId: r.staff_id,
+      date: r.date,
+      amount: Number(r.amount),
+      note: r.note ?? undefined,
+    })),
+  );
+}
+
 function subscribeRealtime() {
   if (!supabase) return;
   supabase
@@ -331,6 +456,10 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "shifts" }, () => loadShift())
     .on("postgres_changes", { event: "*", schema: "public", table: "problems" }, () => loadProblems())
     .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => loadTasks())
+    .on("postgres_changes", { event: "*", schema: "public", table: "staff" }, () => loadStaffDirectory())
+    .on("postgres_changes", { event: "*", schema: "public", table: "shift_payroll" }, () => loadShiftPayroll())
+    .on("postgres_changes", { event: "*", schema: "public", table: "adjustments" }, () => loadAdjustments())
+    .on("postgres_changes", { event: "*", schema: "public", table: "payouts" }, () => loadPayouts())
     .subscribe();
 }
 
@@ -479,7 +608,7 @@ export function createMix(input: {
       .insert({
         id: mix.id,
         guest_id: mix.guestId,
-        master_id: DEMO_STAFF_ID,
+        master_id: getStaffProfile().id,
         title: mix.title,
         cover_url: mix.coverEmoji,
         strength: mix.strength,
@@ -540,7 +669,7 @@ export function resolveServiceCall(id: string) {
   if (isSupabaseConfigured && supabase) {
     supabase
       .from("service_calls")
-      .update({ status: "resolved", resolved_at: resolvedAt, resolved_by: DEMO_STAFF_ID })
+      .update({ status: "resolved", resolved_at: resolvedAt, resolved_by: getStaffProfile().id })
       .eq("id", id)
       .then(({ error }) => error && logSyncError("resolveServiceCall", error));
   }
@@ -583,6 +712,25 @@ function syncChecklist(role: StaffRole, kind: "open" | "close", items: Checklist
     .update({ [roleChecklistColumn(role, kind)]: items })
     .eq("id", shiftStore.get().id)
     .then(({ error }) => error && logSyncError("syncChecklist", error));
+}
+
+// {role}_opened_by / {role}_closed_by — кто именно из "универсалов" на смене
+// отвечал за бар/кальяны (не путать с opened_by/closed_at на самой строке —
+// это венью-статус из Quick Resto, см. комментарий выше). Нужно для
+// автоматического начисления ЗП: бот при закрытии смены читает эти поля,
+// чтобы понять, кому какую выручку начислять (apps/bot/src/quickresto.ts
+// writePayrollForClosedShift).
+function roleStaffColumn(role: StaffRole, kind: "open" | "close"): string {
+  return kind === "open" ? `${role}_opened_by` : `${role}_closed_by`;
+}
+
+function syncRoleClaim(role: StaffRole, kind: "open" | "close") {
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("shifts")
+    .update({ [roleStaffColumn(role, kind)]: getStaffProfile().id })
+    .eq("id", shiftStore.get().id)
+    .then(({ error }) => error && logSyncError("syncRoleClaim", error));
 }
 
 function syncHandoverNote(note: string) {
@@ -654,11 +802,13 @@ export function toggleCloseChecklistItem(role: StaffRole, itemId: string) {
  * Теперь принимает роль (бар/кальяны), т.к. у каждой роли свой чек-лист и своё фото.
  */
 export function openShift(role: StaffRole, openedBy: string, photoBlob?: Blob) {
+  syncRoleClaim(role, "open");
   if (photoBlob) uploadAndNotifyShiftPhoto(role, "open", photoBlob, openedBy);
 }
 
 /** Аналогично openShift — статус закрытия смены тоже теперь из Quick Resto. */
 export function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlob?: Blob) {
+  syncRoleClaim(role, "close");
   if (handoverNote) {
     shiftStore.update((shift) => ({ ...shift, handoverNote }));
     syncHandoverNote(handoverNote);
@@ -686,7 +836,7 @@ export function reportProblem(input: { category: ProblemCategory; description: s
         id: problem.id,
         category: problem.category,
         description: problem.description,
-        reported_by: DEMO_STAFF_ID,
+        reported_by: getStaffProfile().id,
         status: problem.status,
         created_at: problem.createdAt,
       })
@@ -743,7 +893,7 @@ export function addTask(title: string, assignee?: string, dueDate?: string) {
         title: task.title,
         due_date: task.dueDate ?? null,
         done: false,
-        created_by: DEMO_STAFF_ID,
+        created_by: getStaffProfile().id,
       })
       .then(({ error }) => error && logSyncError("addTask", error));
   }
@@ -798,7 +948,7 @@ export function listShiftPayrollForStaff(staffId: string): ShiftPayrollEntry[] {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
-/** Личный кабинет сотрудника — всегда про текущего вошедшего (см. DEMO_STAFF_ID выше). */
+/** Личный кабинет сотрудника — всегда про текущего вошедшего (см. ensureCurrentStaff выше). */
 export function listShiftPayroll(): ShiftPayrollEntry[] {
   return listShiftPayrollForStaff(getStaffProfile().id);
 }
@@ -847,7 +997,21 @@ export function listAdjustments(): Adjustment[] {
 }
 
 export function addAdjustment(type: AdjustmentType, amount: number, reason: string, staffId: string = getStaffProfile().id) {
-  adjustmentsStore.update((list) => [{ id: uid(), staffId, type, amount, reason, date: new Date().toISOString() }, ...list]);
+  const entry: Adjustment = { id: uid(), staffId, type, amount, reason, date: new Date().toISOString() };
+  adjustmentsStore.update((list) => [entry, ...list]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("adjustments")
+      .insert({
+        id: entry.id,
+        staff_id: staffId,
+        type,
+        amount,
+        reason,
+        date: entry.date.slice(0, 10), // колонка date, не timestamptz
+      })
+      .then(({ error }) => error && logSyncError("addAdjustment", error));
+  }
 }
 
 export interface PayrollSummary {

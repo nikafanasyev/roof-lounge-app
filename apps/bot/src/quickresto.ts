@@ -171,10 +171,29 @@ async function fetchRevenueForRange(sinceMs: number, tillMs: number): Promise<nu
   return Number(data.utilityData?.aggregates?.totalSum ?? 0);
 }
 
-// Выручка по кальянной категории за один бизнес-день: с 11:00 до 11:00
-// следующего дня по московскому времени (то же окно, что использует
-// hookah_bot для дневной сверки — совпадает с businessDayOffsetInMs=12ч).
-export async function fetchHookahRevenueForDate(date: Date): Promise<number> {
+// Тот же отчёт без фильтра по категории — вся выручка заведения за диапазон
+// (нужна, чтобы получить "бар/кухня" = всё минус кальяны, см. get_month_revenue
+// в hookah_bot/quickresto.py — там та же логика totalSum − hookah).
+async function fetchTotalRevenueForRange(sinceMs: number, tillMs: number): Promise<number> {
+  const params = new URLSearchParams({
+    mode: "dateFilter",
+    chartsEnabled: "true",
+    "extParams[className]": "DateFilter",
+    "extParams[dateRange][start]": String(sinceMs),
+    "extParams[dateRange][end]": String(tillMs),
+    "extParams[dateFrom]": String(sinceMs),
+    "extParams[dateTo]": String(tillMs),
+    businessDayOffsetInMs: "43200000",
+    timeZone: "-180",
+  });
+  const data = await qrFetchJson<QuickRestoReportResponse>(`${REPORT_PATH}?${params.toString()}`);
+  return Number(data.utilityData?.aggregates?.totalSum ?? 0);
+}
+
+// Границы одного бизнес-дня (11:00-11:00 МСК) в UTC-миллисекундах для даты,
+// заданной в любой таймзоне, плюс ISO-дата этого бизнес-дня (для записи в
+// shift_payroll.date) — общее для всех функций выручки ниже.
+function businessDayRangeMs(date: Date): { sinceMs: number; tillMs: number; isoDate: string } {
   const msk = new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Europe/Moscow",
     year: "numeric",
@@ -187,9 +206,184 @@ export async function fetchHookahRevenueForDate(date: Date): Promise<number> {
 
   // 11:00 МСК = 08:00 UTC (МСК = UTC+3, без перехода на летнее время).
   const sinceMs = Date.UTC(y, m - 1, d, 8, 0, 0);
-  const tillMs = sinceMs + 24 * 60 * 60 * 1000;
+  return { sinceMs, tillMs: sinceMs + 24 * 60 * 60 * 1000, isoDate: `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` };
+}
 
+// Выручка по кальянной категории за один бизнес-день: с 11:00 до 11:00
+// следующего дня по московскому времени (то же окно, что использует
+// hookah_bot для дневной сверки — совпадает с businessDayOffsetInMs=12ч).
+export async function fetchHookahRevenueForDate(date: Date): Promise<number> {
+  const { sinceMs, tillMs } = businessDayRangeMs(date);
   return fetchRevenueForRange(sinceMs, tillMs);
+}
+
+// Выручка по кальянам И "бар/кухня" (всё остальное) за один бизнес-день —
+// нужна для автоматического начисления ЗП обеим ролям при закрытии смены,
+// см. writePayrollForClosedShift ниже.
+async function fetchRevenueSplitForDate(date: Date): Promise<{ hookah: number; barKitchen: number; isoDate: string }> {
+  const { sinceMs, tillMs, isoDate } = businessDayRangeMs(date);
+  const [hookah, total] = await Promise.all([fetchRevenueForRange(sinceMs, tillMs), fetchTotalRevenueForRange(sinceMs, tillMs)]);
+  return { hookah, barKitchen: Math.max(0, total - hookah), isoDate };
+}
+
+// --- Начисление ЗП по закрытой смене (см. supabase/migrations/0004_staff_payroll.sql) ---
+
+type SalaryModel =
+  | { type: "fixed"; value: number }
+  | { type: "percent"; value: number }
+  | { type: "fixed_plus_percent"; base: number; percent: number };
+
+// Подтверждённая реальная формула для одиночной смены на кальянах (см.
+// FLAT_ONE/PCT_ONE в hookah_bot/bot.py, уже в проде) — используется, только
+// если у сотрудника ещё не проставлена своя salary_model в Supabase.
+const DEFAULT_HOOKAH_SALARY_MODEL: SalaryModel = { type: "fixed_plus_percent", base: 1000, percent: 15 };
+
+function computeSalary(model: SalaryModel, revenue: number): number {
+  if (model.type === "fixed") return model.value;
+  if (model.type === "percent") return Math.round((revenue * model.value) / 100);
+  return Math.round(model.base + (revenue * model.percent) / 100);
+}
+
+async function fetchStaffSalaryModel(supabase: SupabaseClient, staffId: string): Promise<SalaryModel | null> {
+  const { data, error } = await supabase.from("staff").select("salary_model").eq("id", staffId).maybeSingle();
+  if (error) {
+    console.error("Quick Resto: не удалось прочитать salary_model сотрудника:", error.message);
+    return null;
+  }
+  return (data?.salary_model as SalaryModel | null) ?? null;
+}
+
+async function writeShiftPayrollForRole(
+  supabase: SupabaseClient,
+  shiftRowId: string,
+  staffId: string,
+  role: "bar" | "hookah",
+  revenue: number,
+  isoDate: string,
+) {
+  let model = await fetchStaffSalaryModel(supabase, staffId);
+  if (!model && role === "hookah") model = DEFAULT_HOOKAH_SALARY_MODEL; // для бара формулу не угадываем, см. миграцию 0004
+  const salary = model ? computeSalary(model, revenue) : 0;
+
+  const { error } = await supabase
+    .from("shift_payroll")
+    .insert({ staff_id: staffId, shift_id: shiftRowId, role, date: isoDate, revenue, salary });
+  if (error) {
+    console.error(`Quick Resto: не удалось записать начисление (${role}):`, error.message);
+  } else {
+    console.log(
+      `Quick Resto: начислено ${role === "hookah" ? "кальяны" : "бар/кухня"} — ${salary} ₽ (выручка ${Math.round(revenue)} ₽) за ${isoDate}, staff=${staffId}${model ? "" : " (без salary_model — начислено 0)"}`,
+    );
+  }
+}
+
+interface ShiftForPayroll {
+  id: string;
+  opened_at: string | null;
+  closed_at: string | null;
+  bar_opened_by: string | null;
+  hookah_opened_by: string | null;
+  bar_closed_by: string | null;
+  hookah_closed_by: string | null;
+}
+
+// Роль закрепляется за конкретным сотрудником в мини-аппе, когда он на экране
+// "Смена" открывает чек-лист своей роли (bar_opened_by/hookah_opened_by в
+// shifts, см. apps/miniapp/src/data/repo.ts openShift). Если он этого не
+// сделал — писать начисление некому, пропускаем с логом (а не гадаем).
+async function writePayrollForShift(supabase: SupabaseClient, shift: ShiftForPayroll) {
+  const barStaffId = shift.bar_opened_by ?? shift.bar_closed_by;
+  const hookahStaffId = shift.hookah_opened_by ?? shift.hookah_closed_by;
+  if (!barStaffId && !hookahStaffId) {
+    console.log(`Quick Resto: начисление за смену ${shift.id} пропущено — ни для бара, ни для кальянов не закреплён сотрудник (чек-лист роли не открывали в мини-аппе)`);
+    return;
+  }
+
+  let split: { hookah: number; barKitchen: number; isoDate: string };
+  try {
+    split = await fetchRevenueSplitForDate(shift.opened_at ? new Date(shift.opened_at) : new Date(shift.closed_at!));
+  } catch (err) {
+    console.error(`Quick Resto: не удалось получить выручку для начисления ЗП по смене ${shift.id}:`, err);
+    return;
+  }
+
+  if (hookahStaffId) await writeShiftPayrollForRole(supabase, shift.id, hookahStaffId, "hookah", split.hookah, split.isoDate);
+  if (barStaffId) await writeShiftPayrollForRole(supabase, shift.id, barStaffId, "bar", split.barKitchen, split.isoDate);
+}
+
+/**
+ * Ежедневное начисление ЗП — по просьбе пользователя вынесено из момента
+ * закрытия смены (не зависит от мгновенного, иногда ненадёжного детекта
+ * статуса смены) в отдельное задание, срабатывающее раз в сутки в 10:00 МСК.
+ * К этому времени бар уже точно закрыт всю ночь, и выручка за бизнес-день
+ * (11:00-11:00) больше не изменится.
+ *
+ * Берёт последние закрытые смены, для которых ещё нет ни одной строки в
+ * shift_payroll, и считает начисление по каждой — так подхватываются и
+ * смены за прошлые дни, если по какой-то причине задание не сработало вовремя.
+ */
+async function runDailyPayrollJob(supabase: SupabaseClient) {
+  const { data: shifts, error } = await supabase
+    .from("shifts")
+    .select("id, opened_at, closed_at, bar_opened_by, hookah_opened_by, bar_closed_by, hookah_closed_by")
+    .not("closed_at", "is", null)
+    .order("closed_at", { ascending: false })
+    .limit(14); // с запасом на случай пропущенных дней, не только вчера
+  if (error) return console.error("Quick Resto: не удалось прочитать закрытые смены для начисления ЗП:", error.message);
+  if (!shifts?.length) return;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("shift_payroll")
+    .select("shift_id")
+    .in(
+      "shift_id",
+      shifts.map((s: ShiftForPayroll) => s.id),
+    );
+  if (existingError) return console.error("Quick Resto: не удалось проверить уже начисленные смены:", existingError.message);
+  const alreadyDone = new Set((existing ?? []).map((r: { shift_id: string }) => r.shift_id));
+
+  const pending = (shifts as ShiftForPayroll[]).filter((s) => !alreadyDone.has(s.id));
+  if (!pending.length) {
+    console.log("Quick Resto: ежедневное начисление ЗП — новых закрытых смен нет");
+    return;
+  }
+  console.log(`Quick Resto: ежедневное начисление ЗП — обрабатываю ${pending.length} смен`);
+  for (const shift of pending) {
+    await writePayrollForShift(supabase, shift);
+  }
+}
+
+function msUntilNextMoscowHour(hour: number): number {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const h = Number(parts.find((p) => p.type === "hour")!.value);
+  const m = Number(parts.find((p) => p.type === "minute")!.value);
+  const s = Number(parts.find((p) => p.type === "second")!.value);
+  const nowSeconds = h * 3600 + m * 60 + s;
+  const targetSeconds = hour * 3600;
+  const diffSeconds = targetSeconds > nowSeconds ? targetSeconds - nowSeconds : 24 * 3600 - (nowSeconds - targetSeconds);
+  return diffSeconds * 1000;
+}
+
+const PAYROLL_JOB_HOUR_MSK = 10;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Планирует runDailyPayrollJob на 10:00 МСК каждый день (первый запуск — на ближайшие 10:00). */
+export function scheduleDailyPayrollJob() {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  function run() {
+    runDailyPayrollJob(supabase).catch((err) => console.error("Quick Resto: ошибка ежедневного начисления ЗП:", err));
+    setTimeout(run, ONE_DAY_MS);
+  }
+  const delay = msUntilNextMoscowHour(PAYROLL_JOB_HOUR_MSK);
+  setTimeout(run, delay);
+  console.log(`Quick Resto: ежедневное начисление ЗП запланировано на ${PAYROLL_JOB_HOUR_MSK}:00 МСК (через ${Math.round(delay / 60000)} мин)`);
 }
 
 async function fetchEmployees(): Promise<QuickRestoEmployee[]> {
@@ -399,6 +593,11 @@ async function closeVenueShift(supabase: SupabaseClient, shiftRowId: string, emp
     .update({ closed_by: staffId, closed_at: closedAt.toISOString() })
     .eq("id", shiftRowId);
   if (error) console.error("Quick Resto: не удалось закрыть строку смены:", error.message);
+  // Начисление ЗП здесь НЕ считаем — оно теперь отдельным ежедневным заданием
+  // в 10:00 МСК, см. schedulePayrollJob ниже. Так надёжнее: не зависит от
+  // мгновенного детекта закрытия смены (см. известную проблему с задержкой/
+  // сбоями статуса смены в claude/quickresto-shift-integration.md), плюс к
+  // 10 утра бар уже точно закрыт и выручка за бизнес-день не изменится.
 }
 
 /**
