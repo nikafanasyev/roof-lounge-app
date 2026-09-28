@@ -18,6 +18,7 @@ import Summary from "@/screens/manager/Summary";
 import ServiceCalls from "@/screens/manager/ServiceCalls";
 import StaffList from "@/screens/manager/StaffList";
 import StaffDetail from "@/screens/manager/StaffDetail";
+import SchedulePayroll from "@/screens/manager/SchedulePayroll";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 
 // Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
@@ -64,6 +65,9 @@ function ManagerNav() {
       </NavLink>
       <NavLink to="/manager/staff" className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">👥</span>Сотрудники
+      </NavLink>
+      <NavLink to="/manager/schedule" className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">📅</span>График
       </NavLink>
     </nav>
   );
@@ -122,6 +126,7 @@ function RoleShell() {
         <Route path="/manager/calls" element={<ServiceCalls />} />
         <Route path="/manager/staff" element={<StaffList />} />
         <Route path="/manager/staff/:staffId" element={<StaffDetail />} />
+        <Route path="/manager/schedule" element={<SchedulePayroll />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

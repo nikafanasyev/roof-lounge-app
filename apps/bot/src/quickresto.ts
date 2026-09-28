@@ -255,7 +255,7 @@ async function fetchStaffSalaryModel(supabase: SupabaseClient, staffId: string):
 
 async function writeShiftPayrollForRole(
   supabase: SupabaseClient,
-  shiftRowId: string,
+  shiftRowId: string | null,
   staffId: string,
   role: "bar" | "hookah",
   revenue: number,
@@ -277,79 +277,156 @@ async function writeShiftPayrollForRole(
   }
 }
 
-interface ShiftForPayroll {
-  id: string;
-  opened_at: string | null;
-  closed_at: string | null;
-  bar_opened_by: string | null;
-  hookah_opened_by: string | null;
-  bar_closed_by: string | null;
-  hookah_closed_by: string | null;
+// --- Сверка графика с Quick Resto (см. supabase/migrations/0005_schedule_payroll_issues.sql) ---
+//
+// Источник истины "кто на какой роли" — график, который руководитель
+// составляет заранее в мини-аппе (раздел "График и начисления"), а не
+// реал-тайм действия в чек-листе смены: их ненадёжно сопоставлять с ролью на
+// лету, поэтому сверка происходит на следующий день, пакетно, с фактическими
+// данными Quick Resto за уже закрывшийся бизнес-день.
+
+export interface PayrollIssueEvent {
+  date: string; // ISO-дата (YYYY-MM-DD)
+  role: "bar" | "hookah";
+  expectedStaffName: string;
+  actualStaffNames: string[];
 }
 
-// Роль закрепляется за конкретным сотрудником в мини-аппе, когда он на экране
-// "Смена" открывает чек-лист своей роли (bar_opened_by/hookah_opened_by в
-// shifts, см. apps/miniapp/src/data/repo.ts openShift). Если он этого не
-// сделал — писать начисление некому, пропускаем с логом (а не гадаем).
-async function writePayrollForShift(supabase: SupabaseClient, shift: ShiftForPayroll) {
-  const barStaffId = shift.bar_opened_by ?? shift.bar_closed_by;
-  const hookahStaffId = shift.hookah_opened_by ?? shift.hookah_closed_by;
-  if (!barStaffId && !hookahStaffId) {
-    console.log(`Quick Resto: начисление за смену ${shift.id} пропущено — ни для бара, ни для кальянов не закреплён сотрудник (чек-лист роли не открывали в мини-аппе)`);
+async function fetchStaffName(supabase: SupabaseClient, staffId: string): Promise<string> {
+  const { data } = await supabase.from("staff").select("name").eq("id", staffId).maybeSingle();
+  return (data?.name as string | undefined) ?? staffId;
+}
+
+async function writePayrollIssue(
+  supabase: SupabaseClient,
+  onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  dateIso: string,
+  role: "bar" | "hookah",
+  expectedStaffId: string,
+  actualStaffIds: string[],
+  revenue: number,
+) {
+  const { error } = await supabase
+    .from("payroll_issues")
+    .insert({ date: dateIso, role, expected_staff_id: expectedStaffId, actual_staff_ids: actualStaffIds, revenue });
+  if (error) {
+    console.error(`Quick Resto: не удалось записать расхождение графика (${dateIso}, ${role}):`, error.message);
     return;
   }
+  console.log(`Quick Resto: график не совпал с Quick Resto — ${dateIso}, роль ${role === "hookah" ? "кальяны" : "бар"}. Начисление отложено.`);
 
-  let split: { hookah: number; barKitchen: number; isoDate: string };
+  const expectedStaffName = await fetchStaffName(supabase, expectedStaffId);
+  const actualStaffNames = await Promise.all(actualStaffIds.map((id) => fetchStaffName(supabase, id)));
+  await onIssue({ date: dateIso, role, expectedStaffName, actualStaffNames });
+}
+
+async function alreadyHandled(supabase: SupabaseClient, dateIso: string, role: "bar" | "hookah"): Promise<boolean> {
+  const [payroll, issue] = await Promise.all([
+    supabase.from("shift_payroll").select("id").eq("date", dateIso).eq("role", role).limit(1),
+    supabase.from("payroll_issues").select("id").eq("date", dateIso).eq("role", role).limit(1),
+  ]);
+  return Boolean(payroll.data?.length) || Boolean(issue.data?.length);
+}
+
+// Кто реально работал в бизнес-день [sinceMs, tillMs) по Quick Resto —
+// пробегаем всех сотрудников терминала и смотрим, есть ли у них запись смены,
+// пересекающая это окно (см. ту же логику, что и в watchQuickRestoShifts —
+// startTime===endTime означает ещё не закрытую смену).
+async function resolveActualWorkedStaffIds(
+  supabase: SupabaseClient,
+  employees: QuickRestoEmployee[],
+  sinceMs: number,
+  tillMs: number,
+): Promise<Set<string>> {
+  const workedStaffIds = new Set<string>();
+  for (const employee of employees) {
+    let records: WorkshiftStatementRaw[];
+    try {
+      records = await fetchShiftRecords(employee.id);
+    } catch (err) {
+      console.error(`Quick Resto: не удалось получить смены сотрудника ${employee.id} для сверки с графиком:`, err);
+      continue;
+    }
+    const worked = records.some((r) => r.startTime < tillMs && r.endTime > sinceMs);
+    if (!worked) continue;
+    const staffId = await upsertStaffForEmployee(supabase, employee);
+    if (staffId) workedStaffIds.add(staffId);
+  }
+  return workedStaffIds;
+}
+
+/** Сверяет график на одну дату с Quick Resto и либо начисляет, либо откладывает начисление (см. writePayrollIssue). */
+async function processScheduledDate(
+  supabase: SupabaseClient,
+  onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  dateIso: string,
+) {
+  const { data: scheduleRows, error } = await supabase.from("schedule_entries").select("staff_id, role").eq("date", dateIso);
+  if (error) return console.error(`Quick Resto: не удалось прочитать график на ${dateIso}:`, error.message);
+  if (!scheduleRows?.length) return; // на эту дату график не выставлен — нечего сверять
+
+  const pendingRoles: { staff_id: string; role: "bar" | "hookah" }[] = [];
+  for (const row of scheduleRows as { staff_id: string; role: "bar" | "hookah" }[]) {
+    if (!(await alreadyHandled(supabase, dateIso, row.role))) pendingRoles.push(row);
+  }
+  if (!pendingRoles.length) return; // всё по этой дате уже обработано (начислено или отложено ранее)
+
+  let employees: QuickRestoEmployee[];
   try {
-    split = await fetchRevenueSplitForDate(shift.opened_at ? new Date(shift.opened_at) : new Date(shift.closed_at!));
+    employees = await fetchEmployees();
   } catch (err) {
-    console.error(`Quick Resto: не удалось получить выручку для начисления ЗП по смене ${shift.id}:`, err);
+    console.error(`Quick Resto: не удалось получить сотрудников для сверки графика на ${dateIso}:`, err);
     return;
   }
 
-  if (hookahStaffId) await writeShiftPayrollForRole(supabase, shift.id, hookahStaffId, "hookah", split.hookah, split.isoDate);
-  if (barStaffId) await writeShiftPayrollForRole(supabase, shift.id, barStaffId, "bar", split.barKitchen, split.isoDate);
+  // Полдень МСК того дня — однозначно попадает в нужный бизнес-день независимо
+  // от того, в какой момент по UTC выполняется задание.
+  const middayMsk = new Date(`${dateIso}T12:00:00+03:00`);
+  const { sinceMs, tillMs } = businessDayRangeMs(middayMsk);
+  const workedStaffIds = await resolveActualWorkedStaffIds(supabase, employees, sinceMs, tillMs);
+
+  let split: { hookah: number; barKitchen: number };
+  try {
+    split = await fetchRevenueSplitForDate(middayMsk);
+  } catch (err) {
+    console.error(`Quick Resto: не удалось получить выручку за ${dateIso}:`, err);
+    return;
+  }
+
+  for (const { staff_id, role } of pendingRoles) {
+    const revenue = role === "hookah" ? split.hookah : split.barKitchen;
+    if (workedStaffIds.has(staff_id)) {
+      await writeShiftPayrollForRole(supabase, null, staff_id, role, revenue, dateIso);
+    } else {
+      await writePayrollIssue(supabase, onIssue, dateIso, role, staff_id, [...workedStaffIds], revenue);
+    }
+  }
+}
+
+function mskDateIso(offsetDays: number): string {
+  const shifted = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  const parts = new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(shifted);
+  const y = parts.find((p) => p.type === "year")!.value;
+  const m = parts.find((p) => p.type === "month")!.value;
+  const d = parts.find((p) => p.type === "day")!.value;
+  return `${y}-${m}-${d}`;
 }
 
 /**
- * Ежедневное начисление ЗП — по просьбе пользователя вынесено из момента
- * закрытия смены (не зависит от мгновенного, иногда ненадёжного детекта
- * статуса смены) в отдельное задание, срабатывающее раз в сутки в 10:00 МСК.
- * К этому времени бар уже точно закрыт всю ночь, и выручка за бизнес-день
- * (11:00-11:00) больше не изменится.
- *
- * Берёт последние закрытые смены, для которых ещё нет ни одной строки в
- * shift_payroll, и считает начисление по каждой — так подхватываются и
- * смены за прошлые дни, если по какой-то причине задание не сработало вовремя.
+ * Ежедневное начисление ЗП, в 10:00 МСК. К этому времени бар уже точно
+ * закрыт всю ночь, и выручка за бизнес-день (11:00-11:00) больше не
+ * изменится. Смотрим не только "вчера", но и последнюю неделю назад — так
+ * подхватываются пропущенные дни, если по какой-то причине задание не
+ * сработало вовремя (processScheduledDate сам пропускает уже обработанные).
  */
-async function runDailyPayrollJob(supabase: SupabaseClient) {
-  const { data: shifts, error } = await supabase
-    .from("shifts")
-    .select("id, opened_at, closed_at, bar_opened_by, hookah_opened_by, bar_closed_by, hookah_closed_by")
-    .not("closed_at", "is", null)
-    .order("closed_at", { ascending: false })
-    .limit(14); // с запасом на случай пропущенных дней, не только вчера
-  if (error) return console.error("Quick Resto: не удалось прочитать закрытые смены для начисления ЗП:", error.message);
-  if (!shifts?.length) return;
-
-  const { data: existing, error: existingError } = await supabase
-    .from("shift_payroll")
-    .select("shift_id")
-    .in(
-      "shift_id",
-      shifts.map((s: ShiftForPayroll) => s.id),
-    );
-  if (existingError) return console.error("Quick Resto: не удалось проверить уже начисленные смены:", existingError.message);
-  const alreadyDone = new Set((existing ?? []).map((r: { shift_id: string }) => r.shift_id));
-
-  const pending = (shifts as ShiftForPayroll[]).filter((s) => !alreadyDone.has(s.id));
-  if (!pending.length) {
-    console.log("Quick Resto: ежедневное начисление ЗП — новых закрытых смен нет");
-    return;
-  }
-  console.log(`Quick Resto: ежедневное начисление ЗП — обрабатываю ${pending.length} смен`);
-  for (const shift of pending) {
-    await writePayrollForShift(supabase, shift);
+async function runDailyPayrollJob(supabase: SupabaseClient, onIssue: (event: PayrollIssueEvent) => void | Promise<void>) {
+  for (let offset = -1; offset >= -7; offset--) {
+    await processScheduledDate(supabase, onIssue, mskDateIso(offset));
   }
 }
 
@@ -374,11 +451,15 @@ function msUntilNextMoscowHour(hour: number): number {
 const PAYROLL_JOB_HOUR_MSK = 10;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Планирует runDailyPayrollJob на 10:00 МСК каждый день (первый запуск — на ближайшие 10:00). */
-export function scheduleDailyPayrollJob() {
+/**
+ * Планирует runDailyPayrollJob на 10:00 МСК каждый день (первый запуск — на
+ * ближайшие 10:00). onIssue вызывается на каждое расхождение графика с Quick
+ * Resto — для уведомления руководителя в Telegram (см. index.ts).
+ */
+export function scheduleDailyPayrollJob(onIssue: (event: PayrollIssueEvent) => void | Promise<void>) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   function run() {
-    runDailyPayrollJob(supabase).catch((err) => console.error("Quick Resto: ошибка ежедневного начисления ЗП:", err));
+    runDailyPayrollJob(supabase, onIssue).catch((err) => console.error("Quick Resto: ошибка ежедневного начисления ЗП:", err));
     setTimeout(run, ONE_DAY_MS);
   }
   const delay = msUntilNextMoscowHour(PAYROLL_JOB_HOUR_MSK);

@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useStore } from "@/data/useStore";
-import { listSchedule, scheduleStore } from "@/data/repo";
-import type { ScheduleEntry } from "@/types";
+import { listMySchedule, scheduleStore } from "@/data/repo";
+import type { ScheduleEntry, StaffRole } from "@/types";
+
+const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
 function dateKey(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -38,7 +40,7 @@ function ListView({ entries }: { entries: ScheduleEntry[] }) {
                 {e.startTime}–{e.endTime}
               </div>
             </div>
-            <span className="chip">{e.roleLabel}</span>
+            <span className="chip">{ROLE_LABELS[e.role]}</span>
           </div>
         );
       })}
@@ -114,7 +116,7 @@ function CalendarView({ entries }: { entries: ScheduleEntry[] }) {
 
 export default function Schedule() {
   useStore(scheduleStore);
-  const entries = listSchedule();
+  const entries = listMySchedule();
   const [view, setView] = useState<"list" | "calendar">("calendar");
 
   return (
