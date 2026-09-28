@@ -772,13 +772,66 @@ function syncRoleClaim(role: StaffRole, kind: "open" | "close") {
     .then(({ error }) => error && logSyncError("syncRoleClaim", error));
 }
 
-function syncHandoverNote(note: string) {
+/**
+ * Раньше статус смены заведения (открыта/закрыта) целиком приходил из Quick
+ * Resto (по ПИН-входу на терминале) — но этот детект оказался ненадёжным
+ * (задержки, сотрудники без личных ПИНов, см. claude/quickresto-shift-integration.md),
+ * из-за чего кнопка "Отправить" в чек-листе открытия переставала реально
+ * что-либо открывать: чек-лист и фото уходили, а статус смены не менялся.
+ * Возвращаем кнопку как источник истины: если смена ещё не открыта — создаём
+ * новую строку в `shifts` (или просто помечаем локально открытой без
+ * Supabase). Quick Resto по-прежнему опрашивается ботом и шлёт уведомления в
+ * Telegram, но на статус в мини-аппе больше не влияет.
+ */
+async function openVenueShiftIfNeeded(): Promise<string> {
+  const current = shiftStore.get();
+  if (current.status === "open") return current.id;
+
+  const openedAt = new Date().toISOString();
+  const openedByName = getStaffProfile().name;
+  // Помечаем открытой сразу, не дожидаясь ответа Supabase, — чтобы интерфейс
+  // не "подвисал" на плохой связи.
+  shiftStore.update((s) => ({ ...s, status: "open", openedBy: openedByName, openedAt }));
+
+  if (!isSupabaseConfigured || !supabase) return current.id;
+
+  const staffId = getStaffProfile().id;
+  const { data, error } = await supabase
+    .from("shifts")
+    .insert({
+      opened_by: staffId || null,
+      opened_at: openedAt,
+      bar_open_checklist: current.bar.openChecklist,
+      bar_close_checklist: current.bar.closeChecklist,
+      hookah_open_checklist: current.hookah.openChecklist,
+      hookah_close_checklist: current.hookah.closeChecklist,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    logSyncError("openVenueShiftIfNeeded", error);
+    return current.id;
+  }
+
+  const newId = data.id as string;
+  shiftStore.update((s) => ({ ...s, id: newId }));
+  return newId;
+}
+
+/** Закрывает смену заведения на кнопку — см. комментарий у openVenueShiftIfNeeded. */
+function closeVenueShift(closedBy: string, closedAt: string, handoverNote?: string) {
   if (!isSupabaseConfigured || !supabase) return;
+  const staffId = getStaffProfile().id;
   supabase
     .from("shifts")
-    .update({ handover_note: note })
+    .update({
+      closed_by: staffId || null,
+      closed_at: closedAt,
+      ...(handoverNote ? { handover_note: handoverNote } : {}),
+    })
     .eq("id", shiftStore.get().id)
-    .then(({ error }) => error && logSyncError("syncHandoverNote", error));
+    .then(({ error }) => error && logSyncError("closeVenueShift", error));
 }
 
 /**
@@ -834,24 +887,30 @@ export function toggleCloseChecklistItem(role: StaffRole, itemId: string) {
 }
 
 /**
- * Раньше эта функция сама выставляла shift.status = "open" по нажатию кнопки.
- * Теперь статус смены целиком приходит из Quick Resto (см. комментарий у
- * syncChecklist выше) — здесь только отправляем фото открытия руководителю в
- * Telegram, чек-лист уже сохранён поштучно через toggleOpenChecklistItem.
- * Теперь принимает роль (бар/кальяны), т.к. у каждой роли свой чек-лист и своё фото.
+ * Открывает смену заведения на кнопку (см. openVenueShiftIfNeeded), помечает,
+ * что эту роль на смене занял текущий сотрудник (для истории/будущей
+ * сверки), и отправляет фото открытия руководителю в Telegram. Чек-лист уже
+ * сохранён поштучно через toggleOpenChecklistItem. Принимает роль (бар/
+ * кальяны), т.к. у каждой роли свой чек-лист и своё фото.
  */
-export function openShift(role: StaffRole, openedBy: string, photoBlob?: Blob) {
+export async function openShift(role: StaffRole, openedBy: string, photoBlob?: Blob) {
+  await openVenueShiftIfNeeded();
   syncRoleClaim(role, "open");
   if (photoBlob) uploadAndNotifyShiftPhoto(role, "open", photoBlob, openedBy);
 }
 
-/** Аналогично openShift — статус закрытия смены тоже теперь из Quick Resto. */
+/** Закрывает смену заведения на кнопку — см. closeVenueShift. */
 export function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlob?: Blob) {
   syncRoleClaim(role, "close");
-  if (handoverNote) {
-    shiftStore.update((shift) => ({ ...shift, handoverNote }));
-    syncHandoverNote(handoverNote);
-  }
+  const closedAt = new Date().toISOString();
+  shiftStore.update((shift) => ({
+    ...shift,
+    status: "closed",
+    closedBy,
+    closedAt,
+    handoverNote: handoverNote ?? shift.handoverNote,
+  }));
+  closeVenueShift(closedBy, closedAt, handoverNote);
   if (photoBlob) uploadAndNotifyShiftPhoto(role, "close", photoBlob, closedBy);
 }
 
