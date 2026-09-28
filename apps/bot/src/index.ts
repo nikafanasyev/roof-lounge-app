@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
 import { watchServiceCalls, watchShiftPhotos } from "./notify";
-import { fetchHookahRevenueForDate, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
+import { fetchRevenueSplitForDate, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -23,9 +23,12 @@ bot.command("start", async (ctx) => {
 // Технический пинг, чтобы быстро проверить, что бот жив после деплоя.
 bot.command("ping", (ctx) => ctx.reply("pong"));
 
-// Выручка по кальянам за конкретный день — тот же отчёт Quick Resto, что и
-// /revenue в roofinfobot, портирован на переиспользуемый логин/куки этого бота
-// (см. quickresto.ts). Формат: /revenue 02.09.2026 (день по МСК, 11:00-11:00).
+// Выручка за конкретный бизнес-день (11:00-11:00 МСК) — тот же отчёт Quick
+// Resto, что и /revenue в roofinfobot, портирован на переиспользуемый
+// логин/куки этого бота (см. quickresto.ts). Показывает и кальянную, и общую
+// выручку — общая нужна вручную посчитать ЗП по текущей формуле (8,5% от
+// общей выручки каждому, см. DEFAULT_SALARY_MODEL) за дни до включения
+// автоматического начисления. Формат: /revenue 02.09.2026.
 bot.command("revenue", async (ctx) => {
   if (!env.QR_LOGIN || !env.QR_PASSWORD) {
     await ctx.reply("Интеграция с Quick Resto не настроена (нет QR_LOGIN/QR_PASSWORD).");
@@ -40,8 +43,15 @@ bot.command("revenue", async (ctx) => {
   const [, dd, mm, yyyy] = parsed;
   const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), 8, 0, 0));
   try {
-    const revenue = await fetchHookahRevenueForDate(date);
-    await ctx.reply(`Выручка по кальянам за ${dd}.${mm}.${yyyy}: ${Math.round(revenue).toLocaleString("ru-RU")} ₽`);
+    const { hookah, barKitchen, total } = await fetchRevenueSplitForDate(date);
+    const salaryPerPerson = Math.round(total * 0.085);
+    await ctx.reply(
+      `Выручка за ${dd}.${mm}.${yyyy}:\n` +
+        `Кальяны: ${Math.round(hookah).toLocaleString("ru-RU")} ₽\n` +
+        `Бар/кухня: ${Math.round(barKitchen).toLocaleString("ru-RU")} ₽\n` +
+        `Итого: ${Math.round(total).toLocaleString("ru-RU")} ₽\n\n` +
+        `8,5% каждому на смене: ${salaryPerPerson.toLocaleString("ru-RU")} ₽`,
+    );
   } catch (err) {
     console.error("Quick Resto: /revenue ошибка:", err);
     await ctx.reply("Не удалось получить выручку из Quick Resto — см. логи бота.");

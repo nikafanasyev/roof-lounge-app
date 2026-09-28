@@ -220,7 +220,7 @@ export async function fetchHookahRevenueForDate(date: Date): Promise<number> {
 // Выручка по кальянам, "бар/кухня" (всё остальное) и общая — за один
 // бизнес-день. hookah/barKitchen оставлены для истории и команды /revenue,
 // начисление ЗП (ниже) теперь считается от total у обеих ролей.
-async function fetchRevenueSplitForDate(date: Date): Promise<{ hookah: number; barKitchen: number; total: number; isoDate: string }> {
+export async function fetchRevenueSplitForDate(date: Date): Promise<{ hookah: number; barKitchen: number; total: number; isoDate: string }> {
   const { sinceMs, tillMs, isoDate } = businessDayRangeMs(date);
   const [hookah, total] = await Promise.all([fetchRevenueForRange(sinceMs, tillMs), fetchTotalRevenueForRange(sinceMs, tillMs)]);
   return { hookah, barKitchen: Math.max(0, total - hookah), total, isoDate };
