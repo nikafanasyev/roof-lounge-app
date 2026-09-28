@@ -35,7 +35,7 @@ function ScheduleForm() {
   const [staffId, setStaffId] = useState(staff[0]?.id ?? "");
 
   if (!staff.length) {
-    return <div className="list-empty">Сначала должны появиться сотрудники с назначенной моделью ЗП.</div>;
+    return <div className="list-empty">Сначала кто-то из сотрудников должен хотя бы раз войти в мини-апп или на терминал Quick Resto.</div>;
   }
 
   return (

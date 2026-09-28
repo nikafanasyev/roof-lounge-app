@@ -223,7 +223,7 @@ export const seedStaffProfile: StaffProfile = {
   medicalBookNumber: undefined, // заполняет руководитель
   medicalBookExpiry: undefined, // заполняет руководитель
   hiredAt: new Date(Date.now() - 86400000 * 240).toISOString(),
-  salaryModel: { type: "fixed_plus_percent", base: 1000, percent: 15 },
+  salaryModel: { type: "percent", value: 8.5 },
   role: "hookah",
 };
 
@@ -238,22 +238,22 @@ export const seedStaffDirectory: StaffProfile[] = [
     id: "s2",
     name: "Дойна Мунтяну",
     hiredAt: new Date(Date.now() - 86400000 * 120).toISOString(),
-    salaryModel: { type: "percent", value: 5 },
+    salaryModel: { type: "percent", value: 8.5 },
     role: "bar",
   },
   {
     id: "s3",
     name: "Андрей Тесля",
     hiredAt: new Date(Date.now() - 86400000 * 60).toISOString(),
-    salaryModel: { type: "percent", value: 5 },
+    salaryModel: { type: "percent", value: 8.5 },
     role: "bar",
   },
 ];
 
 // Зарплата по смене всегда считается из выручки по формуле модели ЗП
 // сотрудника (computeShiftSalary) — не проставляется вручную, чтобы сумма
-// не могла разойтись с моделью ЗП в профиле (сейчас у Никиты 1000 ₽ + 15%
-// от выручки, см. seedStaffProfile.salaryModel).
+// не могла разойтись с моделью ЗП в профиле (сейчас у Никиты 8,5% от общей
+// выручки, см. seedStaffProfile.salaryModel и DEFAULT_SALARY_MODEL в lib/payroll.ts).
 //
 // Выручка по сменам 2.09 и 9.09 — пока приблизительная (Никита прислал даты,
 // точные суммы ещё не назвал), проставлено, чтобы в "Моей зарплате" уже было

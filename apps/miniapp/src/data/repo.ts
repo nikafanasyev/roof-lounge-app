@@ -59,7 +59,7 @@ import {
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { getTelegramUser } from "@/lib/telegram";
-import { computeShiftSalary } from "@/lib/payroll";
+import { computeShiftSalary, DEFAULT_SALARY_MODEL } from "@/lib/payroll";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
 
@@ -194,9 +194,10 @@ async function ensureCurrentStaff() {
     medicalBookNumber: row.medical_book_number ?? prev.medicalBookNumber,
     medicalBookExpiry: row.medical_book_expiry ?? prev.medicalBookExpiry,
     hiredAt: row.hired_at ?? prev.hiredAt,
-    // Модель ЗП и роль на смене — из Supabase, если уже проставлены (бот или
-    // руководитель), иначе оставляем заготовку из seed.ts (не пустое поле).
-    salaryModel: (row.salary_model as SalaryModel | null) ?? prev.salaryModel,
+    // Модель ЗП и роль на смене — из Supabase, если уже проставлены вручную
+    // (руководитель через Supabase Studio), иначе дефолт 8,5% от общей
+    // выручки (см. DEFAULT_SALARY_MODEL).
+    salaryModel: (row.salary_model as SalaryModel | null) ?? DEFAULT_SALARY_MODEL,
     role: (row.work_role as StaffRole | null) ?? prev.role,
   }));
 }
@@ -386,23 +387,24 @@ async function loadStaffDirectory() {
   if (error) return logSyncError("loadStaffDirectory", error);
   for (const r of data ?? []) staffNameById.set(r.id, r.name);
   staffDirectoryStore.set(
-    (data ?? [])
-      // Без salary_model это ещё не "сотрудник" для карточки в разделе
-      // "Сотрудники" — просто кто-то, кто когда-то вошёл по ПИН/Telegram
-      // (бот создаёт строку staff уже при первом входе на терминал).
-      .filter((r) => r.salary_model)
-      .map((r) => ({
-        id: r.id,
-        name: r.name,
-        photoUrl: r.photo_url ?? undefined,
-        phone: r.phone ?? undefined,
-        email: r.email ?? undefined,
-        medicalBookNumber: r.medical_book_number ?? undefined,
-        medicalBookExpiry: r.medical_book_expiry ?? undefined,
-        hiredAt: r.hired_at ?? r.created_at,
-        salaryModel: r.salary_model as SalaryModel,
-        role: (r.work_role as StaffRole | null) ?? undefined,
-      })),
+    (data ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      photoUrl: r.photo_url ?? undefined,
+      phone: r.phone ?? undefined,
+      email: r.email ?? undefined,
+      medicalBookNumber: r.medical_book_number ?? undefined,
+      medicalBookExpiry: r.medical_book_expiry ?? undefined,
+      hiredAt: r.hired_at ?? r.created_at,
+      // Раньше без явной salary_model сотрудник вообще не попадал в этот
+      // список (карточка "Сотрудники", выбор в "Графике") — из-за этого
+      // список почти всегда оказывался пустым, потому что вручную модель
+      // почти никто не проставлял. Теперь есть настоящий дефолт (8,5% от
+      // общей выручки, см. DEFAULT_SALARY_MODEL) — фильтр убран, все, кто
+      // когда-то вошёл по ПИН/Telegram, считаются сотрудниками.
+      salaryModel: (r.salary_model as SalaryModel | null) ?? DEFAULT_SALARY_MODEL,
+      role: (r.work_role as StaffRole | null) ?? undefined,
+    })),
   );
 }
 
