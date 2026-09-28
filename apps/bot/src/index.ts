@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
 import { watchServiceCalls, watchShiftPhotos } from "./notify";
-import { fetchHookahRevenueForDate, watchQuickRestoShifts } from "./quickresto";
+import { fetchHookahRevenueForDate, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -107,6 +107,10 @@ async function main() {
       }
     });
     console.log("Слушаю статус смены через Quick Resto (ПИН на терминале).");
+
+    // Начисление ЗП — отдельным ежедневным заданием в 10:00 МСК, не по
+    // событию закрытия смены (см. комментарий в scheduleDailyPayrollJob).
+    scheduleDailyPayrollJob();
   } else {
     console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }
