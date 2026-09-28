@@ -193,12 +193,31 @@ export interface Adjustment {
   date: string; // ISO-дата
 }
 
+// График теперь составляет руководитель заранее (кто на какой роли в какой
+// день) — это и есть источник истины для начисления ЗП: на следующий день
+// бот сверяет график с тем, кто реально работал по Quick Resto (см.
+// apps/bot/src/quickresto.ts processScheduledDate), а не пытается угадывать
+// роль в реальном времени по действиям в чек-листе.
 export interface ScheduleEntry {
   id: string;
-  date: string; // ISO-дата
+  staffId: string;
+  role: StaffRole;
+  date: string; // ISO-дата (день, на который выставлена смена)
   startTime: string; // "18:00"
   endTime: string; // "02:00"
-  roleLabel: string; // например "Мастер", "Официант"
+}
+
+// Расхождение графика с тем, что реально показал Quick Resto на следующий
+// день — начисление отложено, руководитель разрешает его вручную (см.
+// PayrollIssues.tsx / resolvePayrollIssue в data/repo.ts).
+export interface PayrollIssue {
+  id: string;
+  date: string; // ISO-дата
+  role: StaffRole;
+  expectedStaffId: string; // кто был по графику
+  actualStaffIds: string[]; // кто реально работал по Quick Resto в этот день (может быть пусто)
+  revenue: number; // выручка по этой роли за день, уже посчитана и ждёт начисления
+  resolved: boolean;
 }
 
 export interface KnowledgeArticle {

@@ -6,6 +6,7 @@ import type {
   KnowledgeArticle,
   Mix,
   PayoutRecord,
+  PayrollIssue,
   Problem,
   ScheduleEntry,
   Shift,
@@ -508,7 +509,9 @@ export const seedKnowledgeArticles: KnowledgeArticle[] = [
 ];
 
 export const seedSchedule: ScheduleEntry[] = [
-  { id: "sc1", date: new Date(Date.now() + 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
-  { id: "sc2", date: new Date(Date.now() + 86400000 * 3).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
-  { id: "sc3", date: new Date(Date.now() - 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00", roleLabel: "Мастер" },
+  { id: "sc1", staffId: "s1", role: "hookah", date: new Date(Date.now() + 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00" },
+  { id: "sc2", staffId: "s1", role: "hookah", date: new Date(Date.now() + 86400000 * 3).toISOString(), startTime: "18:00", endTime: "02:00" },
+  { id: "sc3", staffId: "s1", role: "hookah", date: new Date(Date.now() - 86400000 * 1).toISOString(), startTime: "18:00", endTime: "02:00" },
 ];
+
+export const seedPayrollIssues: PayrollIssue[] = [];

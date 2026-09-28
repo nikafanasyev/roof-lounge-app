@@ -108,9 +108,21 @@ async function main() {
     });
     console.log("Слушаю статус смены через Quick Resto (ПИН на терминале).");
 
-    // Начисление ЗП — отдельным ежедневным заданием в 10:00 МСК, не по
-    // событию закрытия смены (см. комментарий в scheduleDailyPayrollJob).
-    scheduleDailyPayrollJob();
+    // Начисление ЗП — отдельным ежедневным заданием в 10:00 МСК по графику
+    // (не по событию закрытия смены, см. scheduleDailyPayrollJob). Если график
+    // не совпал с тем, кто реально работал по Quick Resto — начисление
+    // откладывается, руководителю в тот же чат уходит уведомление.
+    scheduleDailyPayrollJob(async (issue) => {
+      const roleLabel = issue.role === "hookah" ? "Кальяны" : "Бар";
+      const dateLabel = new Date(`${issue.date}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+      const actual = issue.actualStaffNames.length ? issue.actualStaffNames.join(", ") : "никто (по данным Quick Resto)";
+      const text =
+        `⚠️ ЗП не начислена автоматически\n${dateLabel} · ${roleLabel}\n` +
+        `По графику: ${issue.expectedStaffName}\n` +
+        `По Quick Resto реально работал: ${actual}\n\n` +
+        `Проверьте и начислите вручную: «Руководитель» → «График» → «Начислить вручную».`;
+      if (qrChatId) await bot.api.sendMessage(qrChatId, text);
+    });
   } else {
     console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }

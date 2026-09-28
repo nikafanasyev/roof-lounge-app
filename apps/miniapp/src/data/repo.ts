@@ -26,6 +26,7 @@ import type {
   Mix,
   MixItem,
   PayoutRecord,
+  PayrollIssue,
   Problem,
   ProblemCategory,
   RoleChecklists,
@@ -46,6 +47,7 @@ import {
   seedKnowledgeArticles,
   seedMixes,
   seedPayouts,
+  seedPayrollIssues,
   seedProblems,
   seedSchedule,
   seedServiceCalls,
@@ -57,6 +59,7 @@ import {
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { getTelegramUser } from "@/lib/telegram";
+import { computeShiftSalary } from "@/lib/payroll";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
 
@@ -98,6 +101,7 @@ export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll
 export const payoutsStore = new Store<PayoutRecord[]>(seedPayouts);
 export const adjustmentsStore = new Store<Adjustment[]>(seedAdjustments);
 export const scheduleStore = new Store<ScheduleEntry[]>(seedSchedule);
+export const payrollIssuesStore = new Store<PayrollIssue[]>(seedPayrollIssues);
 export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
 
 const uid = () => crypto.randomUUID();
@@ -140,6 +144,8 @@ export async function initData(): Promise<void> {
       loadShiftPayroll(),
       loadAdjustments(),
       loadPayouts(),
+      loadSchedule(),
+      loadPayrollIssues(),
     ]);
     subscribeRealtime();
   } catch (error) {
@@ -444,6 +450,37 @@ async function loadPayouts() {
   );
 }
 
+async function loadSchedule() {
+  const { data, error } = await supabase!.from("schedule_entries").select("*").order("date", { ascending: true });
+  if (error) return logSyncError("loadSchedule", error);
+  scheduleStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      staffId: r.staff_id,
+      role: r.role as StaffRole,
+      date: r.date,
+      startTime: r.start_time,
+      endTime: r.end_time,
+    })),
+  );
+}
+
+async function loadPayrollIssues() {
+  const { data, error } = await supabase!.from("payroll_issues").select("*").order("date", { ascending: false });
+  if (error) return logSyncError("loadPayrollIssues", error);
+  payrollIssuesStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      date: r.date,
+      role: r.role as StaffRole,
+      expectedStaffId: r.expected_staff_id,
+      actualStaffIds: r.actual_staff_ids ?? [],
+      revenue: Number(r.revenue),
+      resolved: r.resolved,
+    })),
+  );
+}
+
 function subscribeRealtime() {
   if (!supabase) return;
   supabase
@@ -460,6 +497,8 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "shift_payroll" }, () => loadShiftPayroll())
     .on("postgres_changes", { event: "*", schema: "public", table: "adjustments" }, () => loadAdjustments())
     .on("postgres_changes", { event: "*", schema: "public", table: "payouts" }, () => loadPayouts())
+    .on("postgres_changes", { event: "*", schema: "public", table: "schedule_entries" }, () => loadSchedule())
+    .on("postgres_changes", { event: "*", schema: "public", table: "payroll_issues" }, () => loadPayrollIssues())
     .subscribe();
 }
 
@@ -939,7 +978,7 @@ export function formatSalaryModel(profile: StaffProfile): string {
   return `${salaryModel.base.toLocaleString("ru-RU")} ₽ + ${salaryModel.percent}% от выручки`;
 }
 
-export { computeShiftSalary } from "@/lib/payroll";
+export { computeShiftSalary };
 
 export function listShiftPayrollForStaff(staffId: string): ShiftPayrollEntry[] {
   return shiftPayrollStore
@@ -1038,8 +1077,89 @@ export function computePayrollSummary(): PayrollSummary {
   return computePayrollSummaryForStaff(getStaffProfile().id);
 }
 
+// --- График (составляет руководитель) и разрешение расхождений с Quick Resto ---
+//
+// График — источник истины для начисления ЗП: кто в какой день отвечает за
+// бар/кальяны. На следующий день бот (apps/bot/src/quickresto.ts) сверяет
+// график с тем, кто реально работал по Quick Resto, и либо начисляет
+// автоматически, либо откладывает начисление в payroll_issues и уведомляет
+// руководителя — тогда он разрешает расхождение здесь, вручную.
+
+/** Все назначения в графике (для руководителя — построение графика). */
 export function listSchedule(): ScheduleEntry[] {
   return [...scheduleStore.get()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** График конкретного сотрудника (личный кабинет — "мои смены"). */
+export function listScheduleForStaff(staffId: string): ScheduleEntry[] {
+  return listSchedule().filter((e) => e.staffId === staffId);
+}
+
+export function listMySchedule(): ScheduleEntry[] {
+  return listScheduleForStaff(getStaffProfile().id);
+}
+
+/** Назначить сотрудника на роль в конкретный день (руководитель). Одна роль в день — один сотрудник, повторная запись переставляет назначение. */
+export function setScheduleEntry(staffId: string, role: StaffRole, date: string, startTime = "18:00", endTime = "02:00") {
+  const dateKey = date.slice(0, 10);
+  const entry: ScheduleEntry = { id: uid(), staffId, role, date, startTime, endTime };
+  scheduleStore.update((list) => [...list.filter((e) => !(e.date.slice(0, 10) === dateKey && e.role === role)), entry]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("schedule_entries")
+      .upsert(
+        { staff_id: staffId, role, date: dateKey, start_time: startTime, end_time: endTime },
+        { onConflict: "date,role" },
+      )
+      .then(({ error }) => error && logSyncError("setScheduleEntry", error));
+  }
+}
+
+export function removeScheduleEntry(id: string) {
+  scheduleStore.update((list) => list.filter((e) => e.id !== id));
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("schedule_entries")
+      .delete()
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("removeScheduleEntry", error));
+  }
+}
+
+/** Нерешённые расхождения графика с Quick Resto — ждут ручного начисления. */
+export function listPayrollIssues(): PayrollIssue[] {
+  return [...payrollIssuesStore.get()].filter((i) => !i.resolved).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/**
+ * Руководитель вручную решает, кому в итоге начислить выручку по этой роли/дню
+ * (обычно — кто-то из actualStaffIds, реально работавший по Quick Resto, но
+ * можно выбрать и любого другого сотрудника). Пишет shift_payroll по модели
+ * ЗП выбранного сотрудника и закрывает issue.
+ */
+export function resolvePayrollIssue(issueId: string, staffId: string) {
+  const issue = payrollIssuesStore.get().find((i) => i.id === issueId);
+  if (!issue) return;
+  const staff = getStaffProfileById(staffId);
+  const salary = staff ? computeShiftSalary(staff.salaryModel, issue.revenue) : 0;
+
+  payrollIssuesStore.update((list) => list.map((i) => (i.id === issueId ? { ...i, resolved: true } : i)));
+  shiftPayrollStore.update((list) => [
+    { id: uid(), staffId, date: issue.date, revenue: issue.revenue, salary, role: issue.role },
+    ...list,
+  ]);
+
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("shift_payroll")
+      .insert({ staff_id: staffId, role: issue.role, date: issue.date.slice(0, 10), revenue: issue.revenue, salary })
+      .then(({ error }) => error && logSyncError("resolvePayrollIssue:insert", error));
+    supabase
+      .from("payroll_issues")
+      .update({ resolved: true, resolved_staff_id: staffId, resolved_at: new Date().toISOString() })
+      .eq("id", issueId)
+      .then(({ error }) => error && logSyncError("resolvePayrollIssue:resolve", error));
+  }
 }
 
 export function listKnowledgeArticles(): KnowledgeArticle[] {
