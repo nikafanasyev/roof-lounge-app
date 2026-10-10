@@ -134,9 +134,16 @@ async function qrFollowRedirects(url: string) {
 // который рендерит клиентский React (Keycloakify-тема), а не в обычном
 // HTML-атрибуте action="" — ищем его где угодно в ответе.
 function extractAuthenticateAction(html: string): string | null {
-  const match = html.match(/["=](https:\/\/[a-zA-Z0-9.-]+\/realms\/[^"'\s]+\/login-actions\/authenticate\?[^"'\s\\]+)["'\\]/);
-  if (!match) return null;
-  return match[1].replace(/&amp;/g, "&").replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+  // Сначала пробуем найти именно поле "url":{"loginAction":"..."} из
+  // kcContext — это гарантированно ссылка на ОТПРАВКУ текущей формы, а не на
+  // что-то ещё (например, "другой способ входа"/организацию), если на
+  // странице окажется несколько ссылок с этим путём.
+  const loginActionMatch = html.match(/"loginAction"\s*:\s*"([^"]+)"/);
+  const generic = loginActionMatch
+    ? loginActionMatch[1]
+    : html.match(/["=](https:\/\/[a-zA-Z0-9.-]+\/realms\/[^"'\s]+\/login-actions\/authenticate\?[^"'\s\\]+)["'\\]/)?.[1];
+  if (!generic) return null;
+  return generic.replace(/&amp;/g, "&").replace(/\\u0026/g, "&").replace(/\\\//g, "/");
 }
 
 async function login() {
@@ -193,11 +200,20 @@ async function login() {
   if (res.status !== 302 || !location) {
     const body = await res.text();
     const looksLikeBadCreds = /invalid username or password|неверный логин|неверные учётные|invalid-user-credentials/i.test(body);
-    const snippet = body.replace(/\s+/g, " ").trim().slice(0, 300);
+    // kcContext.message.summary — текст ошибки формы, если Keycloak его туда
+    // кладёт (может быть на другом языке/в другом поле — не гарантировано).
+    const messageMatch = body.match(/"message"\s*:\s*\{[^}]*"summary"\s*:\s*"([^"]+)"/);
+    // Сколько раз в ответе вообще встречается ссылка на login-actions/authenticate —
+    // если больше одной, extractAuthenticateAction на предыдущем шаге мог
+    // зацепить не ту (например, ссылку "другой способ входа"/организации).
+    const authenticateLinkCount = (body.match(/\/login-actions\/authenticate\?/g) ?? []).length;
+    const snippet = body.replace(/\s+/g, " ").trim().slice(0, 1500);
     throw new Error(
       looksLikeBadCreds
         ? "Quick Resto: неверный логин или пароль (проверь QR_LOGIN/QR_PASSWORD в переменных окружения)."
-        : `Quick Resto: логин не удался (ожидался редирект с кодом авторизации, получили HTTP ${res.status}). Начало ответа: ${snippet}`,
+        : `Quick Resto: логин не удался (ожидался редирект с кодом авторизации, получили HTTP ${res.status}). ` +
+          `Пароль длиной ${env.QR_PASSWORD.length} символов. Сообщение Keycloak: ${messageMatch?.[1] ?? "не найдено"}. ` +
+          `Ссылок login-actions/authenticate в ответе: ${authenticateLinkCount}. Начало ответа: ${snippet}`,
     );
   }
   const code = new URL(location).searchParams.get("code");
@@ -242,9 +258,30 @@ async function refreshAccessToken() {
   accessTokenExpiresAt = Date.now() + (tokenData.expires_in ?? 60) * 1000 - 5000;
 }
 
+// Бот дёргает запросы к Quick Resto из нескольких мест параллельно —
+// фоновый опрос tick() (раз в QR_POLL_INTERVAL_MS) и ручные команды вроде
+// /revenue в любой момент поверх него. login()/refreshAccessToken() — это
+// несколько последовательных запросов, которые делят один и тот же
+// cookieJar/accessToken; если два вызова пойдут одновременно, они будут
+// затирать куки друг друга посреди чужого флоу (на практике это и
+// происходило — то Keycloak возвращал форму логина заново вместо редиректа,
+// то редирект приходил без code). Поэтому вся авторизация идёт через общий
+// "замок": если логин/рефреш уже идёт, остальные просто ждут его результата
+// вместо того, чтобы начинать свой.
+let authInFlight: Promise<void> | null = null;
+
+function withAuthLock(run: () => Promise<void>): Promise<void> {
+  if (!authInFlight) {
+    authInFlight = run().finally(() => {
+      authInFlight = null;
+    });
+  }
+  return authInFlight;
+}
+
 async function ensureLoggedIn() {
-  if (!accessToken) await login();
-  else if (Date.now() >= accessTokenExpiresAt) await refreshAccessToken();
+  if (accessToken && Date.now() < accessTokenExpiresAt) return;
+  await withAuthLock(() => (accessToken ? refreshAccessToken() : login()));
 }
 
 async function qrFetch(path: string, init: RequestInit = {}) {
@@ -262,7 +299,7 @@ async function qrFetch(path: string, init: RequestInit = {}) {
 async function qrFetchJson<T>(path: string): Promise<T> {
   let res = await qrFetch(path);
   if (res.status === 401 || res.status === 403) {
-    await refreshAccessToken();
+    await withAuthLock(() => refreshAccessToken());
     res = await qrFetch(path);
   }
   const text = await res.text();
