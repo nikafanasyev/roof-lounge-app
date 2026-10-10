@@ -20,6 +20,9 @@ export const env = {
   // claude/quickresto-shift-integration.md в проекте. Если QR_LOGIN/QR_PASSWORD
   // не заданы — интеграция просто не запускается.
   QR_HOST: process.env.QR_HOST ?? "hu554.quickresto.ru",
+  // Хост Keycloak, через который с 09.2026 идёт сама авторизация (логин —
+  // это отдельный сервер от бэк-офиса, см. login() в quickresto.ts).
+  QR_ID_HOST: process.env.QR_ID_HOST ?? "id.quickresto.ru",
   QR_LOGIN: process.env.QR_LOGIN ?? "",
   QR_PASSWORD: process.env.QR_PASSWORD ?? "",
   // Куда слать уведомления об открытии/закрытии смены. Если не задано —

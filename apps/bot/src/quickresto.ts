@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { createHash, randomBytes } from "node:crypto";
 import { env } from "./env";
 
 // Интеграция со внутренним (недокументированным) API бэк-офиса Quick Resto —
@@ -51,8 +52,37 @@ function workshiftPath(employeeId: number) {
 
 // --- HTTP-клиент с ручной cookie-jar (fetch в Node не хранит cookies сам) ---
 
+// Авторизация Quick Resto с 09.2026 идёт через Keycloak (id.quickresto.ru) —
+// OAuth2 Authorization Code + PKCE, а не простой POST логин/пароль, как
+// раньше (старый путь /platform/j_spring_security_check Quick Resto убрал —
+// отсюда и HTTP 404 при попытке логина по старой схеме). Восстановлено по
+// реальным запросам живого входа в бэк-офис (см.
+// claude/quickresto-shift-integration.md — там же ссылка на отдельный
+// standalone-скрипт revenue-report.mjs, на котором схема была впервые
+// проверена вручную):
+//   1. GET  id.quickresto.ru/realms/QR/protocol/openid-connect/auth?...   → HTML с формой email
+//   2. POST .../login-actions/authenticate?...  (identifier+identifierType) → HTML с формой пароля
+//   3. POST .../login-actions/authenticate?...  (password+credentialId)     → 302 с ?code=... в Location
+//   4. POST id.quickresto.ru/realms/QR/protocol/openid-connect/token (code+code_verifier) → access_token/refresh_token
+//   5. Запросы к данным — с заголовком Authorization: Bearer <access_token>
+
+const QR_CLIENT_ID = "qrbo-frontend";
+const QR_REDIRECT_URI = `https://${env.QR_HOST}/`;
+const QR_SCOPE = "openid qr profile email";
+
+const QR_BROWSER_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+  "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+};
+
+// Куки нужны только во время самого прохождения формы логина у Keycloak
+// (AUTH_SESSION_ID и т.п.) — данные Quick Resto после логина отдаёт уже по
+// Bearer-токену, без кук.
 const cookieJar = new Map<string, string>();
-let loggedIn = false;
+let accessToken: string | null = null;
+let refreshTokenValue: string | null = null;
+let accessTokenExpiresAt = 0;
 
 function storeCookies(res: Response) {
   const setCookie =
@@ -73,53 +103,154 @@ function cookieHeader() {
   return [...cookieJar.entries()].map(([k, v]) => `${k}=${v}`).join("; ");
 }
 
-async function qrFetch(path: string, init: RequestInit = {}) {
-  const res = await fetch(`https://${env.QR_HOST}${path}`, {
+// Низкоуровневый fetch с ручным редиректом (redirect: "manual") — нужен,
+// чтобы самим поймать 302 с ?code=... на шаге пароля, и чтобы не терять куки
+// на промежуточных хопах, которые fetch({redirect:"follow"}) от нас прячет.
+async function qrRawFetch(url: string, init: RequestInit = {}) {
+  const res = await fetch(url, {
     ...init,
-    headers: {
-      Accept: "application/json, text/plain, */*",
-      ...(init.headers ?? {}),
-      Cookie: cookieHeader(),
-    },
+    redirect: "manual",
+    headers: { ...QR_BROWSER_HEADERS, ...(init.headers ?? {}), Cookie: cookieHeader() },
   });
   storeCookies(res);
   return res;
 }
 
-async function login() {
-  const body = new URLSearchParams({
-    j_username: env.QR_LOGIN,
-    j_password: env.QR_PASSWORD,
-    j_rememberme: "true",
-  }).toString();
-  const res = await qrFetch("/platform/j_spring_security_check", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  if (!res.ok) {
-    throw new Error(`Quick Resto: логин не удался (HTTP ${res.status})`);
+async function qrFollowRedirects(url: string) {
+  let current = url;
+  for (let i = 0; i < 10; i++) {
+    const res = await qrRawFetch(current, { method: "GET" });
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      current = new URL(location, current).toString();
+      continue;
+    }
+    return res;
   }
-  loggedIn = true;
+  throw new Error("Quick Resto: слишком много редиректов при открытии формы логина.");
 }
 
-// Сессия Quick Resto может протухнуть в любой момент — тогда вместо JSON
-// приходит HTML-страница логина (со статусом 200). Ловим это через неудачный
-// JSON.parse, а не только по HTTP-статусу, и перелогиниваемся один раз.
-async function qrFetchJson<T>(path: string): Promise<T> {
-  if (!loggedIn) await login();
+// URL следующего шага формы логина (Keycloak) спрятан в JSON (kcContext),
+// который рендерит клиентский React (Keycloakify-тема), а не в обычном
+// HTML-атрибуте action="" — ищем его где угодно в ответе.
+function extractAuthenticateAction(html: string): string | null {
+  const match = html.match(/["=](https:\/\/[a-zA-Z0-9.-]+\/realms\/[^"'\s]+\/login-actions\/authenticate\?[^"'\s\\]+)["'\\]/);
+  if (!match) return null;
+  return match[1].replace(/&amp;/g, "&").replace(/\\u0026/g, "&").replace(/\\\//g, "/");
+}
 
-  let res = await qrFetch(path);
-  let text = await res.text();
+async function login() {
+  const codeVerifier = randomBytes(48).toString("base64url");
+  const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
+  const state = randomBytes(16).toString("base64url");
 
-  const looksExpired = res.status === 401 || res.status === 403 || !text.trim().startsWith("{");
-  if (looksExpired) {
-    loggedIn = false;
-    await login();
-    res = await qrFetch(path);
-    text = await res.text();
+  const authorizeParams = new URLSearchParams({
+    client_id: QR_CLIENT_ID,
+    redirect_uri: QR_REDIRECT_URI,
+    response_type: "code",
+    response_mode: "query",
+    scope: QR_SCOPE,
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+  });
+
+  // Шаг 1: открыть форму логина (шаг email).
+  let res = await qrFollowRedirects(`https://${env.QR_ID_HOST}/realms/QR/protocol/openid-connect/auth?${authorizeParams}`);
+  let html = await res.text();
+  let actionUrl = extractAuthenticateAction(html);
+  if (!actionUrl) {
+    throw new Error("Quick Resto: не нашёл форму логина (шаг email) — возможно, снова поменяли вёрстку страницы входа.");
   }
 
+  // Шаг 2: отправить email.
+  res = await qrRawFetch(actionUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ identifier: env.QR_LOGIN, identifierType: "loginOrEmail" }).toString(),
+  });
+  html = await res.text();
+  actionUrl = extractAuthenticateAction(html);
+  if (!actionUrl) {
+    throw new Error("Quick Resto: не нашёл форму логина (шаг пароль) — либо неверный логин, либо снова поменяли вёрстку.");
+  }
+
+  // Шаг 3: отправить пароль — в ответ должен прийти 302 с ?code=... в Location.
+  res = await qrRawFetch(actionUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ password: env.QR_PASSWORD, credentialId: "" }).toString(),
+  });
+  const location = res.headers.get("location");
+  if (res.status !== 302 || !location) {
+    throw new Error(`Quick Resto: логин не удался (ожидался редирект с кодом авторизации, получили HTTP ${res.status}).`);
+  }
+  const code = new URL(location).searchParams.get("code");
+  if (!code) throw new Error("Quick Resto: в редиректе после логина нет параметра code.");
+
+  // Шаг 4: обменять code на access/refresh токены.
+  const tokenRes = await qrRawFetch(`https://${env.QR_ID_HOST}/realms/QR/protocol/openid-connect/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      client_id: QR_CLIENT_ID,
+      redirect_uri: QR_REDIRECT_URI,
+      code_verifier: codeVerifier,
+    }).toString(),
+  });
+  if (!tokenRes.ok) throw new Error(`Quick Resto: обмен кода на токен не удался (HTTP ${tokenRes.status}).`);
+  const tokenData = (await tokenRes.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
+  accessToken = tokenData.access_token;
+  refreshTokenValue = tokenData.refresh_token ?? null;
+  accessTokenExpiresAt = Date.now() + (tokenData.expires_in ?? 60) * 1000 - 5000;
+}
+
+async function refreshAccessToken() {
+  if (!refreshTokenValue) {
+    await login();
+    return;
+  }
+  const res = await qrRawFetch(`https://${env.QR_ID_HOST}/realms/QR/protocol/openid-connect/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshTokenValue, client_id: QR_CLIENT_ID }).toString(),
+  });
+  if (!res.ok) {
+    await login(); // refresh-токен тоже протух — логинимся заново
+    return;
+  }
+  const tokenData = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
+  accessToken = tokenData.access_token;
+  refreshTokenValue = tokenData.refresh_token ?? refreshTokenValue;
+  accessTokenExpiresAt = Date.now() + (tokenData.expires_in ?? 60) * 1000 - 5000;
+}
+
+async function ensureLoggedIn() {
+  if (!accessToken) await login();
+  else if (Date.now() >= accessTokenExpiresAt) await refreshAccessToken();
+}
+
+async function qrFetch(path: string, init: RequestInit = {}) {
+  await ensureLoggedIn();
+  return fetch(`https://${env.QR_HOST}${path}`, {
+    ...init,
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      ...(init.headers ?? {}),
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
+async function qrFetchJson<T>(path: string): Promise<T> {
+  let res = await qrFetch(path);
+  if (res.status === 401 || res.status === 403) {
+    await refreshAccessToken();
+    res = await qrFetch(path);
+  }
+  const text = await res.text();
   if (!res.ok) {
     throw new Error(`Quick Resto: HTTP ${res.status} на ${path}`);
   }
