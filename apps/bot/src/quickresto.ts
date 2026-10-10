@@ -106,14 +106,34 @@ function cookieHeader() {
 // Низкоуровневый fetch с ручным редиректом (redirect: "manual") — нужен,
 // чтобы самим поймать 302 с ?code=... на шаге пароля, и чтобы не терять куки
 // на промежуточных хопах, которые fetch({redirect:"follow"}) от нас прячет.
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function qrRawFetch(url: string, init: RequestInit = {}) {
-  const res = await fetch(url, {
-    ...init,
-    redirect: "manual",
-    headers: { ...QR_BROWSER_HEADERS, ...(init.headers ?? {}), Cookie: cookieHeader() },
-  });
-  storeCookies(res);
-  return res;
+  // Сеть Railway до серверов Quick Resto иногда рвётся на уровне TCP/TLS
+  // (ETIMEDOUT при чтении) — это не HTTP-ошибка и не долетает до res.status,
+  // fetch() просто бросает исключение. Дважды повторяем сам запрос с
+  // небольшой паузой, прежде чем сдаться — отсеивает разовые обрывы; если
+  // рвётся стабильно на каждой попытке, это уже не чинится retry (см. лог —
+  // там будет видно, что все 3 попытки изнутри упали одинаково).
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        redirect: "manual",
+        headers: { ...QR_BROWSER_HEADERS, ...(init.headers ?? {}), Cookie: cookieHeader() },
+      });
+      storeCookies(res);
+      return res;
+    } catch (err) {
+      lastErr = err;
+      console.error(`Quick Resto: сетевой сбой запроса (попытка ${attempt}/3) к ${url.split("?")[0]}:`, err);
+      if (attempt < 3) await sleep(1500 * attempt);
+    }
+  }
+  throw lastErr;
 }
 
 async function qrFollowRedirects(url: string) {
