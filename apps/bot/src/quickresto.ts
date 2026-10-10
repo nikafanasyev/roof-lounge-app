@@ -134,14 +134,19 @@ async function qrFollowRedirects(url: string) {
 // который рендерит клиентский React (Keycloakify-тема), а не в обычном
 // HTML-атрибуте action="" — ищем его где угодно в ответе.
 function extractAuthenticateAction(html: string): string | null {
-  // Сначала пробуем найти именно поле "url":{"loginAction":"..."} из
-  // kcContext — это гарантированно ссылка на ОТПРАВКУ текущей формы, а не на
-  // что-то ещё (например, "другой способ входа"/организацию), если на
-  // странице окажется несколько ссылок с этим путём.
-  const loginActionMatch = html.match(/"loginAction"\s*:\s*"([^"]+)"/);
-  const generic = loginActionMatch
-    ? loginActionMatch[1]
-    : html.match(/["=](https:\/\/[a-zA-Z0-9.-]+\/realms\/[^"'\s]+\/login-actions\/authenticate\?[^"'\s\\]+)["'\\]/)?.[1];
+  // На странице логина (organization-aware тема) оказывается НЕСКОЛЬКО ссылок
+  // на login-actions/authenticate — не только форма логина, но и блок
+  // соцпровайдеров/организации ("social"/"providers" в kcContext). Простой
+  // поиск "первого попавшегося loginAction" иногда цеплял не ту ссылку, и
+  // пароль улетал не туда. Канонiчное поле формы в kcContext — это именно
+  // "url":{"loginAction":"...", ...} (верхнеуровневый объект url, который
+  // Keycloakify-тема использует для <form action>), поэтому ищем loginAction
+  // СТРОГО внутри объекта "url", а не где угодно в документе.
+  const scoped = html.match(/"url"\s*:\s*\{[^{}]*"loginAction"\s*:\s*"([^"]+)"/);
+  const generic =
+    scoped?.[1] ??
+    html.match(/"loginAction"\s*:\s*"([^"]+)"/)?.[1] ??
+    html.match(/["=](https:\/\/[a-zA-Z0-9.-]+\/realms\/[^"'\s]+\/login-actions\/authenticate\?[^"'\s\\]+)["'\\]/)?.[1];
   if (!generic) return null;
   return generic.replace(/&amp;/g, "&").replace(/\\u0026/g, "&").replace(/\\\//g, "/");
 }
@@ -177,6 +182,7 @@ async function login() {
   if (!actionUrl) {
     throw new Error("Quick Resto: не нашёл форму логина (шаг email) — возможно, снова поменяли вёрстку страницы входа.");
   }
+  console.log(`Quick Resto: шаг 1 (email) → ${actionUrl}`);
 
   // Шаг 2: отправить email.
   res = await qrRawFetch(actionUrl, {
@@ -189,6 +195,7 @@ async function login() {
   if (!actionUrl) {
     throw new Error("Quick Resto: не нашёл форму логина (шаг пароль) — либо неверный логин, либо снова поменяли вёрстку.");
   }
+  console.log(`Quick Resto: шаг 2 (пароль) → ${actionUrl}`);
 
   // Шаг 3: отправить пароль — в ответ должен прийти 302 с ?code=... в Location.
   res = await qrRawFetch(actionUrl, {
