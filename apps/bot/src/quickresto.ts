@@ -242,9 +242,30 @@ async function refreshAccessToken() {
   accessTokenExpiresAt = Date.now() + (tokenData.expires_in ?? 60) * 1000 - 5000;
 }
 
+// Бот дёргает запросы к Quick Resto из нескольких мест параллельно —
+// фоновый опрос tick() (раз в QR_POLL_INTERVAL_MS) и ручные команды вроде
+// /revenue в любой момент поверх него. login()/refreshAccessToken() — это
+// несколько последовательных запросов, которые делят один и тот же
+// cookieJar/accessToken; если два вызова пойдут одновременно, они будут
+// затирать куки друг друга посреди чужого флоу (на практике это и
+// происходило — то Keycloak возвращал форму логина заново вместо редиректа,
+// то редирект приходил без code). Поэтому вся авторизация идёт через общий
+// "замок": если логин/рефреш уже идёт, остальные просто ждут его результата
+// вместо того, чтобы начинать свой.
+let authInFlight: Promise<void> | null = null;
+
+function withAuthLock(run: () => Promise<void>): Promise<void> {
+  if (!authInFlight) {
+    authInFlight = run().finally(() => {
+      authInFlight = null;
+    });
+  }
+  return authInFlight;
+}
+
 async function ensureLoggedIn() {
-  if (!accessToken) await login();
-  else if (Date.now() >= accessTokenExpiresAt) await refreshAccessToken();
+  if (accessToken && Date.now() < accessTokenExpiresAt) return;
+  await withAuthLock(() => (accessToken ? refreshAccessToken() : login()));
 }
 
 async function qrFetch(path: string, init: RequestInit = {}) {
@@ -262,7 +283,7 @@ async function qrFetch(path: string, init: RequestInit = {}) {
 async function qrFetchJson<T>(path: string): Promise<T> {
   let res = await qrFetch(path);
   if (res.status === 401 || res.status === 403) {
-    await refreshAccessToken();
+    await withAuthLock(() => refreshAccessToken());
     res = await qrFetch(path);
   }
   const text = await res.text();
