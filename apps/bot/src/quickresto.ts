@@ -140,6 +140,14 @@ function extractAuthenticateAction(html: string): string | null {
 }
 
 async function login() {
+  // Бот гоняет login() на каждом неудачном тике опроса (раз в
+  // QR_POLL_INTERVAL_MS) — в отличие от одноразового запуска
+  // revenue-report.mjs. Если не чистить cookieJar, куки от предыдущей
+  // (возможно, неудачной) попытки логина остаются в памяти процесса и
+  // Keycloak может решить, что сессия уже есть, и вместо чистой формы
+  // логина отдать какую-то другую страницу (не 302) — начинаем каждую
+  // попытку с нуля.
+  cookieJar.clear();
   const codeVerifier = randomBytes(48).toString("base64url");
   const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
   const state = randomBytes(16).toString("base64url");
@@ -183,7 +191,14 @@ async function login() {
   });
   const location = res.headers.get("location");
   if (res.status !== 302 || !location) {
-    throw new Error(`Quick Resto: логин не удался (ожидался редирект с кодом авторизации, получили HTTP ${res.status}).`);
+    const body = await res.text();
+    const looksLikeBadCreds = /invalid username or password|неверный логин|неверные учётные|invalid-user-credentials/i.test(body);
+    const snippet = body.replace(/\s+/g, " ").trim().slice(0, 300);
+    throw new Error(
+      looksLikeBadCreds
+        ? "Quick Resto: неверный логин или пароль (проверь QR_LOGIN/QR_PASSWORD в переменных окружения)."
+        : `Quick Resto: логин не удался (ожидался редирект с кодом авторизации, получили HTTP ${res.status}). Начало ответа: ${snippet}`,
+    );
   }
   const code = new URL(location).searchParams.get("code");
   if (!code) throw new Error("Quick Resto: в редиректе после логина нет параметра code.");
