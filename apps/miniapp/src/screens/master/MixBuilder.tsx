@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { flavorsStore, computeStrengthFromItems, createMix, getGuest } from "@/data/repo";
 import type { Flavor, MixItem } from "@/types";
@@ -122,6 +122,11 @@ export default function MixBuilder() {
       <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
         для {guest.displayName}
       </div>
+      {step === "pick" && (
+        <Link to={`/employee/guests/${guest.id}`} className="muted" style={{ fontSize: 13, display: "block", marginBottom: 12 }}>
+          👃 Вкусовой профиль гостя →
+        </Link>
+      )}
 
       {step === "pick" && (
         <>

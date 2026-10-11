@@ -3,7 +3,7 @@
 // реальное разделение прав по ролям.
 import { useState } from "react";
 import { useStore } from "@/data/useStore";
-import { addAdjustment, adjustmentsStore, listAdjustments } from "@/data/repo";
+import { addAdjustment, adjustmentsStore, getStaffProfile, listAdjustments, listStaffDirectory } from "@/data/repo";
 import type { AdjustmentType } from "@/types";
 
 function money(n: number): string {
@@ -13,18 +13,22 @@ function money(n: number): string {
 export default function Adjustments() {
   useStore(adjustmentsStore);
   const entries = listAdjustments();
+  const staffList = listStaffDirectory();
+  const me = getStaffProfile();
 
   const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState<AdjustmentType>("bonus");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
+  const [staffId, setStaffId] = useState(me.id);
 
   function submit() {
     const value = Number(amount);
     if (!value || !reason.trim()) return;
-    addAdjustment(type, value, reason.trim());
+    addAdjustment(type, value, reason.trim(), staffId);
     setAmount("");
     setReason("");
+    setStaffId(me.id);
     setShowForm(false);
   }
 
@@ -64,6 +68,15 @@ export default function Adjustments() {
               Штраф
             </button>
           </div>
+          <div className="eyebrow">Кому</div>
+          <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={{ marginBottom: 12 }}>
+            {staffList.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+                {s.id === me.id ? " (я)" : ""}
+              </option>
+            ))}
+          </select>
           <div className="eyebrow">Сумма, ₽</div>
           <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ marginBottom: 12 }} />
           <div className="eyebrow">Причина</div>
