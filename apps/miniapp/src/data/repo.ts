@@ -1579,3 +1579,29 @@ export function groupKnowledgeByCategory(): { category: string; articles: Knowle
   }
   return Array.from(byCategory.entries()).map(([category, articles]) => ({ category, articles }));
 }
+
+export interface KnowledgeSection {
+  title: string;
+  body: string; // включает свою строку "# Заголовок" — так KnowledgeBody рендерит её как h2
+}
+
+// Длинные статьи (тех. карты бара/кухни, штрафная сетка) собраны из нескольких
+// разделов "# Раздел" подряд — вместо одной "простыни" даём экран-меню с
+// кнопками по разделам, а не всё сразу. Если в статье меньше двух разделов
+// (ровно один "# ..." или вообще без разметки) — секции не нужны, показываем
+// статью целиком, как раньше.
+export function splitKnowledgeSections(body: string): KnowledgeSection[] {
+  const lines = body.split("\n");
+  const sections: KnowledgeSection[] = [];
+  let current: { title: string; lines: string[] } | null = null;
+  for (const rawLine of lines) {
+    if (rawLine.trim().startsWith("# ")) {
+      if (current) sections.push({ title: current.title, body: current.lines.join("\n") });
+      current = { title: rawLine.trim().slice(2), lines: [rawLine] };
+    } else if (current) {
+      current.lines.push(rawLine);
+    }
+  }
+  if (current) sections.push({ title: current.title, body: current.lines.join("\n") });
+  return sections;
+}
