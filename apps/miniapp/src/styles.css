@@ -239,7 +239,8 @@ textarea {
   background: var(--surface);
 }
 
-.bottom-nav a {
+.bottom-nav a,
+.bottom-nav button {
   flex: 1;
   text-align: center;
   padding: 10px 0 12px;
@@ -250,9 +251,13 @@ textarea {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
 }
 
-.bottom-nav a.active {
+.bottom-nav a.active,
+.bottom-nav button.active {
   color: var(--ink);
 }
 
