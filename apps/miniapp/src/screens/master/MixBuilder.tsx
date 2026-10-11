@@ -104,6 +104,15 @@ export default function MixBuilder() {
 
   return (
     <div className="screen">
+      {step === "pick" && (
+        <button
+          className="muted"
+          style={{ background: "none", border: "none", padding: 0, marginBottom: 8, cursor: "pointer" }}
+          onClick={() => navigate("/employee/guests")}
+        >
+          ← Все гости
+        </button>
+      )}
       <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
         для {guest.displayName}
       </div>
