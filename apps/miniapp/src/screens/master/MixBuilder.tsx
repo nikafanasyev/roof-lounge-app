@@ -5,6 +5,7 @@ import { flavorsStore, computeStrengthFromItems, createMix, getGuest } from "@/d
 import type { Flavor, MixItem } from "@/types";
 
 const MAX_ITEMS = 5;
+const DEFAULT_VISIBLE_FLAVORS = 7; // без поиска показываем короткий список, а не все 300+ позиций
 const BOWL_TYPES = ["классика", "фунтик", "самса"];
 const DENSITY_OPTIONS = ["лёгкое касание", "средняя набивка", "плотная набивка"];
 
@@ -28,9 +29,14 @@ export default function MixBuilder() {
 
   const filteredFlavors = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return flavors;
+    if (!q) {
+      const selectedIds = new Set(selected.map((s) => s.id));
+      const rest = flavors.filter((f) => !selectedIds.has(f.id));
+      return [...selected, ...rest.slice(0, Math.max(0, DEFAULT_VISIBLE_FLAVORS - selected.length))];
+    }
     return flavors.filter((f) => f.brand.toLowerCase().includes(q) || f.name.toLowerCase().includes(q));
-  }, [flavors, query]);
+  }, [flavors, query, selected]);
+  const isBrowsingAll = query.trim().length > 0;
 
   const totalShare = Object.values(shares).reduce((a, b) => a + b, 0);
 
@@ -128,6 +134,11 @@ export default function MixBuilder() {
             style={{ marginBottom: 12 }}
           />
           <div className="eyebrow">Вкусы</div>
+          {!isBrowsingAll && (
+            <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+              Показаны несколько вкусов — начните вводить бренд или название, чтобы найти нужный (всего {flavors.length}).
+            </div>
+          )}
           {filteredFlavors.map((f) => {
             const isSelected = !!selected.find((s) => s.id === f.id);
             return (
