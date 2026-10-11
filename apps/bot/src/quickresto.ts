@@ -1083,3 +1083,102 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
     tick().catch((err) => console.error("Quick Resto: ошибка опроса:", err));
   }, env.QR_POLL_INTERVAL_MS);
 }
+
+// --- Синхронизация клиентов CRM (гости) в guests — см. миграцию
+// 0008_crm_customer_sync.sql и обсуждение с Никитой 11.10.2026. Переносим
+// существующую базу клиентов Quick Resto (ФИО + "Идентификаторы" как номер
+// карты) в наш guests — специально НЕ как phone, чтобы это не участвовало во
+// входе гостя в мини-апп по телефону (это отдельная, независимая база для
+// гостей, кто регистрируется сам). quickresto_customer_id — ключ upsert, так
+// синхронизация идемпотентна и день за днём просто подтягивает новых/
+// изменившихся клиентов, не плодя дублей.
+
+interface CrmCustomerRaw {
+  id: number;
+  title?: string;
+  firstName?: string;
+  lastName?: string;
+  middleName?: string;
+  identifiers?: string;
+  dateOfBirth?: string;
+  deleted?: boolean;
+}
+
+const CRM_CUSTOMER_PAGE_SIZE = 150;
+
+function crmCustomerPath(start: number) {
+  return `/platform/data/crm.customer/select?start=${start}&count=${CRM_CUSTOMER_PAGE_SIZE}&businessDayOffsetInMs=43200000&timeZone=-180`;
+}
+
+async function fetchAllCrmCustomers(): Promise<CrmCustomerRaw[]> {
+  const all: CrmCustomerRaw[] = [];
+  for (let start = 0; ; start += CRM_CUSTOMER_PAGE_SIZE) {
+    const data = await qrFetchJson<{ ds?: { object: CrmCustomerRaw }[] }>(crmCustomerPath(start));
+    const page = (data.ds ?? []).map((row) => row.object);
+    all.push(...page);
+    if (page.length < CRM_CUSTOMER_PAGE_SIZE) break;
+  }
+  return all;
+}
+
+function displayNameFromCrmCustomer(c: CrmCustomerRaw): string {
+  // title у Quick Resto уже собран в правильном порядке (Имя [Отчество] Фамилия) —
+  // проще и надёжнее взять его, чем собирать самим из firstName/lastName/middleName.
+  const title = c.title?.trim();
+  if (title) return title;
+  return [c.firstName, c.middleName, c.lastName].filter(Boolean).join(" ").trim() || "Без имени";
+}
+
+/**
+ * Синхронизация справочника клиентов Quick Resto -> guests. Пропускает
+ * удалённых (deleted=true) и записи без имени. Батчами по 500, чтобы не
+ * упереться в лимит размера запроса на ~2500+ строк разом.
+ */
+export async function syncCrmCustomers(supabase: SupabaseClient): Promise<{ synced: number; total: number }> {
+  const customers = await fetchAllCrmCustomers();
+  const rows = customers
+    .filter((c) => !c.deleted)
+    .map((c) => ({
+      quickresto_customer_id: c.id,
+      display_name: displayNameFromCrmCustomer(c),
+      card_number: c.identifiers?.trim() || null,
+      birth_date: c.dateOfBirth || null,
+    }));
+
+  const BATCH = 500;
+  let synced = 0;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const batch = rows.slice(i, i + BATCH);
+    const { error } = await supabase.from("guests").upsert(batch, { onConflict: "quickresto_customer_id" });
+    if (error) {
+      console.error("Quick Resto: ошибка синхронизации клиентов CRM:", error);
+      continue;
+    }
+    synced += batch.length;
+  }
+  return { synced, total: customers.length };
+}
+
+const CRM_SYNC_JOB_HOUR_MSK = 9;
+
+/**
+ * Планирует syncCrmCustomers на 9:00 МСК каждый день (и один раз сразу при
+ * старте бота — чтобы не ждать до следующего утра первого переноса базы).
+ */
+export function scheduleDailyCrmCustomerSync() {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  function runOnce() {
+    return syncCrmCustomers(supabase)
+      .then(({ synced, total }) => console.log(`Quick Resto: синхронизация клиентов CRM — ${synced}/${total}`))
+      .catch((err) => console.error("Quick Resto: ошибка синхронизации клиентов CRM:", err));
+  }
+  function scheduleNext() {
+    const delay = msUntilNextMoscowHour(CRM_SYNC_JOB_HOUR_MSK);
+    setTimeout(() => {
+      runOnce().then(scheduleNext);
+    }, delay);
+    console.log(`Quick Resto: следующая синхронизация клиентов CRM — через ${Math.round(delay / 60000)} мин (${CRM_SYNC_JOB_HOUR_MSK}:00 МСК)`);
+  }
+  // Сразу при старте бота — чтобы не ждать до следующих 9:00 МСК первого переноса базы.
+  runOnce().then(scheduleNext);
+}
