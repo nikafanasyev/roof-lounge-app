@@ -42,3 +42,25 @@ export function getTelegramUser() {
 export function haptic(style: "light" | "medium" | "heavy" = "light") {
   window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style);
 }
+
+
+// Список telegram_id руководителей — задаётся переменной окружения
+// VITE_MANAGER_TELEGRAM_IDS (через запятую, напр. "123456789,987654321") в
+// настройках деплоя мини-аппа на Vercel. У кого id в списке — тот видит и
+// кабинет "Сотрудник", и "Руководитель" с ручным переключателем (как сейчас,
+// удобно для тебя как суперпользователя); у всех остальных переключатель
+// скрыт — сразу открывается кабинет "Сотрудник".
+const MANAGER_TELEGRAM_IDS = new Set(
+  (import.meta.env.VITE_MANAGER_TELEGRAM_IDS ?? "")
+    .split(",")
+    .map((id: string) => id.trim())
+    .filter(Boolean),
+);
+
+export function isCurrentUserManager(): boolean {
+  const tgUser = getTelegramUser();
+  // Вне Telegram (разработка, прямая ссылка в браузере без initData) — считаем
+  // руководителем, чтобы не мешать тестировать оба экрана.
+  if (!tgUser) return true;
+  return MANAGER_TELEGRAM_IDS.has(String(tgUser.id));
+}

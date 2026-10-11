@@ -20,6 +20,7 @@ import StaffList from "@/screens/manager/StaffList";
 import StaffDetail from "@/screens/manager/StaffDetail";
 import SchedulePayroll from "@/screens/manager/SchedulePayroll";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
+import { isCurrentUserManager } from "@/lib/telegram";
 
 // Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
 // реально работает в заведении) и отдельно "Руководитель". Переключатель
@@ -79,7 +80,11 @@ const DEFAULT_ROUTE: Record<AppRole, string> = {
 };
 
 function RoleShell() {
-  const [role, setRole] = useState<AppRole>("employee");
+  // Переключатель виден только руководителю (см. lib/telegram.ts) — у него
+  // одна и та же ссылка открывает оба кабинета, остальной персонал сразу
+  // попадает в "Сотрудник" без ручного выбора.
+  const isManager = isCurrentUserManager();
+  const [role, setRole] = useState<AppRole>(isManager ? "employee" : "employee");
   const location = useLocation();
   const isGuestScreen = location.pathname.startsWith("/table/");
 
@@ -91,17 +96,25 @@ function RoleShell() {
     );
   }
 
+  // Доп. защита: даже если кто-то наберёт /manager/... руками в адресной
+  // строке, без флага руководителя его отправляют обратно в "Сотрудник".
+  if (!isManager && location.pathname.startsWith("/manager")) {
+    return <Navigate to={DEFAULT_ROUTE.employee} replace />;
+  }
+
   return (
     <div className="app">
-      <div className="top-bar">
-        <div className="role-switch">
-          {(Object.keys(ROLE_LABEL) as AppRole[]).map((r) => (
-            <button key={r} className={role === r ? "active" : ""} onClick={() => setRole(r)}>
-              {ROLE_LABEL[r]}
-            </button>
-          ))}
+      {isManager && (
+        <div className="top-bar">
+          <div className="role-switch">
+            {(Object.keys(ROLE_LABEL) as AppRole[]).map((r) => (
+              <button key={r} className={role === r ? "active" : ""} onClick={() => setRole(r)}>
+                {ROLE_LABEL[r]}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <Routes>
         <Route path="/" element={<Navigate to={DEFAULT_ROUTE[role]} replace />} />
@@ -131,8 +144,8 @@ function RoleShell() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      {role === "employee" && <EmployeeNav />}
-      {role === "manager" && <ManagerNav />}
+      {(role === "employee" || !isManager) && <EmployeeNav />}
+      {role === "manager" && isManager && <ManagerNav />}
     </div>
   );
 }
