@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
 import { watchServiceCalls, watchShiftPhotos } from "./notify";
-import { fetchRevenueSplitForDate, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
+import { fetchRevenueSplitForDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -141,6 +141,10 @@ async function main() {
       },
       { reconcile: false },
     );
+
+    // Перенос базы клиентов Quick Resto (ФИО + номер карты, без телефона —
+    // см. claude/quickresto-shift-integration.md) в наш guests, ежедневно.
+    scheduleDailyCrmCustomerSync();
   } else {
     console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }
