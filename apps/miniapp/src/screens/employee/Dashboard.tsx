@@ -1,11 +1,14 @@
 import { useStore } from "@/data/useStore";
 import {
   adjustmentsStore,
+  computeEarnedThisCalendarMonth,
   computePayrollSummary,
+  listActivePayrollPeriodSummaries,
   listShiftPayrollByMonth,
   payoutsStore,
   shiftPayrollStore,
 } from "@/data/repo";
+import PayrollPeriods from "@/components/PayrollPeriods";
 
 function money(n: number): string {
   return n.toLocaleString("ru-RU") + " ₽";
@@ -16,20 +19,21 @@ export default function Dashboard() {
   useStore(adjustmentsStore);
   useStore(payoutsStore);
   const summary = computePayrollSummary();
+  const periods = listActivePayrollPeriodSummaries();
+  const earnedThisMonth = computeEarnedThisCalendarMonth();
   const months = listShiftPayrollByMonth();
 
   return (
     <div className="screen">
       <h1>Моя зарплата</h1>
 
-      <div className="card" style={{ textAlign: "center", padding: "18px 16px" }}>
+      <PayrollPeriods summaries={periods} />
+
+      <div className="card" style={{ textAlign: "center", padding: "14px 16px", marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>
-          К выплате
+          Заработано за месяц
         </div>
-        <div style={{ fontSize: 30, fontWeight: 700 }}>{money(summary.due)}</div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          зарплата + премии − штрафы − выплачено
-        </div>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>{money(earnedThisMonth)}</div>
       </div>
 
       <div className="stat-grid">
@@ -37,7 +41,7 @@ export default function Dashboard() {
           <div className="value" style={{ color: "var(--accent)" }}>
             {money(summary.earned)}
           </div>
-          <div className="label">Зарплата</div>
+          <div className="label">Зарплата (всего)</div>
         </div>
         <div className="stat-tile">
           <div className="value" style={{ color: "var(--good)" }}>

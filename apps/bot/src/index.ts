@@ -118,26 +118,29 @@ async function main() {
     });
     console.log("Слушаю статус смены через Quick Resto (ПИН на терминале).");
 
-    // Сверка графика с Quick Resto (scheduleDailyPayrollJob) пока ВЫКЛЮЧЕНА —
-    // в бэклоге до тех пор, пока у сотрудников нет личных ПИН-кодов доступа на
-    // терминале Quick Resto (сейчас, судя по всему, вход общий/не персональный,
-    // поэтому "кто реально работал" по Quick Resto ещё нельзя надёжно
-    // сопоставить с конкретным сотрудником). Пока обкатываем ручное
-    // составление графика (раздел "Руководитель" → "График") без
-    // автоматического начисления поверх него — см. claude/quickresto-shift-integration.md.
-    //
-    // Когда личные ПИНы появятся — раскомментировать:
-    // scheduleDailyPayrollJob(async (issue) => {
-    //   const roleLabel = issue.role === "hookah" ? "Кальяны" : "Бар";
-    //   const dateLabel = new Date(`${issue.date}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
-    //   const actual = issue.actualStaffNames.length ? issue.actualStaffNames.join(", ") : "никто (по данным Quick Resto)";
-    //   const text =
-    //     `⚠️ ЗП не начислена автоматически\n${dateLabel} · ${roleLabel}\n` +
-    //     `По графику: ${issue.expectedStaffName}\n` +
-    //     `По Quick Resto реально работал: ${actual}\n\n` +
-    //     `Проверьте и начислите вручную: «Руководитель» → «График» → «Начислить вручную».`;
-    //   if (qrChatId) await bot.api.sendMessage(qrChatId, text);
-    // });
+    // Ежедневное начисление ЗП по графику (11.10.2026, см.
+    // claude/quickresto-shift-integration.md). Сверка "кто реально зашёл по
+    // ПИН-коду на терминале" (reconcile: true) пока ВЫКЛЮЧЕНА — у сотрудников
+    // ещё нет личных ПИНов, поэтому "кто реально работал" по Quick Resto
+    // нельзя надёжно сопоставить с конкретным сотрудником. Сейчас начисляем
+    // просто всем, кто стоит в графике (руководитель составляет его заранее в
+    // разделе «Руководитель» → «График») — ровно то же самое, что раньше
+    // делали вручную SQL-бэкфиллом, теперь ежедневно и автоматически.
+    scheduleDailyPayrollJob(
+      async (issue) => {
+        // onIssue срабатывает только при reconcile: true — сейчас не используется.
+        const roleLabel = issue.role === "hookah" ? "Кальяны" : "Бар";
+        const dateLabel = new Date(`${issue.date}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+        const actual = issue.actualStaffNames.length ? issue.actualStaffNames.join(", ") : "никто (по данным Quick Resto)";
+        const text =
+          `⚠️ ЗП не начислена автоматически\n${dateLabel} · ${roleLabel}\n` +
+          `По графику: ${issue.expectedStaffName}\n` +
+          `По Quick Resto реально работал: ${actual}\n\n` +
+          `Проверьте и начислите вручную: «Руководитель» → «График» → «Начислить вручную».`;
+        if (qrChatId) await bot.api.sendMessage(qrChatId, text);
+      },
+      { reconcile: false },
+    );
   } else {
     console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }
