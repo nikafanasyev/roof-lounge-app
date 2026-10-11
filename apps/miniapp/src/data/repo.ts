@@ -1365,6 +1365,30 @@ export function resolvePayrollIssue(issueId: string, staffId: string) {
   }
 }
 
+/**
+ * Переназначить уже начисленную смену другому сотруднику — для случая
+ * "в графике была замена, а бот успел начислить не тому" (см. обсуждение с
+ * Никитой 11.10.2026): перенос ЗП на нужного человека задним числом, без
+ * ручного SQL в Supabase. Выручка смены не трогается — только сотрудник и
+ * сумма (пересчитывается по salary_model нового сотрудника).
+ */
+export function reassignShiftPayroll(entryId: string, newStaffId: string) {
+  const entry = shiftPayrollStore.get().find((e) => e.id === entryId);
+  if (!entry) return;
+  const newStaff = getStaffProfileById(newStaffId);
+  const salary = newStaff ? computeShiftSalary(newStaff.salaryModel, entry.revenue) : entry.salary;
+
+  shiftPayrollStore.update((list) => list.map((e) => (e.id === entryId ? { ...e, staffId: newStaffId, salary } : e)));
+
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("shift_payroll")
+      .update({ staff_id: newStaffId, salary })
+      .eq("id", entryId)
+      .then(({ error }) => error && logSyncError("reassignShiftPayroll", error));
+  }
+}
+
 export function listKnowledgeArticles(): KnowledgeArticle[] {
   return knowledgeStore.get();
 }
