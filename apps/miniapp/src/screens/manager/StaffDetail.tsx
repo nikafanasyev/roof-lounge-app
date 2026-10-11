@@ -1,14 +1,18 @@
 import { Link, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import {
+  computeAverageSalaryPerShift,
+  computeEarnedThisCalendarMonthForStaff,
   computePayrollSummaryForStaff,
   formatSalaryModel,
   getStaffProfileById,
+  listActivePayrollPeriodSummariesForStaff,
   listShiftPayrollByMonthForStaff,
   shiftPayrollStore,
   staffDirectoryStore,
   yearsOfService,
 } from "@/data/repo";
+import PayrollPeriods from "@/components/PayrollPeriods";
 import type { StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
@@ -48,6 +52,9 @@ export default function StaffDetail() {
   }
 
   const summary = computePayrollSummaryForStaff(staffId);
+  const periods = listActivePayrollPeriodSummariesForStaff(staffId);
+  const earnedThisMonth = computeEarnedThisCalendarMonthForStaff(staffId);
+  const avgPerShift = computeAverageSalaryPerShift(staffId);
   const months = listShiftPayrollByMonthForStaff(staffId);
   const expirySoon =
     profile.medicalBookExpiry && new Date(profile.medicalBookExpiry).getTime() - Date.now() < 86400000 * 30;
@@ -88,12 +95,25 @@ export default function StaffDetail() {
         </div>
       </div>
 
+      <PayrollPeriods summaries={periods} />
+
+      <div className="stat-grid">
+        <div className="stat-tile">
+          <div className="value">{money(earnedThisMonth)}</div>
+          <div className="label">Заработано за месяц</div>
+        </div>
+        <div className="stat-tile">
+          <div className="value">{money(avgPerShift)}</div>
+          <div className="label">Средняя ЗП за смену</div>
+        </div>
+      </div>
+
       <div className="stat-grid">
         <div className="stat-tile">
           <div className="value" style={{ color: "var(--accent)" }}>
             {money(summary.earned)}
           </div>
-          <div className="label">Начислено</div>
+          <div className="label">Начислено (всего)</div>
         </div>
         <div className="stat-tile">
           <div className="value" style={{ color: "var(--good)" }}>
@@ -113,12 +133,6 @@ export default function StaffDetail() {
           </div>
           <div className="label">Премии</div>
         </div>
-      </div>
-      <div className="card" style={{ textAlign: "center", padding: "14px 16px" }}>
-        <div className="eyebrow" style={{ marginBottom: 4 }}>
-          К выплате
-        </div>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>{money(summary.due)}</div>
       </div>
 
       <h2>Начисления по сменам</h2>

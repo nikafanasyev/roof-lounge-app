@@ -1138,6 +1138,148 @@ export function computePayrollSummary(): PayrollSummary {
   return computePayrollSummaryForStaff(getStaffProfile().id);
 }
 
+// --- Зарплатные периоды (см. обсуждение с Никитой 11.10.2026) ---
+//
+// В заведении два периода в месяц: 11–24 число включительно (выплата
+// 30-го числа того же месяца) и 25 число – 10 число следующего месяца
+// включительно (выплата 15-го числа следующего месяца). "К выплате" на
+// экранах теперь показывает оба периода отдельно, а не одну общую сумму —
+// легко спутать, за что уже выплачено, когда они смешаны. "Заработано за
+// месяц" (ниже) — отдельная метрика по календарному месяцу, не путать с
+// зарплатным периодом: он не совпадает с границами месяца.
+
+export interface PayrollPeriod {
+  start: string; // ISO-дата YYYY-MM-DD, включительно
+  end: string; // ISO-дата YYYY-MM-DD, включительно
+  payoutDate: string; // ISO-дата YYYY-MM-DD, когда выплачивается
+  label: string; // "11–24 октября" / "25 сентября – 10 октября"
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** month — 1-based (как из monthDayFromIso); Date сам нормализует переполнение/уход в соседний месяц или год. */
+function ymd(year: number, month: number, day: number): string {
+  const d = new Date(year, month - 1, day);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function monthDayFromIso(iso: string): { year: number; month: number; day: number } {
+  const [year, month, day] = iso.slice(0, 10).split("-").map(Number);
+  return { year, month, day };
+}
+
+function formatPeriodLabel(start: string, end: string): string {
+  const s = new Date(`${start}T12:00:00`);
+  const e = new Date(`${end}T12:00:00`);
+  const endLabel = e.toLocaleDateString("ru-RU", { day: "numeric", month: "long" }); // ICU сам даёт родительный падеж при наличии дня, например "24 октября"
+  if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth()) {
+    return `${s.getDate()}–${endLabel}`; // "11–24 октября"
+  }
+  const startLabel = s.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+  return `${startLabel} – ${endLabel}`; // "25 сентября – 10 октября"
+}
+
+export function getPayrollPeriodForDate(dateIso: string): PayrollPeriod {
+  const { year, month, day } = monthDayFromIso(dateIso);
+  if (day >= 11 && day <= 24) {
+    const start = ymd(year, month, 11);
+    const end = ymd(year, month, 24);
+    const payoutDate = ymd(year, month, 30);
+    return { start, end, payoutDate, label: formatPeriodLabel(start, end) };
+  }
+  if (day >= 25) {
+    const start = ymd(year, month, 25);
+    const end = ymd(year, month + 1, 10);
+    const payoutDate = ymd(year, month + 1, 15);
+    return { start, end, payoutDate, label: formatPeriodLabel(start, end) };
+  }
+  // day <= 10 — хвост периода, начавшегося 25-го числа предыдущего месяца
+  const start = ymd(year, month - 1, 25);
+  const end = ymd(year, month, 10);
+  const payoutDate = ymd(year, month, 15);
+  return { start, end, payoutDate, label: formatPeriodLabel(start, end) };
+}
+
+/** Период, непосредственно предшествующий данному (день перед его началом). */
+function previousPayrollPeriod(period: PayrollPeriod): PayrollPeriod {
+  const { year, month, day } = monthDayFromIso(period.start);
+  const prevDayIso = ymd(year, month, day - 1);
+  return getPayrollPeriodForDate(prevDayIso);
+}
+
+/**
+ * Два периода, актуальных "сейчас": только что закрывшийся (скоро будет
+ * выплачен) и текущий (ещё копится). Например, 11.10.2026 это период
+ * 25.09–10.10 (выплата 15.10) и период 11–24.10 (выплата 30.10).
+ */
+export function getActivePayrollPeriods(referenceDate: Date = new Date()): [PayrollPeriod, PayrollPeriod] {
+  const iso = `${referenceDate.getFullYear()}-${pad2(referenceDate.getMonth() + 1)}-${pad2(referenceDate.getDate())}`;
+  const current = getPayrollPeriodForDate(iso);
+  return [previousPayrollPeriod(current), current];
+}
+
+export interface PayrollPeriodSummary {
+  period: PayrollPeriod;
+  earned: number;
+  paid: number;
+  due: number;
+}
+
+export function computePayrollPeriodSummary(staffId: string, period: PayrollPeriod): PayrollPeriodSummary {
+  const inRange = (iso: string) => {
+    const d = iso.slice(0, 10);
+    return d >= period.start && d <= period.end;
+  };
+  const shifts = listShiftPayrollForStaff(staffId).filter((s) => inRange(s.date));
+  const adjustments = listAdjustmentsForStaff(staffId).filter((a) => inRange(a.date));
+  // Выплата считается "за этот период", если её дата попадает в сам период
+  // или между концом периода и днём выплаты включительно.
+  const payouts = listPayoutsForStaff(staffId).filter((p) => {
+    const d = p.date.slice(0, 10);
+    return d >= period.start && d <= period.payoutDate;
+  });
+  const fromShifts = shifts.reduce((sum, s) => sum + s.salary, 0);
+  const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
+  const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
+  const earned = fromShifts + bonuses - fines;
+  const paid = payouts.reduce((sum, p) => sum + p.amount, 0);
+  return { period, earned, paid, due: earned - paid };
+}
+
+/** "К выплате", разбитое на два актуальных периода — см. getActivePayrollPeriods. */
+export function listActivePayrollPeriodSummariesForStaff(staffId: string, referenceDate: Date = new Date()): PayrollPeriodSummary[] {
+  return getActivePayrollPeriods(referenceDate).map((period) => computePayrollPeriodSummary(staffId, period));
+}
+
+export function listActivePayrollPeriodSummaries(referenceDate: Date = new Date()): PayrollPeriodSummary[] {
+  return listActivePayrollPeriodSummariesForStaff(getStaffProfile().id, referenceDate);
+}
+
+/** Заработано за текущий календарный месяц — отдельно от зарплатных периодов выше. */
+export function computeEarnedThisCalendarMonthForStaff(staffId: string, referenceDate: Date = new Date()): number {
+  const key = `${referenceDate.getFullYear()}-${pad2(referenceDate.getMonth() + 1)}`;
+  const inMonth = (iso: string) => iso.slice(0, 7) === key;
+  const shifts = listShiftPayrollForStaff(staffId).filter((s) => inMonth(s.date));
+  const adjustments = listAdjustmentsForStaff(staffId).filter((a) => inMonth(a.date));
+  const fromShifts = shifts.reduce((sum, s) => sum + s.salary, 0);
+  const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
+  const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
+  return fromShifts + bonuses - fines;
+}
+
+export function computeEarnedThisCalendarMonth(referenceDate: Date = new Date()): number {
+  return computeEarnedThisCalendarMonthForStaff(getStaffProfile().id, referenceDate);
+}
+
+/** Средняя ЗП за смену по всем записанным сменам — для раздела "Сотрудники" у руководителя. */
+export function computeAverageSalaryPerShift(staffId: string): number {
+  const shifts = listShiftPayrollForStaff(staffId);
+  if (!shifts.length) return 0;
+  return Math.round(shifts.reduce((sum, s) => sum + s.salary, 0) / shifts.length);
+}
+
 // --- График (составляет руководитель) и разрешение расхождений с Quick Resto ---
 //
 // График — источник истины для начисления ЗП: кто в какой день отвечает за
