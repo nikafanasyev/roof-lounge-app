@@ -245,6 +245,7 @@ async function loadFlavors() {
       name: r.name,
       code: r.code ?? "",
       categories: r.categories ?? [],
+      strength: r.strength ?? undefined,
     })),
   );
 }

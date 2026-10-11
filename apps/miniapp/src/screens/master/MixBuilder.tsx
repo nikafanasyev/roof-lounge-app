@@ -124,12 +124,18 @@ export default function MixBuilder() {
             return (
               <div key={f.id} className="card card-row" onClick={() => toggleFlavor(f)} style={{ cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span className="chip">{f.code}</span>
+                  {f.code && <span className="chip">{f.code}</span>}
                   <div>
                     <div style={{ fontWeight: 700 }}>{f.name.toUpperCase()}</div>
                     <div className="muted" style={{ fontSize: 13 }}>
                       {f.brand}
+                      {f.strength ? ` · ${f.strength}` : ""}
                     </div>
+                    {f.categories.length > 0 && (
+                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                        {f.categories.join(", ")}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <span style={{ fontSize: 18, color: isSelected ? "var(--accent-2)" : "var(--muted)" }}>
@@ -164,7 +170,9 @@ export default function MixBuilder() {
             <div key={f.id} className="card">
               <div style={{ fontWeight: 700, marginBottom: 2 }}>{f.name.toUpperCase()}</div>
               <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-                {f.brand} · {f.code}
+                {f.brand}
+                {f.code ? ` · ${f.code}` : ""}
+                {f.strength ? ` · ${f.strength}` : ""}
               </div>
               <div className="share-row">
                 <div className="stepper">
