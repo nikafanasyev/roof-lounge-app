@@ -1,12 +1,21 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getKnowledgeArticle, splitKnowledgeSections } from "@/data/repo";
+import { CLEANING_ROLE_WEEKS, getCurrentStaffRole, getKnowledgeArticle, splitKnowledgeSections, STAFF_ROLE_TO_CLEANING_ROLE } from "@/data/repo";
 import KnowledgeBody from "@/components/KnowledgeBody";
+import CleaningChecklist from "./CleaningChecklist";
+
+// Статья "Генеральная уборка" — единственная, у которой разделы (Бар/Кухня/
+// Уборщица/Кальянный мастер) рендерятся не как текст, а как интерактивный
+// чек-лист с чекбоксами и логом выполнения (см. CleaningChecklist.tsx и
+// обсуждение с Никитой 11.10.2026 — "добавить чек-боксы и сохранять дату",
+// "для бара и для км отображаться должны соответствующие задачи").
+const CLEANING_ARTICLE_ID = "k12";
 
 export default function KnowledgeArticleScreen() {
   const { articleId = "", sectionIndex } = useParams();
   const article = getKnowledgeArticle(articleId);
   const [query, setQuery] = useState("");
+  const [showAllRoles, setShowAllRoles] = useState(false);
 
   if (!article) {
     return (
@@ -21,6 +30,52 @@ export default function KnowledgeArticleScreen() {
   const selectedIndex = sectionIndex !== undefined ? Number(sectionIndex) : null;
   const selectedSection = selectedIndex !== null ? sections[selectedIndex] : undefined;
   const q = query.trim().toLowerCase();
+
+  const isCleaningArticle = article.id === CLEANING_ARTICLE_ID;
+  const ownCleaningRole = isCleaningArticle ? STAFF_ROLE_TO_CLEANING_ROLE[getCurrentStaffRole()] : undefined;
+
+  // Генеральная уборка: сразу показываем чек-лист своей роли (бар/КМ), без
+  // похода в меню категорий — см. STAFF_ROLE_TO_CLEANING_ROLE. Ссылка
+  // "Показать все роли" уводит на обычное меню (для Кухни/Уборщицы или
+  // руководителя, которому нужно свериться с другой ролью).
+  if (isCleaningArticle && ownCleaningRole && !showAllRoles && !selectedSection) {
+    return (
+      <div className="screen">
+        <Link to="/employee/knowledge" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+          ← База знаний
+        </Link>
+        <div className="eyebrow" style={{ marginTop: 12 }}>
+          {article.category}
+        </div>
+        <div className="card-row" style={{ marginBottom: 4 }}>
+          <h1 style={{ marginBottom: 0 }}>{ownCleaningRole}</h1>
+          <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 13 }} onClick={() => setShowAllRoles(true)}>
+            Все роли
+          </button>
+        </div>
+        <CleaningChecklist role={ownCleaningRole} />
+      </div>
+    );
+  }
+
+  // Та же статья, но выбран конкретный раздел из меню (роль) — чек-лист
+  // этой роли вместо текста. "Разовая уборка" — не роль с графиком по
+  // неделям (CLEANING_ROLE_WEEKS её не знает), поэтому остаётся обычным
+  // текстом ниже, как раньше.
+  if (isCleaningArticle && selectedSection && CLEANING_ROLE_WEEKS[selectedSection.title]) {
+    return (
+      <div className="screen">
+        <Link to={`/employee/knowledge/${article.id}`} className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+          ← {article.title}
+        </Link>
+        <div className="eyebrow" style={{ marginTop: 12 }}>
+          {article.category}
+        </div>
+        <h1>{selectedSection.title}</h1>
+        <CleaningChecklist role={selectedSection.title} />
+      </div>
+    );
+  }
 
   // Статья с несколькими разделами и без выбранного раздела — показываем
   // меню категорий (кнопки). Поиск здесь фильтрует разделы по названию и по

@@ -927,6 +927,22 @@ async function closeVenueShift(supabase: SupabaseClient, shiftRowId: string, emp
   // мгновенного детекта закрытия смены (см. известную проблему с задержкой/
   // сбоями статуса смены в claude/quickresto-shift-integration.md), плюс к
   // 10 утра бар уже точно закрыт и выручка за бизнес-день не изменится.
+  await endAllActiveGuestVisits(supabase);
+}
+
+/**
+ * Подстраховка на случай, если сотрудник забыл вручную завершить визит
+ * гостя (кнопка "Завершить визит" у мастера/официанта, см.
+ * apps/miniapp/src/screens/master/GuestProfile.tsx) — при закрытии смены
+ * заведения считаем все ещё активные визиты завершёнными. См. обсуждение с
+ * Никитой 11.10.2026: "вручную + подстраховка по закрытию смены".
+ */
+async function endAllActiveGuestVisits(supabase: SupabaseClient) {
+  const { error } = await supabase
+    .from("guests")
+    .update({ active_table_number: null, active_visit_started_at: null })
+    .not("active_table_number", "is", null);
+  if (error) console.error("Quick Resto: не удалось завершить активные визиты гостей:", error.message);
 }
 
 /**

@@ -3,6 +3,7 @@ import { getGuestByIdRemote } from "@/data/repo";
 import type { Guest } from "@/types";
 import GuestAuth from "./GuestAuth";
 import GuestTasteProfile from "./GuestTasteProfile";
+import GuestTasteSummary from "./GuestTasteSummary";
 import GuestHome from "./GuestHome";
 
 // Личность гостя хранится в localStorage на его устройстве — не привязана к
@@ -26,6 +27,10 @@ export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
   const [guest, setGuest] = useState<Guest | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<GuestTab>("home");
+  // На вкладке "Вкусовой профиль" по умолчанию показываем сводку, а не квиз —
+  // иначе уже заполненный профиль выглядит как "заполни заново". Квиз
+  // открывается явно, по кнопке "Изменить".
+  const [editingTaste, setEditingTaste] = useState(false);
 
   useEffect(() => {
     const storedId = localStorage.getItem(STORAGE_KEY);
@@ -47,6 +52,7 @@ export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
 
   function handleTasteProfileDone(patch: Partial<Guest>) {
     setGuest((g) => (g ? { ...g, ...patch } : g));
+    setEditingTaste(false);
     setTab("home");
   }
 
@@ -64,15 +70,23 @@ export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
     return <GuestTasteProfile guest={guest} onDone={handleTasteProfileDone} />;
   }
 
+  function renderTab() {
+    if (tab === "home") return <GuestHome guest={guest!} tableNumber={tableNumber} />;
+    if (editingTaste) return <GuestTasteProfile guest={guest!} onDone={handleTasteProfileDone} />;
+    return <GuestTasteSummary guest={guest!} onEdit={() => setEditingTaste(true)} />;
+  }
+
   return (
     <>
-      {tab === "home" ? (
-        <GuestHome guest={guest} tableNumber={tableNumber} />
-      ) : (
-        <GuestTasteProfile guest={guest} onDone={handleTasteProfileDone} />
-      )}
+      {renderTab()}
       <nav className="bottom-nav">
-        <button className={tab === "home" ? "active" : ""} onClick={() => setTab("home")}>
+        <button
+          className={tab === "home" ? "active" : ""}
+          onClick={() => {
+            setTab("home");
+            setEditingTaste(false);
+          }}
+        >
           <span className="icon">🏠</span>Главная
         </button>
         <button className={tab === "taste" ? "active" : ""} onClick={() => setTab("taste")}>

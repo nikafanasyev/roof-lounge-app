@@ -1,8 +1,15 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { mixesStore, computeTasteProfile, getFlavor, getGuest, removeMix } from "@/data/repo";
+import { mixesStore, computeTasteProfile, endGuestVisit, getFlavor, getGuest, listAromaTags, removeMix } from "@/data/repo";
+import { AROMA_DIRECTION_LABELS } from "@/types";
 import { Stars } from "@/components/Stars";
+
+function aromaNames(ids?: string[]): string[] {
+  if (!ids || ids.length === 0) return [];
+  const all = listAromaTags();
+  return ids.map((id) => all.find((t) => t.id === id)?.name).filter((n): n is string => Boolean(n));
+}
 
 export default function GuestProfile() {
   const { guestId = "" } = useParams();
@@ -20,6 +27,9 @@ export default function GuestProfile() {
   }
 
   const profile = computeTasteProfile(guestId);
+  const likedNames = aromaNames(guest.likedAromaIds);
+  const dislikedNames = aromaNames(guest.dislikedAromaIds);
+  const hasQuizAnswers = (guest.tasteDirections?.length ?? 0) > 0 || likedNames.length > 0 || dislikedNames.length > 0;
   const history = Object.values(mixesStore.get())
     .filter((m) => m.guestId === guestId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -42,6 +52,18 @@ export default function GuestProfile() {
             </span>
           ))}
         </div>
+        {guest.activeTableNumber && (
+          <div className="card-row" style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+            <span className="chip">
+              🟢 Стол №{guest.activeTableNumber}
+              {guest.activeVisitStartedAt &&
+                ` · с ${new Date(guest.activeVisitStartedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`}
+            </span>
+            <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 13 }} onClick={() => endGuestVisit(guestId)}>
+              Завершить визит
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="tabs">
@@ -55,7 +77,59 @@ export default function GuestProfile() {
 
       {tab === "profile" && (
         <>
-          <div className="eyebrow">Вкусовой профиль</div>
+          {/* Анкета, которую гость сам заполнил в своём кабинете (квиз) — не
+              путать с разделом ниже, который считается по истории миксов. */}
+          <div className="eyebrow">Анкета гостя</div>
+          {!hasQuizAnswers ? (
+            <div className="card muted">Гость пока не прошёл вкусовой квиз в своём кабинете</div>
+          ) : (
+            <div className="card">
+              {(guest.tasteDirections?.length ?? 0) > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                    Направления
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {guest.tasteDirections!.map((d) => (
+                      <span key={d} className="chip">
+                        {AROMA_DIRECTION_LABELS[d]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {likedNames.length > 0 && (
+                <div style={{ marginBottom: dislikedNames.length > 0 ? 10 : 0 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                    Любимые ароматы
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {likedNames.map((name) => (
+                      <span key={name} className="chip accent">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {dislikedNames.length > 0 && (
+                <div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                    Не нравятся
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {dislikedNames.map((name) => (
+                      <span key={name} className="chip">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="eyebrow">Профиль по миксам</div>
           {profile.topCategories.length === 0 ? (
             <div className="card muted">Профиль появится, когда для гостя соберут первый микс</div>
           ) : (

@@ -43,6 +43,10 @@ import type {
   Task,
 } from "@/types";
 import {
+  CLEANING_BAR_WEEKS,
+  CLEANING_KITCHEN_WEEKS,
+  CLEANING_KM_WEEKS,
+  CLEANING_UBORSHITSA_WEEKS,
   seedAdjustments,
   seedFlavors,
   seedGuests,
@@ -58,6 +62,7 @@ import {
   seedStaffDirectory,
   seedStaffProfile,
   seedTasks,
+  type WeekBlock,
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { getTelegramUser } from "@/lib/telegram";
@@ -150,6 +155,7 @@ export async function initData(): Promise<void> {
       loadPayouts(),
       loadSchedule(),
       loadPayrollIssues(),
+      loadTodayCleaningLog(),
     ]);
     subscribeRealtime();
   } catch (error) {
@@ -269,7 +275,11 @@ async function loadAromaTags() {
 // гостей так светить нельзя — их тянем точечно, по конкретному гостю (см.
 // findGuestByPhone/getGuestByIdRemote ниже).
 async function loadGuests() {
-  const { data, error } = await supabase!.from("guests").select("id, display_name, badges, telegram_id");
+  const { data, error } = await supabase!
+    .from("guests")
+    .select(
+      "id, display_name, badges, telegram_id, taste_directions, liked_aroma_ids, disliked_aroma_ids, active_table_number, active_visit_started_at",
+    );
   if (error) return logSyncError("loadGuests", error);
   guestsStore.set(
     (data ?? []).map((r) => ({
@@ -277,6 +287,11 @@ async function loadGuests() {
       displayName: r.display_name,
       badges: r.badges ?? [],
       tableTelegramId: r.telegram_id ? String(r.telegram_id) : undefined,
+      tasteDirections: r.taste_directions ?? [],
+      likedAromaIds: r.liked_aroma_ids ?? [],
+      dislikedAromaIds: r.disliked_aroma_ids ?? [],
+      activeTableNumber: r.active_table_number ?? undefined,
+      activeVisitStartedAt: r.active_visit_started_at ?? undefined,
     })),
   );
 }
@@ -761,6 +776,8 @@ function mapGuestRow(r: Record<string, unknown>): Guest {
     tasteDirections: (r.taste_directions as AromaDirection[] | null) ?? [],
     likedAromaIds: (r.liked_aroma_ids as string[] | null) ?? [],
     dislikedAromaIds: (r.disliked_aroma_ids as string[] | null) ?? [],
+    activeTableNumber: (r.active_table_number as number | null) ?? undefined,
+    activeVisitStartedAt: (r.active_visit_started_at as string | null) ?? undefined,
   };
 }
 
@@ -824,11 +841,41 @@ export async function saveGuestTasteProfile(
   if (error) logSyncError("saveGuestTasteProfile", error);
 }
 
-/** Отмечает визит (вызывается при открытии главного гостевого экрана). */
+/** Отмечает визит (вызывается при открытии главного гостевого экрана, если визит уже активен). */
 export async function touchGuestVisit(guestId: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) return;
   const { error } = await supabase.from("guests").update({ last_visit_at: new Date().toISOString() }).eq("id", guestId);
   if (error) logSyncError("touchGuestVisit", error);
+}
+
+/**
+ * Начинает активный визит гостя за столом (вызывается при открытии главного
+ * гостевого экрана, если активного визита ещё нет — см. GuestHome.tsx).
+ * Завершается вручную сотрудником (endGuestVisit) или автоматически при
+ * закрытии смены заведения (endAllActiveVisits, дёргает бот — см.
+ * apps/bot/src/quickresto.ts closeVenueShift).
+ */
+export async function startGuestVisit(guestId: string, tableNumber: number): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("guests")
+    .update({ active_table_number: tableNumber, active_visit_started_at: now, last_visit_at: now })
+    .eq("id", guestId);
+  if (error) logSyncError("startGuestVisit", error);
+}
+
+/** Завершает активный визит гостя вручную — кнопка "Завершить визит" у сотрудника (GuestProfile.tsx). */
+export function endGuestVisit(guestId: string) {
+  guestsStore.update((guests) =>
+    guests.map((g) => (g.id === guestId ? { ...g, activeTableNumber: undefined, activeVisitStartedAt: undefined } : g)),
+  );
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("guests")
+    .update({ active_table_number: null, active_visit_started_at: null })
+    .eq("id", guestId)
+    .then(({ error }) => error && logSyncError("endGuestVisit", error));
 }
 
 export function listAromaTags(): AromaTag[] {
@@ -1135,6 +1182,163 @@ export function daysOpen(createdAt: string): number {
 
 export function listTasks(): Task[] {
   return tasksStore.get();
+}
+
+// --- Генеральная уборка: чек-листы по ролям внутри базы знаний ---
+//
+// Графики по ролям (CLEANING_*_WEEKS) живут в data/seed.ts — тот же массив,
+// из которого раньше собирался статичный текст статьи "Генеральная уборка"
+// (k12); теперь статья рендерит их интерактивно (см.
+// screens/employee/CleaningChecklist.tsx) — чекбокс на каждый пункт
+// сегодняшнего дня, выполнение сохраняется в cleaning_log (кто и когда).
+// Привязки графика к конкретной календарной дате нам не давали, поэтому
+// неделя ротации считается по номеру недели года (ISO) по модулю 4 — если
+// это не совпадает с реальным графиком на стене, скажи, с какой календарной
+// недели реально начинается "Неделя 1", и я поправлю привязку.
+// Пока нет привязки роли к сотруднику через График — сотрудник выбирает сам,
+// за что отвечает в эту смену (бар или кальяны), и это запоминается на
+// устройстве (см. screens/staff/Shift.tsx). Та же роль используется, чтобы
+// в базе знаний сразу показать "свой" чек-лист генеральной уборки (см.
+// screens/employee/CleaningChecklist.tsx) без похода в меню ролей. Когда
+// появится распределение ролей в Графике — заменить на значение оттуда.
+const STAFF_ROLE_STORAGE_KEY = "roofLounge.staffRole";
+
+export function getCurrentStaffRole(): StaffRole {
+  const stored = localStorage.getItem(STAFF_ROLE_STORAGE_KEY);
+  return stored === "bar" || stored === "hookah" ? stored : "bar";
+}
+
+export function setCurrentStaffRole(role: StaffRole) {
+  localStorage.setItem(STAFF_ROLE_STORAGE_KEY, role);
+}
+
+export const CLEANING_ROLE_WEEKS: Record<string, WeekBlock[]> = {
+  "Бар": CLEANING_BAR_WEEKS,
+  "Кухня": CLEANING_KITCHEN_WEEKS,
+  "Уборщица": CLEANING_UBORSHITSA_WEEKS,
+  "Кальянный мастер": CLEANING_KM_WEEKS,
+};
+
+// StaffRole ("bar"/"hookah", см. localStorage "roofLounge.staffRole" —
+// см. getCurrentStaffRole ниже) -> какая роль в графике уборки ему
+// соответствует, чтобы сразу показать "свой" чек-лист без выбора из меню.
+// Кухня/Уборщица пока не отдельные StaffRole в приложении — для них меню
+// ролей остаётся как есть.
+export const STAFF_ROLE_TO_CLEANING_ROLE: Record<StaffRole, string> = {
+  bar: "Бар",
+  hookah: "Кальянный мастер",
+};
+
+const WEEKDAY_NAMES = [
+  "Воскресенье",
+  "Понедельник",
+  "Вторник",
+  "Среда",
+  "Четверг",
+  "Пятница",
+  "Суббота",
+];
+
+function isoWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+function dayOfYear(date: Date): number {
+  const start = new Date(date.getFullYear(), 0, 0);
+  return Math.floor((date.getTime() - start.getTime()) / 86400000);
+}
+
+/** Номер недели ротации (1..4) и подпись на сегодня, для заголовка чек-листа. */
+export function cleaningRotationWeek(now: Date = new Date()): { index: number; label: string } {
+  const index = (isoWeekNumber(now) - 1) % 4;
+  return { index, label: `Неделя ${index + 1}` };
+}
+
+export interface TodayCleaningTask {
+  task: string;
+  note: string; // "сегодня" / "каждый день" / "через день"
+}
+
+/** Задачи генеральной уборки на сегодня для одной роли (Бар/Кухня/Уборщица/Кальянный мастер). */
+export function getTodayCleaningTasksForRole(role: string, now: Date = new Date()): TodayCleaningTask[] {
+  const weeks = CLEANING_ROLE_WEEKS[role];
+  if (!weeks) return [];
+  const { index: weekIndex } = cleaningRotationWeek(now);
+  const week = weeks[weekIndex];
+  if (!week) return [];
+  const todayName = WEEKDAY_NAMES[now.getDay()];
+  const evenDay = dayOfYear(now) % 2 === 0;
+
+  const result: TodayCleaningTask[] = [];
+  for (const [day, task] of week.tasks) {
+    if (day === todayName) result.push({ task, note: "сегодня" });
+    else if (day === "Каждый день") result.push({ task, note: "каждый день" });
+    else if (day === "Каждый второй день" && evenDay) result.push({ task, note: "через день" });
+  }
+  return result;
+}
+
+// --- Лог выполнения генеральной уборки (supabase/migrations/0011_cleaning_log.sql) ---
+
+function cleaningLogKey(role: string, task: string): string {
+  return `${role}::${task}`;
+}
+
+function todayDateStr(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/** ключ "роль::задача" -> ISO-момент отметки сегодня (undefined — ещё не отмечено). */
+export const cleaningLogStore = new Store<Record<string, string>>({});
+
+async function loadTodayCleaningLog() {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { data, error } = await supabase
+    .from("cleaning_log")
+    .select("role, task, done_at")
+    .eq("log_date", todayDateStr());
+  if (error) return logSyncError("loadTodayCleaningLog", error);
+  const map: Record<string, string> = {};
+  for (const r of data ?? []) map[cleaningLogKey(r.role as string, r.task as string)] = r.done_at as string;
+  cleaningLogStore.set(map);
+}
+
+export function isCleaningTaskDone(role: string, task: string): string | undefined {
+  return cleaningLogStore.get()[cleaningLogKey(role, task)];
+}
+
+/** Отмечает/снимает отметку о выполнении пункта уборки на сегодня — чекбокс в базе знаний. */
+export async function setCleaningTaskDone(role: string, task: string, done: boolean): Promise<void> {
+  const key = cleaningLogKey(role, task);
+  const now = new Date().toISOString();
+  cleaningLogStore.update((map) => {
+    const next = { ...map };
+    if (done) next[key] = now;
+    else delete next[key];
+    return next;
+  });
+  if (!isSupabaseConfigured || !supabase) return;
+  if (done) {
+    const { error } = await supabase
+      .from("cleaning_log")
+      .upsert(
+        { role, task, log_date: todayDateStr(), done_by: getStaffProfile().id, done_at: now },
+        { onConflict: "role,task,log_date" },
+      );
+    if (error) logSyncError("setCleaningTaskDone", error);
+  } else {
+    const { error } = await supabase
+      .from("cleaning_log")
+      .delete()
+      .eq("role", role)
+      .eq("task", task)
+      .eq("log_date", todayDateStr());
+    if (error) logSyncError("setCleaningTaskDone", error);
+  }
 }
 
 export function toggleTask(id: string) {

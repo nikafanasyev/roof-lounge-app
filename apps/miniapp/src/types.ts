@@ -19,6 +19,12 @@ export interface Guest {
   bonusPoints?: number;
   lastVisitAt?: string; // ISO-дата последнего визита (обновляется при открытии гостевого экрана)
 
+  // Активный визит — стол и момент начала, если гость сейчас на месте;
+  // NULL/undefined = визита нет. Завершается вручную сотрудником или
+  // автоматически при закрытии смены заведения (см. supabase/migrations/0010_guest_visits.sql).
+  activeTableNumber?: number;
+  activeVisitStartedAt?: string;
+
   // Вкусовой профиль
   tasteDirections?: AromaDirection[]; // направления ароматов, которые нравятся
   likedAromaIds?: string[]; // минимум 3 при заполнении квиза

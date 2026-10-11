@@ -591,8 +591,12 @@ const KNOWLEDGE_BOOKING_RULES_BODY = [
 // инструмент контроля для них, не интерактивный чеклист сотрудника,
 // поэтому в базу знаний переносим только сам график (что когда убирать),
 // без отметок выполнения.
-type DayTask = [day: string, task: string];
-type WeekBlock = { week: string; tasks: DayTask[] };
+// Экспортируем тип и сами недели по ролям — используются не только для
+// текста статьи базы знаний (formatCleaningRole ниже), но и чтобы показать
+// сотруднику актуальные задачи "на сегодня" на экране "Задачи" (см.
+// getTodayCleaningTasks в data/repo.ts).
+export type DayTask = [day: string, task: string];
+export type WeekBlock = { week: string; tasks: DayTask[] };
 
 function formatCleaningRole(roleTitle: string, weeks: WeekBlock[]): string {
   const lines: string[] = [`# ${roleTitle}`];
@@ -611,7 +615,7 @@ function formatFlatSection(title: string, items: string[]): string {
   return lines.join("\n");
 }
 
-const CLEANING_BAR_WEEKS: WeekBlock[] = [
+export const CLEANING_BAR_WEEKS: WeekBlock[] = [
   {
     week: "Неделя 1",
     tasks: [
@@ -664,7 +668,7 @@ const CLEANING_BAR_WEEKS: WeekBlock[] = [
   },
 ];
 
-const CLEANING_KITCHEN_WEEKS: WeekBlock[] = [
+export const CLEANING_KITCHEN_WEEKS: WeekBlock[] = [
   {
     week: "Неделя 1",
     tasks: [
@@ -711,7 +715,7 @@ const CLEANING_KITCHEN_WEEKS: WeekBlock[] = [
   },
 ];
 
-const CLEANING_UBORSHITSA_WEEKS: WeekBlock[] = [
+export const CLEANING_UBORSHITSA_WEEKS: WeekBlock[] = [
   {
     week: "Неделя 1",
     tasks: [
@@ -766,7 +770,7 @@ const CLEANING_UBORSHITSA_WEEKS: WeekBlock[] = [
   },
 ];
 
-const CLEANING_KM_WEEKS: WeekBlock[] = [
+export const CLEANING_KM_WEEKS: WeekBlock[] = [
   {
     week: "Неделя 1",
     tasks: [
