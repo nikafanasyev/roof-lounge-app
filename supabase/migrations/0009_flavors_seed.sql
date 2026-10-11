@@ -327,7 +327,7 @@ insert into flavors (brand, name, strength, categories) values
 ('NAШ', 'Корица', 'Средний', ARRAY['Пряный']::text[]),
 ('Dogma', 'Красная слива', 'Средний', ARRAY['Фруктовый','Ягодный']::text[]),
 ('StarLine', 'Лимонная шипучка', 'Легкий', ARRAY['Цитрусовый']::text[]),
-('Snobless', 'Пармезан, грецкий орех и мед', 'Средний', ARRAY['Гастрономия','Орехи','Цветочный']::text[]))
+('Snobless', 'Пармезан, грецкий орех и мед', 'Средний', ARRAY['Гастрономия','Орехи','Цветочный']::text[])
 on conflict (brand, name) do update set
   strength = excluded.strength,
   categories = excluded.categories;
