@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useStore } from "@/data/useStore";
 import {
   closeShift,
+  getCurrentStaffRole,
   getStaffProfile,
   isChecklistComplete,
   openShift,
+  setCurrentStaffRole,
   shiftStore,
   toggleCloseChecklistItem,
   toggleOpenChecklistItem,
@@ -12,17 +14,7 @@ import {
 import CameraCapture from "@/components/CameraCapture";
 import type { ChecklistItem, StaffRole } from "@/types";
 
-// Пока нет привязки роли к сотруднику через График — сотрудник выбирает сам,
-// за что отвечает в эту смену (бар или кальяны), и это запоминается на
-// устройстве. Когда появится распределение ролей в Графике — заменить на
-// значение оттуда.
-const ROLE_STORAGE_KEY = "roofLounge.staffRole";
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
-
-function loadStoredRole(): StaffRole {
-  const stored = localStorage.getItem(ROLE_STORAGE_KEY);
-  return stored === "bar" || stored === "hookah" ? stored : "bar";
-}
 
 interface CapturedPhoto {
   url: string;
@@ -69,7 +61,7 @@ function ChecklistGroups({
 
 export default function Shift() {
   const shift = useStore(shiftStore);
-  const [role, setRole] = useState<StaffRole>(loadStoredRole);
+  const [role, setRole] = useState<StaffRole>(getCurrentStaffRole);
   const [handoverNote, setHandoverNote] = useState("");
   const [openPhoto, setOpenPhoto] = useState<CapturedPhoto | undefined>();
   const [closePhoto, setClosePhoto] = useState<CapturedPhoto | undefined>();
@@ -78,7 +70,7 @@ export default function Shift() {
 
   function selectRole(next: StaffRole) {
     setRole(next);
-    localStorage.setItem(ROLE_STORAGE_KEY, next);
+    setCurrentStaffRole(next);
   }
 
   const openReady = isChecklistComplete(roleShift.openChecklist) && !!openPhoto;
