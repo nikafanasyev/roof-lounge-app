@@ -7,7 +7,7 @@ import type { Flavor, MixItem } from "@/types";
 const MAX_ITEMS = 5;
 const DEFAULT_VISIBLE_FLAVORS = 7; // без поиска показываем короткий список, а не все 300+ позиций
 const BOWL_TYPES = ["классика", "фунтик", "самса"];
-const DENSITY_OPTIONS = ["лёгкое касание", "средняя набивка", "плотная набивка"];
+const DENSITY_OPTIONS = ["лёгкое касание", "оверпак", "без касания"];
 
 export default function MixBuilder() {
   const { guestId = "" } = useParams();
@@ -23,7 +23,7 @@ export default function MixBuilder() {
   const [title, setTitle] = useState("");
   const [coverEmoji, setCoverEmoji] = useState("🍃");
   const [bowlType, setBowlType] = useState(BOWL_TYPES[0]);
-  const [density, setDensity] = useState(DENSITY_OPTIONS[1]);
+  const [density, setDensity] = useState(DENSITY_OPTIONS[0]);
   const [masterNote, setMasterNote] = useState("");
   const [description, setDescription] = useState("");
 
