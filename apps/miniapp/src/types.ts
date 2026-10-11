@@ -9,6 +9,58 @@ export interface Guest {
   avatarUrl?: string;
   badges?: string[]; // например ["VIP"], аналог бейджей "Boss"/"100%" в референсе
   tableTelegramId?: string; // для связки с Telegram, без телефона
+
+  // Самостоятельная регистрация гостя по QR на столе (см. screens/guest/) —
+  // отдельная личность от staff/мастера, авторизация по телефону без
+  // SMS-кода на старте (см. обсуждение с Никитой 11.10.2026).
+  phone?: string;
+  birthDate?: string; // ISO-дата
+  loyaltyCode?: string; // короткий код для QR лояльности и ручного ввода на кассе
+  bonusPoints?: number;
+  lastVisitAt?: string; // ISO-дата последнего визита (обновляется при открытии гостевого экрана)
+
+  // Вкусовой профиль
+  tasteDirections?: AromaDirection[]; // направления ароматов, которые нравятся
+  likedAromaIds?: string[]; // минимум 3 при заполнении квиза
+  dislikedAromaIds?: string[];
+}
+
+// 11 направлений ароматов для вкусового квиза гостя (см. supabase/migrations/0006_guest_profile.sql).
+export type AromaDirection =
+  | "fruit"
+  | "berry"
+  | "dessert"
+  | "herbal"
+  | "spice"
+  | "tea"
+  | "alcohol"
+  | "perfume"
+  | "drinks"
+  | "gastro"
+  | "non_aromatic";
+
+export const AROMA_DIRECTION_LABELS: Record<AromaDirection, string> = {
+  fruit: "Фрукты",
+  berry: "Ягоды",
+  dessert: "Десертное",
+  herbal: "Травянистое",
+  spice: "Пряное",
+  tea: "Чайное",
+  alcohol: "Алкогольное",
+  perfume: "Парфюм",
+  drinks: "Напитки",
+  gastro: "Гастрономия",
+  non_aromatic: "Неароматика",
+};
+
+// Справочник ароматов для вкусового квиза — обобщённые названия ("малина",
+// "сандал"), не привязанные к конкретному бренду табака (ту задачу решает
+// Flavor ниже, для мастера при сборке микса).
+export interface AromaTag {
+  id: string;
+  name: string;
+  direction: AromaDirection;
+  custom?: boolean; // добавлен гостем вручную, если своего аромата не было в списке
 }
 
 export interface Flavor {
@@ -48,7 +100,7 @@ export interface StaffMember {
   role: Role;
 }
 
-export type ServiceCallType = "waiter" | "bill" | "help";
+export type ServiceCallType = "waiter" | "bill" | "help" | "master";
 export type ServiceCallStatus = "open" | "resolved";
 
 export interface ServiceCall {
@@ -58,6 +110,7 @@ export interface ServiceCall {
   status: ServiceCallStatus;
   createdAt: string;
   resolvedAt?: string;
+  guestId?: string; // кто вызвал, если гость был авторизован (см. screens/guest/)
 }
 
 export interface ChecklistItem {

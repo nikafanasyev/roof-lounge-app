@@ -19,6 +19,8 @@
 import type {
   Adjustment,
   AdjustmentType,
+  AromaDirection,
+  AromaTag,
   ChecklistItem,
   Flavor,
   Guest,
@@ -90,6 +92,7 @@ class Store<T> {
 
 export const guestsStore = new Store<Guest[]>(seedGuests);
 export const flavorsStore = new Store<Flavor[]>(seedFlavors);
+export const aromaTagsStore = new Store<AromaTag[]>([]); // справочник вкусового квиза гостя, грузится из Supabase (см. loadAromaTags)
 export const mixesStore = new Store<Mix[]>(seedMixes);
 export const serviceCallsStore = new Store<ServiceCall[]>(seedServiceCalls);
 export const shiftStore = new Store<Shift>(seedShift);
@@ -135,6 +138,7 @@ export async function initData(): Promise<void> {
     await Promise.all([
       loadFlavors(),
       loadGuests(),
+      loadAromaTags(),
       loadMixes(),
       loadServiceCalls(),
       loadShift(),
@@ -245,8 +249,26 @@ async function loadFlavors() {
   );
 }
 
+async function loadAromaTags() {
+  const { data, error } = await supabase!.from("aroma_tags").select("*").order("name");
+  if (error) return logSyncError("loadAromaTags", error);
+  aromaTagsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      direction: r.direction as AromaDirection,
+      custom: Boolean(r.custom),
+    })),
+  );
+}
+
+// ВАЖНО: только эти колонки, не select("*") — initData() грузит это при
+// любом открытии мини-аппа, включая гостевой QR-сценарий без авторизации
+// (см. /table/:token). Телефон/дату рождения/бонусы/код лояльности других
+// гостей так светить нельзя — их тянем точечно, по конкретному гостю (см.
+// findGuestByPhone/getGuestByIdRemote ниже).
 async function loadGuests() {
-  const { data, error } = await supabase!.from("guests").select("*");
+  const { data, error } = await supabase!.from("guests").select("id, display_name, badges, telegram_id");
   if (error) return logSyncError("loadGuests", error);
   guestsStore.set(
     (data ?? []).map((r) => ({
@@ -679,13 +701,14 @@ export function listServiceCalls(): ServiceCall[] {
   return [...serviceCallsStore.get()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export function createServiceCall(tableNumber: number, type: ServiceCallType): ServiceCall {
+export function createServiceCall(tableNumber: number, type: ServiceCallType, guestId?: string): ServiceCall {
   const call: ServiceCall = {
     id: uid(),
     tableNumber,
     type,
     status: "open",
     createdAt: new Date().toISOString(),
+    guestId,
   };
   serviceCallsStore.update((calls) => [call, ...calls]);
 
@@ -694,12 +717,161 @@ export function createServiceCall(tableNumber: number, type: ServiceCallType): S
       if (!tableId) return;
       supabase!
         .from("service_calls")
-        .insert({ id: call.id, table_id: tableId, type: call.type, status: call.status, created_at: call.createdAt })
+        .insert({
+          id: call.id,
+          table_id: tableId,
+          type: call.type,
+          status: call.status,
+          created_at: call.createdAt,
+          guest_id: guestId ?? null,
+        })
         .then(({ error }) => error && logSyncError("createServiceCall", error));
     });
   }
 
   return call;
+}
+
+// --- Гостевой профиль (QR на столе -> /table/:token, см. screens/guest/) ---
+//
+// Отдельная личность от сотрудников/мастера: гость заходит по телефону, без
+// SMS-кода на старте (см. обсуждение с Никитой 11.10.2026) — если телефон
+// уже есть в базе, сразу попадает в свой профиль, иначе короткая регистрация
+// (ФИО, телефон, дата рождения) и вкусовой квиз. Личность хранится в
+// localStorage на устройстве гостя (см. screens/guest/GuestFlow.tsx), не
+// привязана к Telegram.
+//
+// Эти функции НЕ используют guestsStore (он урезан до id/displayName/badges
+// для общего справочника у мастера, см. loadGuests выше) — читают/пишут
+// Supabase напрямую, по одному гостю за раз, чтобы не тянуть чужие
+// телефоны/даты рождения в браузер первого встречного со сканом QR.
+
+function mapGuestRow(r: Record<string, unknown>): Guest {
+  return {
+    id: r.id as string,
+    displayName: r.display_name as string,
+    badges: (r.badges as string[] | null) ?? [],
+    tableTelegramId: r.telegram_id ? String(r.telegram_id) : undefined,
+    phone: (r.phone as string | null) ?? undefined,
+    birthDate: (r.birth_date as string | null) ?? undefined,
+    loyaltyCode: (r.loyalty_code as string | null) ?? undefined,
+    bonusPoints: Number(r.bonus_points ?? 0),
+    lastVisitAt: (r.last_visit_at as string | null) ?? undefined,
+    tasteDirections: (r.taste_directions as AromaDirection[] | null) ?? [],
+    likedAromaIds: (r.liked_aroma_ids as string[] | null) ?? [],
+    dislikedAromaIds: (r.disliked_aroma_ids as string[] | null) ?? [],
+  };
+}
+
+/** Нормализация ввода — сравниваем телефоны по цифрам, не по форматированию (+7/8, пробелы, скобки). */
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 11 && (digits[0] === "7" || digits[0] === "8")) return "7" + digits.slice(1);
+  if (digits.length === 10) return "7" + digits;
+  return digits;
+}
+
+export async function findGuestByPhone(phone: string): Promise<Guest | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const normalized = normalizePhone(phone);
+  const { data, error } = await supabase.from("guests").select("*").eq("phone", normalized).maybeSingle();
+  if (error) {
+    logSyncError("findGuestByPhone", error);
+    return null;
+  }
+  return data ? mapGuestRow(data) : null;
+}
+
+export async function getGuestByIdRemote(guestId: string): Promise<Guest | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase.from("guests").select("*").eq("id", guestId).maybeSingle();
+  if (error) {
+    logSyncError("getGuestByIdRemote", error);
+    return null;
+  }
+  return data ? mapGuestRow(data) : null;
+}
+
+export async function registerGuest(input: { phone: string; displayName: string; birthDate: string }): Promise<Guest | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const normalized = normalizePhone(input.phone);
+  const { data, error } = await supabase
+    .from("guests")
+    .insert({ phone: normalized, display_name: input.displayName, birth_date: input.birthDate, last_visit_at: new Date().toISOString() })
+    .select("*")
+    .single();
+  if (error) {
+    logSyncError("registerGuest", error);
+    return null;
+  }
+  return mapGuestRow(data);
+}
+
+export async function saveGuestTasteProfile(
+  guestId: string,
+  profile: { tasteDirections: AromaDirection[]; likedAromaIds: string[]; dislikedAromaIds: string[] },
+): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { error } = await supabase
+    .from("guests")
+    .update({
+      taste_directions: profile.tasteDirections,
+      liked_aroma_ids: profile.likedAromaIds,
+      disliked_aroma_ids: profile.dislikedAromaIds,
+    })
+    .eq("id", guestId);
+  if (error) logSyncError("saveGuestTasteProfile", error);
+}
+
+/** Отмечает визит (вызывается при открытии главного гостевого экрана). */
+export async function touchGuestVisit(guestId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { error } = await supabase.from("guests").update({ last_visit_at: new Date().toISOString() }).eq("id", guestId);
+  if (error) logSyncError("touchGuestVisit", error);
+}
+
+export function listAromaTags(): AromaTag[] {
+  return aromaTagsStore.get();
+}
+
+export function listAromaTagsByDirection(direction: AromaDirection): AromaTag[] {
+  return aromaTagsStore.get().filter((t) => t.direction === direction);
+}
+
+export function searchAromaTags(query: string): AromaTag[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  return aromaTagsStore.get().filter((t) => t.name.toLowerCase().includes(q));
+}
+
+/** N случайных ароматов (для квиза — показываем не весь список сразу, см. обсуждение с Никитой 11.10.2026). */
+export function randomAromaTags(count: number, excludeIds: string[] = []): AromaTag[] {
+  const pool = aromaTagsStore.get().filter((t) => !excludeIds.includes(t.id));
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+/** Гость добавляет свой аромат, если в списке нет подходящего — сразу доступен для выбора (локально и в общем справочнике). */
+export async function addCustomAromaTag(name: string, direction: AromaDirection): Promise<AromaTag | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  if (!isSupabaseConfigured || !supabase) {
+    const local: AromaTag = { id: uid(), name: trimmed, direction, custom: true };
+    aromaTagsStore.update((list) => [...list, local]);
+    return local;
+  }
+  const { data, error } = await supabase
+    .from("aroma_tags")
+    .upsert({ name: trimmed, direction, custom: true }, { onConflict: "name" })
+    .select("*")
+    .single();
+  if (error || !data) {
+    logSyncError("addCustomAromaTag", error);
+    return null;
+  }
+  const tag: AromaTag = { id: data.id, name: data.name, direction: data.direction as AromaDirection, custom: Boolean(data.custom) };
+  aromaTagsStore.update((list) => (list.some((t) => t.id === tag.id) ? list : [...list, tag]));
+  return tag;
 }
 
 export function resolveServiceCall(id: string) {
