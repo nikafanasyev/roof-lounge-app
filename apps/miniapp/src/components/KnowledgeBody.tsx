@@ -51,8 +51,18 @@ function parseBody(body: string): Block[] {
   return blocks;
 }
 
-export default function KnowledgeBody({ body }: { body: string }) {
-  const blocks = parseBody(body);
+export default function KnowledgeBody({ body, query }: { body: string; query?: string }) {
+  const allBlocks = parseBody(body);
+  const q = query?.trim().toLowerCase();
+  const blocks = !q
+    ? allBlocks
+    : allBlocks.filter(
+        (block) =>
+          block.kind === "h1" ||
+          (block.title?.toLowerCase().includes(q) ?? false) ||
+          block.items.some((i) => i.toLowerCase().includes(q)) ||
+          block.paragraphs.some((p) => p.toLowerCase().includes(q)),
+      );
 
   return (
     <>
