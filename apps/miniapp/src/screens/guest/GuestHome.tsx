@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { createServiceCall, touchGuestVisit } from "@/data/repo";
+import { createServiceCall, startGuestVisit, touchGuestVisit } from "@/data/repo";
 import type { Guest, ServiceCallType } from "@/types";
 
 // Переадресация на внешний сервис чаевых (НетМонет) — см. обсуждение с
@@ -37,8 +37,17 @@ export default function GuestHome({
   // прошлого визита на экране).
   const [lastVisitShown] = useState(guest.lastVisitAt);
 
+  // Если у гостя уже есть активный визит (сидит за столом) — просто
+  // обновляем отметку последней активности; если нет — считаем, что визит
+  // начинается сейчас (стол, за которым открыли мини-апп). См. обсуждение
+  // с Никитой 11.10.2026: завершается визит вручную сотрудником или
+  // автоматически при закрытии смены.
   useEffect(() => {
-    touchGuestVisit(guest.id);
+    if (guest.activeTableNumber) {
+      touchGuestVisit(guest.id);
+    } else {
+      startGuestVisit(guest.id, tableNumber);
+    }
   }, [guest.id]);
 
   function send(type: ServiceCallType) {

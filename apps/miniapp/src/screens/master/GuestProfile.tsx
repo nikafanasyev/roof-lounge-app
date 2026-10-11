@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { mixesStore, computeTasteProfile, getFlavor, getGuest, listAromaTags, removeMix } from "@/data/repo";
+import { mixesStore, computeTasteProfile, endGuestVisit, getFlavor, getGuest, listAromaTags, removeMix } from "@/data/repo";
 import { AROMA_DIRECTION_LABELS } from "@/types";
 import { Stars } from "@/components/Stars";
 
@@ -52,6 +52,18 @@ export default function GuestProfile() {
             </span>
           ))}
         </div>
+        {guest.activeTableNumber && (
+          <div className="card-row" style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+            <span className="chip">
+              🟢 Стол №{guest.activeTableNumber}
+              {guest.activeVisitStartedAt &&
+                ` · с ${new Date(guest.activeVisitStartedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`}
+            </span>
+            <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 13 }} onClick={() => endGuestVisit(guestId)}>
+              Завершить визит
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="tabs">

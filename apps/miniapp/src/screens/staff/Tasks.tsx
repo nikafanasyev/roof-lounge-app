@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useStore } from "@/data/useStore";
-import { addTask, listTasks, tasksStore, toggleTask } from "@/data/repo";
+import { addTask, getTodayCleaningTasks, listTasks, tasksStore, toggleTask } from "@/data/repo";
 
 export default function Tasks() {
   useStore(tasksStore);
   const tasks = listTasks();
   const [title, setTitle] = useState("");
+  // Задачи генеральной уборки на сегодня — считаются из 4-недельного графика
+  // по ролям (не хранятся как Task в tasksStore: это read-only авто-список,
+  // статус выполнения по нему отмечает руководство в общем графике, см.
+  // data/repo.ts getTodayCleaningTasks).
+  const todayCleaning = getTodayCleaningTasks();
 
   const open = tasks.filter((t) => !t.done);
   const done = tasks.filter((t) => t.done);
@@ -30,7 +35,25 @@ export default function Tasks() {
         </div>
       </div>
 
-      <div className="eyebrow">Открытые · {open.length}</div>
+      {todayCleaning.length > 0 && (
+        <>
+          <div className="eyebrow" style={{ marginTop: 16 }}>
+            Генеральная уборка · сегодня
+          </div>
+          {todayCleaning.map((t, idx) => (
+            <div key={idx} className="card card-row">
+              <div>
+                <div>{t.task}</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {[t.role, t.note].filter(Boolean).join(" · ")}
+                </div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      <div className="eyebrow" style={{ marginTop: 16 }}>Открытые · {open.length}</div>
       {open.length === 0 && <div className="list-empty">Все задачи выполнены</div>}
       {open.map((t) => (
         <label key={t.id} className="card card-row" style={{ cursor: "pointer" }}>

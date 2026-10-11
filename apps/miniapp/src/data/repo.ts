@@ -43,6 +43,10 @@ import type {
   Task,
 } from "@/types";
 import {
+  CLEANING_BAR_WEEKS,
+  CLEANING_KITCHEN_WEEKS,
+  CLEANING_KM_WEEKS,
+  CLEANING_UBORSHITSA_WEEKS,
   seedAdjustments,
   seedFlavors,
   seedGuests,
@@ -58,6 +62,7 @@ import {
   seedStaffDirectory,
   seedStaffProfile,
   seedTasks,
+  type WeekBlock,
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { getTelegramUser } from "@/lib/telegram";
@@ -269,7 +274,11 @@ async function loadAromaTags() {
 // гостей так светить нельзя — их тянем точечно, по конкретному гостю (см.
 // findGuestByPhone/getGuestByIdRemote ниже).
 async function loadGuests() {
-  const { data, error } = await supabase!.from("guests").select("id, display_name, badges, telegram_id");
+  const { data, error } = await supabase!
+    .from("guests")
+    .select(
+      "id, display_name, badges, telegram_id, taste_directions, liked_aroma_ids, disliked_aroma_ids, active_table_number, active_visit_started_at",
+    );
   if (error) return logSyncError("loadGuests", error);
   guestsStore.set(
     (data ?? []).map((r) => ({
@@ -277,6 +286,11 @@ async function loadGuests() {
       displayName: r.display_name,
       badges: r.badges ?? [],
       tableTelegramId: r.telegram_id ? String(r.telegram_id) : undefined,
+      tasteDirections: r.taste_directions ?? [],
+      likedAromaIds: r.liked_aroma_ids ?? [],
+      dislikedAromaIds: r.disliked_aroma_ids ?? [],
+      activeTableNumber: r.active_table_number ?? undefined,
+      activeVisitStartedAt: r.active_visit_started_at ?? undefined,
     })),
   );
 }
@@ -761,6 +775,8 @@ function mapGuestRow(r: Record<string, unknown>): Guest {
     tasteDirections: (r.taste_directions as AromaDirection[] | null) ?? [],
     likedAromaIds: (r.liked_aroma_ids as string[] | null) ?? [],
     dislikedAromaIds: (r.disliked_aroma_ids as string[] | null) ?? [],
+    activeTableNumber: (r.active_table_number as number | null) ?? undefined,
+    activeVisitStartedAt: (r.active_visit_started_at as string | null) ?? undefined,
   };
 }
 
@@ -824,11 +840,41 @@ export async function saveGuestTasteProfile(
   if (error) logSyncError("saveGuestTasteProfile", error);
 }
 
-/** Отмечает визит (вызывается при открытии главного гостевого экрана). */
+/** Отмечает визит (вызывается при открытии главного гостевого экрана, если визит уже активен). */
 export async function touchGuestVisit(guestId: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) return;
   const { error } = await supabase.from("guests").update({ last_visit_at: new Date().toISOString() }).eq("id", guestId);
   if (error) logSyncError("touchGuestVisit", error);
+}
+
+/**
+ * Начинает активный визит гостя за столом (вызывается при открытии главного
+ * гостевого экрана, если активного визита ещё нет — см. GuestHome.tsx).
+ * Завершается вручную сотрудником (endGuestVisit) или автоматически при
+ * закрытии смены заведения (endAllActiveVisits, дёргает бот — см.
+ * apps/bot/src/quickresto.ts closeVenueShift).
+ */
+export async function startGuestVisit(guestId: string, tableNumber: number): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("guests")
+    .update({ active_table_number: tableNumber, active_visit_started_at: now, last_visit_at: now })
+    .eq("id", guestId);
+  if (error) logSyncError("startGuestVisit", error);
+}
+
+/** Завершает активный визит гостя вручную — кнопка "Завершить визит" у сотрудника (GuestProfile.tsx). */
+export function endGuestVisit(guestId: string) {
+  guestsStore.update((guests) =>
+    guests.map((g) => (g.id === guestId ? { ...g, activeTableNumber: undefined, activeVisitStartedAt: undefined } : g)),
+  );
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("guests")
+    .update({ active_table_number: null, active_visit_started_at: null })
+    .eq("id", guestId)
+    .then(({ error }) => error && logSyncError("endGuestVisit", error));
 }
 
 export function listAromaTags(): AromaTag[] {
@@ -1135,6 +1181,73 @@ export function daysOpen(createdAt: string): number {
 
 export function listTasks(): Task[] {
   return tasksStore.get();
+}
+
+// --- Генеральная уборка: авто-задачи "на сегодня" из 4-недельной ротации ---
+//
+// Графики по ролям (CLEANING_*_WEEKS) живут в data/seed.ts — тот же массив,
+// из которого собрана статья базы знаний "Генеральная уборка" (k12).
+// Привязки графика к конкретной календарной дате нам не давали, поэтому
+// неделя ротации считается по номеру недели года (ISO) по модулю 4 — если
+// это не совпадает с реальным графиком на стене, скажи, с какой календарной
+// недели реально начинается "Неделя 1", и я поправлю привязку.
+const CLEANING_ROLES: { role: string; weeks: WeekBlock[] }[] = [
+  { role: "Бар", weeks: CLEANING_BAR_WEEKS },
+  { role: "Кухня", weeks: CLEANING_KITCHEN_WEEKS },
+  { role: "Уборщица", weeks: CLEANING_UBORSHITSA_WEEKS },
+  { role: "Кальянный мастер", weeks: CLEANING_KM_WEEKS },
+];
+
+const WEEKDAY_NAMES = [
+  "Воскресенье",
+  "Понедельник",
+  "Вторник",
+  "Среда",
+  "Четверг",
+  "Пятница",
+  "Суббота",
+];
+
+function isoWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+function dayOfYear(date: Date): number {
+  const start = new Date(date.getFullYear(), 0, 0);
+  return Math.floor((date.getTime() - start.getTime()) / 86400000);
+}
+
+export interface TodayCleaningTask {
+  role: string;
+  task: string;
+  note: string; // "сегодня" / "каждый день" / "через день"
+}
+
+/** Задачи генеральной уборки на сегодня по всем ролям, см. комментарий выше про неделю ротации. */
+export function getTodayCleaningTasks(now: Date = new Date()): TodayCleaningTask[] {
+  const weekIndex = (isoWeekNumber(now) - 1) % 4;
+  const todayName = WEEKDAY_NAMES[now.getDay()];
+  const evenDay = dayOfYear(now) % 2 === 0;
+
+  const result: TodayCleaningTask[] = [];
+  for (const { role, weeks } of CLEANING_ROLES) {
+    const week = weeks[weekIndex];
+    if (!week) continue;
+    for (const [day, task] of week.tasks) {
+      if (day === todayName) {
+        result.push({ role, task, note: "сегодня" });
+      } else if (day === "Каждый день") {
+        result.push({ role, task, note: "каждый день" });
+      } else if (day === "Каждый второй день" && evenDay) {
+        result.push({ role, task, note: "через день" });
+      }
+    }
+  }
+  return result;
 }
 
 export function toggleTask(id: string) {
