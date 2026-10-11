@@ -89,7 +89,7 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
         Вы у нас впервые — пара слов о вас
       </p>
       <div className="card" style={{ marginTop: 16 }}>
-        <input placeholder="ФИО" value={name} onChange={(e) => setName(e.target.value)} style={{ marginBottom: 10 }} />
+        <input type="text" placeholder="ФИО" value={name} onChange={(e) => setName(e.target.value)} style={{ marginBottom: 10 }} />
         <input type="tel" placeholder="Телефон" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ marginBottom: 10 }} />
         <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={{ marginBottom: 10 }} />
         <button

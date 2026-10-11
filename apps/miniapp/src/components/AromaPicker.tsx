@@ -1,9 +1,6 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { addCustomAromaTag, randomAromaTags, searchAromaTags } from "@/data/repo";
-import { AROMA_DIRECTION_LABELS } from "@/types";
 import type { AromaDirection, AromaTag } from "@/types";
-
-const DIRECTIONS = Object.keys(AROMA_DIRECTION_LABELS) as AromaDirection[];
 
 /**
  * Список ароматов для вкусового квиза гостя (см. screens/guest/GuestTasteProfile.tsx):
@@ -17,32 +14,35 @@ export default function AromaPicker({
   onToggle,
   excludeIds = [],
   randomCount = 20,
+  // Направление, в которое молча кладём аромат, если гость добавляет свой —
+  // выбирать категорию его не просим (см. обсуждение с Никитой 11.10.2026).
+  // Берём первое направление, которое гость уже отметил на шаге 1 квиза;
+  // если он ничего не отметил — "non_aromatic" как нейтральный дефолт.
+  defaultDirection = "non_aromatic",
 }: {
   selectedIds: string[];
   onToggle: (id: string) => void;
   excludeIds?: string[];
   randomCount?: number;
+  defaultDirection?: AromaDirection;
 }) {
   const [query, setQuery] = useState("");
   // Фиксируем случайную выборку один раз при монтировании — не перемешивать список на каждый клик по чипу.
   const [shown] = useState<AromaTag[]>(() => randomAromaTags(randomCount, excludeIds));
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newDirection, setNewDirection] = useState<AromaDirection>("fruit");
   const [adding, setAdding] = useState(false);
   const [extra, setExtra] = useState<AromaTag[]>([]); // добавленные вручную в этой сессии — сразу видны чипом
 
   const searchResults = query.trim() ? searchAromaTags(query).filter((t) => !excludeIds.includes(t.id)) : shown;
-  const visible = useMemo(() => {
-    const byId = new Map(searchResults.map((t) => [t.id, t] as const));
-    for (const t of extra) byId.set(t.id, t);
-    return [...byId.values()];
-  }, [searchResults, extra]);
+  const byId = new Map(searchResults.map((t) => [t.id, t] as const));
+  for (const t of extra) byId.set(t.id, t);
+  const visible = [...byId.values()];
 
   async function handleAdd() {
     if (!newName.trim()) return;
     setAdding(true);
-    const tag = await addCustomAromaTag(newName, newDirection);
+    const tag = await addCustomAromaTag(newName, defaultDirection);
     setAdding(false);
     if (tag) {
       setExtra((e) => [...e, tag]);
@@ -55,12 +55,13 @@ export default function AromaPicker({
   return (
     <div>
       <input
+        type="text"
         placeholder="Поиск аромата…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        style={{ marginBottom: 10 }}
+        style={{ marginBottom: 12, width: "100%" }}
       />
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         {visible.map((t) => {
           const active = selectedIds.includes(t.id);
           return (
@@ -86,7 +87,7 @@ export default function AromaPicker({
         <button
           type="button"
           className="btn ghost"
-          style={{ marginTop: 10 }}
+          style={{ marginTop: 14, width: "100%" }}
           onClick={() => {
             setAddOpen(true);
             setNewName(query.trim());
@@ -97,18 +98,13 @@ export default function AromaPicker({
       ) : (
         <div className="card" style={{ marginTop: 10 }}>
           <input
+            type="text"
             placeholder="Название аромата"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            style={{ marginBottom: 8 }}
+            style={{ marginBottom: 10, width: "100%" }}
+            autoFocus
           />
-          <select value={newDirection} onChange={(e) => setNewDirection(e.target.value as AromaDirection)} style={{ marginBottom: 8 }}>
-            {DIRECTIONS.map((d) => (
-              <option key={d} value={d}>
-                {AROMA_DIRECTION_LABELS[d]}
-              </option>
-            ))}
-          </select>
           <div style={{ display: "flex", gap: 8 }}>
             <button type="button" className="btn primary" style={{ flex: 1 }} disabled={!newName.trim() || adding} onClick={handleAdd}>
               {adding ? "Добавляем…" : "Добавить"}

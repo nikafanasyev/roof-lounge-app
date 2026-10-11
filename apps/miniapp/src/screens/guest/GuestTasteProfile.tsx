@@ -70,7 +70,7 @@ export default function GuestTasteProfile({ guest, onDone }: { guest: Guest; onD
         <p className="muted" style={{ marginTop: -8 }}>
           Выберите минимум {MIN_LIKED}
         </p>
-        <AromaPicker selectedIds={liked} onToggle={toggleLiked} excludeIds={disliked} />
+        <AromaPicker key="liked" selectedIds={liked} onToggle={toggleLiked} excludeIds={disliked} defaultDirection={directions[0]} />
         <button
           className="btn primary"
           style={{ marginTop: 24, width: "100%" }}
@@ -90,7 +90,7 @@ export default function GuestTasteProfile({ guest, onDone }: { guest: Guest; onD
       <p className="muted" style={{ marginTop: -8 }}>
         Необязательно, но поможет мастеру
       </p>
-      <AromaPicker selectedIds={disliked} onToggle={toggleDisliked} excludeIds={liked} />
+      <AromaPicker key="disliked" selectedIds={disliked} onToggle={toggleDisliked} excludeIds={liked} defaultDirection={directions[0]} />
       <button className="btn primary" style={{ marginTop: 24, width: "100%" }} disabled={saving} onClick={finish}>
         {saving ? "Сохраняем…" : "Готово"}
       </button>
