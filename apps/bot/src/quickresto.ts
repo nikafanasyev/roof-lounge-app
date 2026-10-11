@@ -571,10 +571,23 @@ async function resolveActualWorkedStaffIds(
 }
 
 /** Сверяет график на одну дату с Quick Resto и либо начисляет, либо откладывает начисление (см. writePayrollIssue). */
+/**
+ * reconcile=true — старое поведение: сверяет график с тем, кто реально зашёл
+ * по ПИН-коду на терминале Quick Resto, и при расхождении откладывает
+ * начисление в payroll_issues (см. writePayrollIssue). Требует персональных
+ * ПИН-кодов у сотрудников — пока их нет, поэтому сейчас везде вызывается с
+ * reconcile=false.
+ *
+ * reconcile=false — простой режим (включён 11.10.2026, см.
+ * claude/quickresto-shift-integration.md): начисляет каждому, кто стоит в
+ * графике на дату/роль, без сверки с терминалом. Именно так раньше начисляли
+ * вручную бэкфиллом — теперь то же самое делает бот сам каждый день.
+ */
 async function processScheduledDate(
   supabase: SupabaseClient,
   onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
   dateIso: string,
+  reconcile: boolean,
 ) {
   const { data: scheduleRows, error } = await supabase.from("schedule_entries").select("staff_id, role").eq("date", dateIso);
   if (error) return console.error(`Quick Resto: не удалось прочитать график на ${dateIso}:`, error.message);
@@ -586,19 +599,9 @@ async function processScheduledDate(
   }
   if (!pendingRoles.length) return; // всё по этой дате уже обработано (начислено или отложено ранее)
 
-  let employees: QuickRestoEmployee[];
-  try {
-    employees = await fetchEmployees();
-  } catch (err) {
-    console.error(`Quick Resto: не удалось получить сотрудников для сверки графика на ${dateIso}:`, err);
-    return;
-  }
-
   // Полдень МСК того дня — однозначно попадает в нужный бизнес-день независимо
   // от того, в какой момент по UTC выполняется задание.
   const middayMsk = new Date(`${dateIso}T12:00:00+03:00`);
-  const { sinceMs, tillMs } = businessDayRangeMs(middayMsk);
-  const workedStaffIds = await resolveActualWorkedStaffIds(supabase, employees, sinceMs, tillMs);
 
   let split: { total: number };
   try {
@@ -608,8 +611,26 @@ async function processScheduledDate(
     return;
   }
 
-  // Начисление теперь считается от общей выручки заведения (не от
-  // кальянной/барной по отдельности) — см. DEFAULT_SALARY_MODEL выше.
+  if (!reconcile) {
+    // Начисление теперь считается от общей выручки заведения (не от
+    // кальянной/барной по отдельности) — см. DEFAULT_SALARY_MODEL выше.
+    for (const { staff_id, role } of pendingRoles) {
+      await writeShiftPayrollForRole(supabase, null, staff_id, role, split.total, dateIso);
+    }
+    return;
+  }
+
+  let employees: QuickRestoEmployee[];
+  try {
+    employees = await fetchEmployees();
+  } catch (err) {
+    console.error(`Quick Resto: не удалось получить сотрудников для сверки графика на ${dateIso}:`, err);
+    return;
+  }
+
+  const { sinceMs, tillMs } = businessDayRangeMs(middayMsk);
+  const workedStaffIds = await resolveActualWorkedStaffIds(supabase, employees, sinceMs, tillMs);
+
   for (const { staff_id, role } of pendingRoles) {
     const revenue = split.total;
     if (workedStaffIds.has(staff_id)) {
@@ -641,9 +662,13 @@ function mskDateIso(offsetDays: number): string {
  * подхватываются пропущенные дни, если по какой-то причине задание не
  * сработало вовремя (processScheduledDate сам пропускает уже обработанные).
  */
-async function runDailyPayrollJob(supabase: SupabaseClient, onIssue: (event: PayrollIssueEvent) => void | Promise<void>) {
+async function runDailyPayrollJob(
+  supabase: SupabaseClient,
+  onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  reconcile: boolean,
+) {
   for (let offset = -1; offset >= -7; offset--) {
-    await processScheduledDate(supabase, onIssue, mskDateIso(offset));
+    await processScheduledDate(supabase, onIssue, mskDateIso(offset), reconcile);
   }
 }
 
@@ -673,15 +698,21 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * ближайшие 10:00). onIssue вызывается на каждое расхождение графика с Quick
  * Resto — для уведомления руководителя в Telegram (см. index.ts).
  */
-export function scheduleDailyPayrollJob(onIssue: (event: PayrollIssueEvent) => void | Promise<void>) {
+export function scheduleDailyPayrollJob(
+  onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  options: { reconcile?: boolean } = {},
+) {
+  const reconcile = options.reconcile ?? false; // см. processScheduledDate — сверка по ПИНу пока недоступна
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   function run() {
-    runDailyPayrollJob(supabase, onIssue).catch((err) => console.error("Quick Resto: ошибка ежедневного начисления ЗП:", err));
+    runDailyPayrollJob(supabase, onIssue, reconcile).catch((err) => console.error("Quick Resto: ошибка ежедневного начисления ЗП:", err));
     setTimeout(run, ONE_DAY_MS);
   }
   const delay = msUntilNextMoscowHour(PAYROLL_JOB_HOUR_MSK);
   setTimeout(run, delay);
-  console.log(`Quick Resto: ежедневное начисление ЗП запланировано на ${PAYROLL_JOB_HOUR_MSK}:00 МСК (через ${Math.round(delay / 60000)} мин)`);
+  console.log(
+    `Quick Resto: ежедневное начисление ЗП запланировано на ${PAYROLL_JOB_HOUR_MSK}:00 МСК (через ${Math.round(delay / 60000)} мин, reconcile=${reconcile})`,
+  );
 }
 
 async function fetchEmployees(): Promise<QuickRestoEmployee[]> {
