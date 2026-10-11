@@ -137,6 +137,7 @@ function RoleShell() {
         <Route path="/employee/adjustments" element={<Adjustments />} />
         <Route path="/employee/knowledge" element={<Knowledge />} />
         <Route path="/employee/knowledge/:articleId" element={<KnowledgeArticleScreen />} />
+        <Route path="/employee/knowledge/:articleId/:sectionIndex" element={<KnowledgeArticleScreen />} />
 
         <Route path="/manager/summary" element={<Summary />} />
         <Route path="/manager/calls" element={<ServiceCalls />} />
