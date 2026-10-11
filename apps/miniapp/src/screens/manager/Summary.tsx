@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import {
   averageReactionMinutes,
@@ -32,18 +33,18 @@ export default function Summary() {
       <h1>Сводка</h1>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div className="card">
+        <Link to="/manager/calls" className="card" style={{ display: "block" }}>
           <div className="eyebrow">Открытые вызовы</div>
           <div style={{ fontSize: 28, fontWeight: 700 }}>{openCalls.length}</div>
-        </div>
+        </Link>
         <div className="card">
           <div className="eyebrow">Ср. время реакции</div>
           <div style={{ fontSize: 28, fontWeight: 700 }}>{avgReaction !== null ? `${avgReaction} мин` : "—"}</div>
         </div>
-        <div className="card">
+        <Link to="/manager/problems" className="card" style={{ display: "block" }}>
           <div className="eyebrow">Открытые проблемы</div>
           <div style={{ fontSize: 28, fontWeight: 700 }}>{openProblems.length}</div>
-        </div>
+        </Link>
         <div className="card">
           <div className="eyebrow">Задачи в работе</div>
           <div style={{ fontSize: 28, fontWeight: 700 }}>{openTasks.length}</div>
