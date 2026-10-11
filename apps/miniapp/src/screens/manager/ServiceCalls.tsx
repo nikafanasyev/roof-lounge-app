@@ -6,6 +6,7 @@ const TYPE_LABELS: Record<ServiceCallType, string> = {
   waiter: "Позвать сотрудника",
   bill: "Попросить счёт",
   help: "Нужна помощь",
+  master: "Позвать мастера",
 };
 
 function minutesAgo(iso: string) {
