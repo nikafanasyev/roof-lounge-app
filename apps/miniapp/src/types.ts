@@ -69,6 +69,7 @@ export interface Flavor {
   name: string;
   code: string; // номер позиции, как "077"
   categories: string[]; // теги вкуса, например ["Фруктовый", "Цитрусовый"] — основа для taste_profile
+  strength?: string; // крепость по каталогу поставщика, например "Выше среднего" — справочно для мастера
 }
 
 export interface MixItem {
