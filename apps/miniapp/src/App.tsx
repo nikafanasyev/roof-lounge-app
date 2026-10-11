@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import GuestsList from "@/screens/master/GuestsList";
 import GuestProfile from "@/screens/master/GuestProfile";
 import MixBuilder from "@/screens/master/MixBuilder";
@@ -69,6 +69,9 @@ function ManagerNav() {
       </NavLink>
       <NavLink to="/manager/schedule" className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">📅</span>График
+      </NavLink>
+      <NavLink to="/manager/problems" className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🛠</span>Проблемы
       </NavLink>
     </nav>
   );
@@ -140,6 +143,7 @@ function RoleShell() {
         <Route path="/manager/staff" element={<StaffList />} />
         <Route path="/manager/staff/:staffId" element={<StaffDetail />} />
         <Route path="/manager/schedule" element={<SchedulePayroll />} />
+        <Route path="/manager/problems" element={<Problems />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

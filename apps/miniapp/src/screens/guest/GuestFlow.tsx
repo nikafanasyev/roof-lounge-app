@@ -21,6 +21,9 @@ function hasTasteProfile(guest: Guest): boolean {
 export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
   const [guest, setGuest] = useState<Guest | null>(null);
   const [loading, setLoading] = useState(true);
+  // Отдельно от "квиз ещё не пройден" — гость сам открыл "Изменить" на
+  // главном экране, чтобы пересмотреть вкусовой профиль позже.
+  const [editingProfile, setEditingProfile] = useState(false);
 
   useEffect(() => {
     const storedId = localStorage.getItem(STORAGE_KEY);
@@ -35,13 +38,14 @@ export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
     });
   }, []);
 
-  function handleAuthed(g: Guest) {
+  function handleAuthed(g: Guest, _isNew: boolean) {
     localStorage.setItem(STORAGE_KEY, g.id);
     setGuest(g);
   }
 
   function handleTasteProfileDone(patch: Partial<Guest>) {
     setGuest((g) => (g ? { ...g, ...patch } : g));
+    setEditingProfile(false);
   }
 
   if (loading) {
@@ -53,10 +57,11 @@ export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
   }
 
   // Квиз показываем, если его ещё не проходили (новый гость, или старый без
-  // заполненного профиля) — не только сразу после регистрации.
-  if (!hasTasteProfile(guest)) {
+  // заполненного профиля), либо если гость сам нажал "Изменить" на главном
+  // экране — пересмотреть вкусовой профиль позже.
+  if (!hasTasteProfile(guest) || editingProfile) {
     return <GuestTasteProfile guest={guest} onDone={handleTasteProfileDone} />;
   }
 
-  return <GuestHome guest={guest} tableNumber={tableNumber} />;
+  return <GuestHome guest={guest} tableNumber={tableNumber} onEditTasteProfile={() => setEditingProfile(true)} />;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { createServiceCall, touchGuestVisit } from "@/data/repo";
+import { createServiceCall, listAromaTags, touchGuestVisit } from "@/data/repo";
+import { AROMA_DIRECTION_LABELS } from "@/types";
 import type { Guest, ServiceCallType } from "@/types";
 
 // Переадресация на внешний сервис чаевых (НетМонет) — см. обсуждение с
@@ -14,13 +15,27 @@ const ACTIONS: { type: ServiceCallType; label: string; emoji: string }[] = [
   { type: "bill", label: "Попросить счёт", emoji: "🧾" },
 ];
 
+function aromaNames(ids?: string[]): string[] {
+  if (!ids || ids.length === 0) return [];
+  const all = listAromaTags();
+  return ids.map((id) => all.find((t) => t.id === id)?.name).filter((n): n is string => Boolean(n));
+}
+
 function formatLastVisit(iso?: string): string {
   if (!iso) return "это ваш первый визит";
   return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" });
 }
 
 /** Главный экран гостя после авторизации — ФИО, QR лояльности, бонусы, последний визит, вызовы и чаевые. */
-export default function GuestHome({ guest, tableNumber }: { guest: Guest; tableNumber: number }) {
+export default function GuestHome({
+  guest,
+  tableNumber,
+  onEditTasteProfile,
+}: {
+  guest: Guest;
+  tableNumber: number;
+  onEditTasteProfile: () => void;
+}) {
   const [sent, setSent] = useState<ServiceCallType | null>(null);
   const [showLost, setShowLost] = useState(false);
   const [lostText, setLostText] = useState("");
@@ -83,6 +98,57 @@ export default function GuestHome({ guest, tableNumber }: { guest: Guest; tableN
           Сотрудник уже в курсе — идёт к вам
         </div>
       )}
+
+      <div className="card-row" style={{ marginTop: 20, marginBottom: 4 }}>
+        <h2 style={{ marginBottom: 0 }}>Вкусовой профиль</h2>
+        <button className="btn ghost" onClick={onEditTasteProfile}>
+          Изменить
+        </button>
+      </div>
+      <div className="card">
+        {(guest.tasteDirections?.length ?? 0) > 0 && (
+          <div style={{ marginBottom: 10 }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              Направления
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {guest.tasteDirections!.map((d) => (
+                <span key={d} className="chip">
+                  {AROMA_DIRECTION_LABELS[d]}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {aromaNames(guest.likedAromaIds).length > 0 && (
+          <div style={{ marginBottom: aromaNames(guest.dislikedAromaIds).length > 0 ? 10 : 0 }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              Любимые ароматы
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {aromaNames(guest.likedAromaIds).map((name) => (
+                <span key={name} className="chip accent">
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {aromaNames(guest.dislikedAromaIds).length > 0 && (
+          <div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              Не нравятся
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {aromaNames(guest.dislikedAromaIds).map((name) => (
+                <span key={name} className="chip">
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       <h2>Позвать</h2>
       {ACTIONS.map((a) => (
