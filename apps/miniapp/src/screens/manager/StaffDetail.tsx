@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import {
@@ -8,6 +9,8 @@ import {
   getStaffProfileById,
   listActivePayrollPeriodSummariesForStaff,
   listShiftPayrollByMonthForStaff,
+  listStaffDirectory,
+  reassignShiftPayroll,
   shiftPayrollStore,
   staffDirectoryStore,
   yearsOfService,
@@ -32,6 +35,67 @@ function formatTenure(hiredAt: string): string {
 function formatExpiry(iso?: string): string {
   if (!iso) return "не указано";
   return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+/**
+ * Карточка одной начисленной смены + переназначение на другого сотрудника —
+ * на случай, если в графике была замена, а бот успел начислить не тому (см.
+ * reassignShiftPayroll в data/repo.ts). Выручка переносится как есть,
+ * сумма пересчитывается по salary_model выбранного сотрудника.
+ */
+function ShiftRow({ id, staffId, date, role, revenue, salary }: { id: string; staffId: string; date: string; role?: StaffRole; revenue: number; salary: number }) {
+  const [open, setOpen] = useState(false);
+  const staff = listStaffDirectory();
+  const others = staff.filter((s) => s.id !== staffId);
+  const [pick, setPick] = useState(() => others[0]?.id ?? "");
+
+  return (
+    <div className="card">
+      <div className="card-row">
+        <div>
+          <div style={{ fontWeight: 700 }}>
+            {new Date(date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
+            {role ? ` · ${ROLE_LABELS[role]}` : ""}
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            выручка {money(revenue)}
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontWeight: 700, color: "var(--accent)" }}>{money(salary)}</div>
+          <button
+            className="muted"
+            style={{ background: "none", border: "none", padding: 0, fontSize: 12, textDecoration: "underline", cursor: "pointer" }}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? "отмена" : "переназначить"}
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <select style={{ flex: 1 }} value={pick} onChange={(e) => setPick(e.target.value)}>
+            {others.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn primary"
+            style={{ width: "auto", padding: "11px 16px" }}
+            disabled={!pick}
+            onClick={() => {
+              reassignShiftPayroll(id, pick);
+              setOpen(false);
+            }}
+          >
+            Перенести
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function StaffDetail() {
@@ -146,18 +210,7 @@ export default function StaffDetail() {
             <span style={{ fontWeight: 700 }}>{money(group.total)}</span>
           </div>
           {group.shifts.map((s) => (
-            <div key={s.id} className="card card-row">
-              <div>
-                <div style={{ fontWeight: 700 }}>
-                  {new Date(s.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
-                  {s.role ? ` · ${ROLE_LABELS[s.role]}` : ""}
-                </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  выручка {money(s.revenue)}
-                </div>
-              </div>
-              <div style={{ fontWeight: 700, color: "var(--accent)" }}>{money(s.salary)}</div>
-            </div>
+            <ShiftRow key={s.id} id={s.id} staffId={s.staffId} date={s.date} role={s.role} revenue={s.revenue} salary={s.salary} />
           ))}
         </div>
       ))}
