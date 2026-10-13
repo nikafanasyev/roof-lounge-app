@@ -23,7 +23,7 @@ import Salary from "@/screens/manager/Salary";
 import SalaryPeriodDetail from "@/screens/manager/SalaryPeriodDetail";
 import Fines from "@/screens/manager/Fines";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
-import { isCurrentUserManager, isInsideTelegramClient } from "@/lib/telegram";
+import { isCurrentUserManager, isGuestTestAccount, isInsideTelegramClient } from "@/lib/telegram";
 
 // Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
 // реально работает в заведении) и отдельно "Руководитель". Переключатель
@@ -110,7 +110,11 @@ function RoleShell() {
   const [role, setRole] = useState<AppRole>(isManager && inTelegram ? "manager" : "employee");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
-  const isGuestScreen = location.pathname.startsWith("/table/");
+  // Тестовый гостевой аккаунт (VITE_GUEST_TEST_TELEGRAM_IDS, см. lib/telegram.ts)
+  // всегда видит гостевой сценарий, даже открыв мини-апп обычной кнопкой
+  // бота (не по QR-ссылке стола) — иначе он попадал в кабинет "Сотрудник",
+  // как любой другой Telegram-аккаунт (см. обсуждение 14.10.2026).
+  const isGuestScreen = location.pathname.startsWith("/table/") || isGuestTestAccount();
 
   // Меню само закрывается при переходе на другой экран (в т.ч. кнопкой
   // "назад" в Telegram) — чтобы не оставалось открытым поверх нового экрана.
@@ -122,6 +126,11 @@ function RoleShell() {
     return (
       <Routes>
         <Route path="/table/:token" element={<TableGuestScreen />} />
+        {/* Тестовый гостевой аккаунт открывает мини-апп не по QR-ссылке
+            стола, а обычной кнопкой — путь будет "/", не "/table/...".
+            TableGuestScreen сам подставляет "table-1", если :token не задан
+            (см. его useParams с дефолтом). */}
+        <Route path="*" element={<TableGuestScreen />} />
       </Routes>
     );
   }

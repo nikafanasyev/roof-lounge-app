@@ -76,3 +76,26 @@ export function isCurrentUserManager(): boolean {
 export function isInsideTelegramClient(): boolean {
   return getTelegramUser() !== null;
 }
+
+// Тестовый гостевой аккаунт — задаётся VITE_GUEST_TEST_TELEGRAM_IDS (та же
+// идея, что MANAGER_TELEGRAM_IDS выше). Нужен из-за бага: раньше ЛЮБОЙ
+// Telegram-аккаунт, открывший мини-апп обычной кнопкой (не по QR-ссылке
+// стола /table/<token>), автоматически попадал в кабинет "Сотрудник" и
+// записывался в таблицу staff (см. ensureCurrentStaff в data/repo.ts) — так
+// и тестовый гостевой аккаунт Никиты вместо гостевого сценария видел
+// "Сотрудник" → "Моя зарплата" (см. обсуждение 14.10.2026, скриншоты). Для
+// id из этого списка RoleShell (App.tsx) и initData (data/repo.ts) всегда
+// ведут себя как гостевой QR-сценарий за столом, независимо от пути и без
+// записи в staff.
+const GUEST_TEST_TELEGRAM_IDS = new Set(
+  (import.meta.env.VITE_GUEST_TEST_TELEGRAM_IDS ?? "")
+    .split(",")
+    .map((id: string) => id.trim())
+    .filter(Boolean),
+);
+
+export function isGuestTestAccount(): boolean {
+  const tgUser = getTelegramUser();
+  if (!tgUser) return false;
+  return GUEST_TEST_TELEGRAM_IDS.has(String(tgUser.id));
+}
