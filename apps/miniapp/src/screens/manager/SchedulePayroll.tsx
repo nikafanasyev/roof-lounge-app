@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import { useStore } from "@/data/useStore";
 import {
+  latestPayrollRecalcRequestForDate,
   listPayrollIssues,
   listSchedule,
   listStaffDirectory,
   payrollIssuesStore,
+  payrollRecalcRequestsStore,
   removeScheduleEntry,
+  requestPayrollRecalc,
   resolvePayrollIssue,
   scheduleStore,
   setScheduleEntry,
@@ -60,6 +63,36 @@ type DayEntries = Partial<Record<StaffRole, ScheduleEntry>>;
  * поэтому локальный выбор в select'ах всегда стартует от актуальных данных
  * этого дня, без лишнего useEffect.
  */
+const RECALC_STATUS_LABEL: Record<string, string> = {
+  pending: "Считаю…",
+  done: "Готово",
+  failed: "Не получилось",
+};
+
+/** Кнопка "Начислить ЗП за этот день" — пишет запрос через Supabase, бот сам
+ * его подхватывает и выполняет (см. requestPayrollRecalc в data/repo.ts) —
+ * без ручных правок в базе и без команды /accrue в Telegram. См. запрос
+ * Никиты 14.10.2026: "чтобы руками не лезть в базу данных". */
+function RecalcButton({ dateIso }: { dateIso: string }) {
+  useStore(payrollRecalcRequestsStore);
+  const request = latestPayrollRecalcRequestForDate(dateIso);
+  const pending = request?.status === "pending";
+
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+      <button className="btn secondary" style={{ width: "100%" }} disabled={pending} onClick={() => requestPayrollRecalc(dateIso)}>
+        {pending ? "Считаю…" : "Начислить ЗП за этот день"}
+      </button>
+      {request && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          {RECALC_STATUS_LABEL[request.status] ?? request.status}
+          {request.result ? `: ${request.result}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DayPanel({ dateIso, staff, staffById, dayEntries }: { dateIso: string; staff: StaffProfile[]; staffById: Map<string, string>; dayEntries: DayEntries }) {
   const [picks, setPicks] = useState<Record<StaffRole, string>>({
     bar: dayEntries.bar?.staffId ?? staff[0]?.id ?? "",
@@ -111,6 +144,7 @@ function DayPanel({ dateIso, staff, staffById, dayEntries }: { dateIso: string; 
           </div>
         );
       })}
+      <RecalcButton dateIso={dateIso} />
     </div>
   );
 }

@@ -233,3 +233,47 @@ export function watchStaffArchived(onArchived: (event: StaffArchivedEvent) => vo
     ),
   );
 }
+
+interface PayrollRecalcRequestEvent {
+  id: string;
+  date: string; // ISO YYYY-MM-DD
+  markDone: (result: string) => Promise<void>;
+  markFailed: (error: string) => Promise<void>;
+}
+
+/**
+ * Кнопка "Начислить ЗП за дату" в мини-аппе (экран "Руководитель" → "График")
+ * пишет сюда вместо того, чтобы дёргать бота напрямую — у миниаппа нет
+ * credentials Quick Resto и сервисного ключа Supabase, они есть только у
+ * бота. onRequest должен вызвать manuallyAccrueDate (см. quickresto.ts) и
+ * вызвать markDone/markFailed — миниапп покажет результат через realtime.
+ */
+export function watchPayrollRecalcRequests(onRequest: (event: PayrollRecalcRequestEvent) => void | Promise<void>) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  resubscribable("payroll_recalc_requests", () =>
+    supabase.channel(`payroll_recalc_requests_inserts_${Date.now()}`).on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "payroll_recalc_requests" },
+      async (payload) => {
+        const row = payload.new as { id: string; date: string; status: string };
+        if (row.status !== "pending") return;
+        try {
+          await onRequest({
+            id: row.id,
+            date: row.date,
+            markDone: async (result: string) => {
+              await supabase.from("payroll_recalc_requests").update({ status: "done", result, handled_at: new Date().toISOString() }).eq("id", row.id);
+            },
+            markFailed: async (error: string) => {
+              await supabase.from("payroll_recalc_requests").update({ status: "failed", result: error, handled_at: new Date().toISOString() }).eq("id", row.id);
+            },
+          });
+        } catch (err) {
+          console.error("Ошибка при обработке запроса на пересчёт ЗП:", err);
+          await supabase.from("payroll_recalc_requests").update({ status: "failed", result: String(err), handled_at: new Date().toISOString() }).eq("id", row.id);
+        }
+      },
+    ),
+  );
+}
