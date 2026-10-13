@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import {
   adjustmentsStore,
@@ -207,15 +208,15 @@ export default function Salary() {
             По периодам
           </div>
           {orderedPeriodTotals.map((p) => (
-            <div key={p.key} className="card">
+            <Link key={p.key} to={`/manager/salary/${p.key}`} className="card" style={{ display: "block", textDecoration: "none", color: "inherit" }}>
               <div className="card-row">
                 <span style={{ fontWeight: 600 }}>{p.label}</span>
                 <span style={{ fontWeight: 700, color: "var(--accent)" }}>{money(p.net)}</span>
               </div>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                НДФЛ {money(p.ndfl)} · итого + НДФЛ {money(p.gross)}
+                НДФЛ {money(p.ndfl)} · итого + НДФЛ {money(p.gross)} · →
               </div>
-            </div>
+            </Link>
           ))}
         </>
       )}

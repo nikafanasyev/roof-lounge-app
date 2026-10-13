@@ -20,6 +20,7 @@ import StaffList from "@/screens/manager/StaffList";
 import StaffDetail from "@/screens/manager/StaffDetail";
 import SchedulePayroll from "@/screens/manager/SchedulePayroll";
 import Salary from "@/screens/manager/Salary";
+import SalaryPeriodDetail from "@/screens/manager/SalaryPeriodDetail";
 import Fines from "@/screens/manager/Fines";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 import { isCurrentUserManager, isInsideTelegramClient } from "@/lib/telegram";
@@ -201,6 +202,7 @@ function RoleShell() {
         <Route path="/manager/staff/:staffId" element={<StaffDetail />} />
         <Route path="/manager/schedule" element={<SchedulePayroll />} />
         <Route path="/manager/salary" element={<Salary />} />
+        <Route path="/manager/salary/:periodKey" element={<SalaryPeriodDetail />} />
         <Route path="/manager/fines" element={<Fines />} />
         <Route path="/manager/problems" element={<Problems />} />
 
