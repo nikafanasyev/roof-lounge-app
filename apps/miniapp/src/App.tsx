@@ -20,7 +20,7 @@ import StaffList from "@/screens/manager/StaffList";
 import StaffDetail from "@/screens/manager/StaffDetail";
 import SchedulePayroll from "@/screens/manager/SchedulePayroll";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
-import { isCurrentUserManager } from "@/lib/telegram";
+import { isCurrentUserManager, isInsideTelegramClient } from "@/lib/telegram";
 
 // Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
 // реально работает в заведении) и отдельно "Руководитель". Переключатель
@@ -83,11 +83,17 @@ const DEFAULT_ROUTE: Record<AppRole, string> = {
 };
 
 function RoleShell() {
-  // Переключатель виден только руководителю (см. lib/telegram.ts) — у него
-  // одна и та же ссылка открывает оба кабинета, остальной персонал сразу
-  // попадает в "Сотрудник" без ручного выбора.
+  // Переключатель между "Сотрудник" и "Руководитель" — только вне Telegram
+  // (прямая ссылка в браузере, без initData): удобно тебе для теста, сразу
+  // видно оба кабинета. Внутри настоящего Telegram-клиента у каждого
+  // аккаунта закреплён ровно один кабинет без переключателя — руководитель
+  // (аккаунт из VITE_MANAGER_TELEGRAM_IDS, см. lib/telegram.ts) сразу
+  // попадает в "Руководитель" и не может переключиться на "Сотрудник",
+  // остальной персонал — наоборот. См. обсуждение с Никитой 13.10.2026.
   const isManager = isCurrentUserManager();
-  const [role, setRole] = useState<AppRole>(isManager ? "employee" : "employee");
+  const inTelegram = isInsideTelegramClient();
+  const canSwitchRole = isManager && !inTelegram;
+  const [role, setRole] = useState<AppRole>(isManager && inTelegram ? "manager" : "employee");
   const location = useLocation();
   const isGuestScreen = location.pathname.startsWith("/table/");
 
@@ -105,9 +111,15 @@ function RoleShell() {
     return <Navigate to={DEFAULT_ROUTE.employee} replace />;
   }
 
+  // И наоборот: руководитель в Telegram (без переключателя) не должен
+  // попадать в кабинет "Сотрудник" даже прямой ссылкой/кнопкой "назад".
+  if (isManager && inTelegram && location.pathname.startsWith("/employee")) {
+    return <Navigate to={DEFAULT_ROUTE.manager} replace />;
+  }
+
   return (
     <div className="app">
-      {isManager && (
+      {canSwitchRole && (
         <div className="top-bar">
           <div className="role-switch">
             {(Object.keys(ROLE_LABEL) as AppRole[]).map((r) => (
@@ -149,7 +161,7 @@ function RoleShell() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
-      {(role === "employee" || !isManager) && <EmployeeNav />}
+      {(role === "employee" || !isManager) && !(isManager && inTelegram) && <EmployeeNav />}
       {role === "manager" && isManager && <ManagerNav />}
     </div>
   );
