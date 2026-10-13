@@ -267,6 +267,111 @@ textarea {
 
 .top-bar {
   padding: 12px 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hamburger-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.hamburger-btn span {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: var(--ink);
+  border-radius: 1px;
+}
+
+/* Выдвижное меню (гамбургер в шапке) — заменяет нижнюю панель вкладок у
+   сотрудника/руководителя (см. обсуждение с Никитой 13.10.2026: пять
+   кнопок внизу было неудобно переключать). Гостевой кабинет (guest/*) по-
+   прежнему использует .bottom-nav — его не трогаем. */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 50;
+  display: flex;
+}
+
+.drawer-panel {
+  width: 78%;
+  max-width: 300px;
+  height: 100%;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  animation: drawer-slide-in 0.18s ease-out;
+}
+
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+}
+
+.drawer-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.drawer-nav {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.drawer-nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 15px;
+}
+
+.drawer-nav a.active {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.drawer-nav .icon {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
 }
 
 .role-switch {

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import GuestsList from "@/screens/master/GuestsList";
 import GuestProfile from "@/screens/master/GuestProfile";
 import MixBuilder from "@/screens/master/MixBuilder";
@@ -33,44 +33,49 @@ const ROLE_LABEL: Record<AppRole, string> = {
   manager: "Руководитель",
 };
 
-function EmployeeNav() {
+// Навигация переехала из нижней панели в выдвижное меню слева (гамбургер ☰
+// в шапке) — см. обсуждение с Никитой 13.10.2026: с пятью кнопками внизу
+// было неудобно переключаться между разделами. Пункты и иконки те же, что
+// были в нижней панели, просто в вертикальный список; клик по пункту сам
+// закрывает меню через onNavigate.
+function EmployeeNav({ onNavigate }: { onNavigate: () => void }) {
   return (
-    <nav className="bottom-nav">
-      <NavLink to="/employee/dashboard" className={({ isActive }) => (isActive ? "active" : "")}>
+    <nav className="drawer-nav">
+      <NavLink to="/employee/dashboard" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">💰</span>Зарплата
       </NavLink>
-      <NavLink to="/employee/guests" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/employee/guests" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🧪</span>Гости
       </NavLink>
-      <NavLink to="/employee/shift" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/employee/shift" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">✅</span>Смена
       </NavLink>
-      <NavLink to="/employee/calls" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/employee/calls" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🔔</span>Вызовы
       </NavLink>
-      <NavLink to="/employee/more" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/employee/more" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">☰</span>Ещё
       </NavLink>
     </nav>
   );
 }
 
-function ManagerNav() {
+function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
   return (
-    <nav className="bottom-nav">
-      <NavLink to="/manager/summary" className={({ isActive }) => (isActive ? "active" : "")}>
+    <nav className="drawer-nav">
+      <NavLink to="/manager/summary" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">📊</span>Сводка
       </NavLink>
-      <NavLink to="/manager/calls" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/manager/calls" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🔔</span>Вызовы
       </NavLink>
-      <NavLink to="/manager/staff" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/manager/staff" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">👥</span>Сотрудники
       </NavLink>
-      <NavLink to="/manager/schedule" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/manager/schedule" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">📅</span>График
       </NavLink>
-      <NavLink to="/manager/problems" className={({ isActive }) => (isActive ? "active" : "")}>
+      <NavLink to="/manager/problems" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🛠</span>Проблемы
       </NavLink>
     </nav>
@@ -94,8 +99,15 @@ function RoleShell() {
   const inTelegram = isInsideTelegramClient();
   const canSwitchRole = isManager && !inTelegram;
   const [role, setRole] = useState<AppRole>(isManager && inTelegram ? "manager" : "employee");
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
   const isGuestScreen = location.pathname.startsWith("/table/");
+
+  // Меню само закрывается при переходе на другой экран (в т.ч. кнопкой
+  // "назад" в Telegram) — чтобы не оставалось открытым поверх нового экрана.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [location.pathname]);
 
   if (isGuestScreen) {
     return (
@@ -117,16 +129,40 @@ function RoleShell() {
     return <Navigate to={DEFAULT_ROUTE.manager} replace />;
   }
 
+  const showEmployeeNav = (role === "employee" || !isManager) && !(isManager && inTelegram);
+  const showManagerNav = role === "manager" && isManager;
+
   return (
     <div className="app">
-      {canSwitchRole && (
-        <div className="top-bar">
+      <div className="top-bar">
+        <button className="hamburger-btn" onClick={() => setDrawerOpen(true)} aria-label="Меню">
+          <span />
+          <span />
+          <span />
+        </button>
+
+        {canSwitchRole && (
           <div className="role-switch">
             {(Object.keys(ROLE_LABEL) as AppRole[]).map((r) => (
               <button key={r} className={role === r ? "active" : ""} onClick={() => setRole(r)}>
                 {ROLE_LABEL[r]}
               </button>
             ))}
+          </div>
+        )}
+      </div>
+
+      {drawerOpen && (
+        <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)}>
+          <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-header">
+              <span>{ROLE_LABEL[role]}</span>
+              <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Закрыть">
+                ✕
+              </button>
+            </div>
+            {showEmployeeNav && <EmployeeNav onNavigate={() => setDrawerOpen(false)} />}
+            {showManagerNav && <ManagerNav onNavigate={() => setDrawerOpen(false)} />}
           </div>
         </div>
       )}
@@ -160,9 +196,6 @@ function RoleShell() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-
-      {(role === "employee" || !isManager) && !(isManager && inTelegram) && <EmployeeNav />}
-      {role === "manager" && isManager && <ManagerNav />}
     </div>
   );
 }
