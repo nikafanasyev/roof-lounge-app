@@ -435,7 +435,15 @@ export default function StaffDetail() {
         </div>
       ))}
 
-      <DangerZone staffId={staffId} name={profile.name} />
+      {profile.archived ? (
+        <div className="card" style={{ borderColor: "var(--border)", marginTop: 20 }}>
+          <div className="muted" style={{ fontSize: 13 }}>
+            Уволен — скрыт из «Сотрудники» и графика, вся история начислений выше сохранена.
+          </div>
+        </div>
+      ) : (
+        <DangerZone staffId={staffId} name={profile.name} />
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { addAdjustment, adjustmentsStore, getStaffProfile, listAdjustments, listStaffDirectory } from "@/data/repo";
+import { addAdjustment, adjustmentsStore, getStaffProfile, listActiveStaffDirectory, listAdjustments } from "@/data/repo";
 import type { AdjustmentType } from "@/types";
 
 function money(n: number): string {
@@ -14,7 +14,7 @@ function money(n: number): string {
 export default function Adjustments() {
   useStore(adjustmentsStore);
   const entries = listAdjustments();
-  const staffList = listStaffDirectory();
+  const staffList = listActiveStaffDirectory();
   const me = getStaffProfile();
 
   const [showForm, setShowForm] = useState(false);

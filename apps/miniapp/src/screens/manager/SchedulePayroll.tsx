@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "@/data/useStore";
 import {
   latestPayrollRecalcRequestForDate,
+  listActiveStaffDirectory,
   listPayrollIssues,
   listSchedule,
   listStaffDirectory,
@@ -154,6 +155,7 @@ function ScheduleCalendar() {
   const entries = useStore(scheduleStore);
   useStore(staffDirectoryStore);
   const staff = listStaffDirectory();
+  const activeStaff = listActiveStaffDirectory();
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s.name])), [staff]);
 
   const byDate = useMemo(() => {
@@ -243,7 +245,7 @@ function ScheduleCalendar() {
         </span>
       </div>
 
-      <DayPanel key={selected} dateIso={selected} staff={staff} staffById={staffById} dayEntries={byDate.get(selected) ?? {}} />
+      <DayPanel key={selected} dateIso={selected} staff={activeStaff} staffById={staffById} dayEntries={byDate.get(selected) ?? {}} />
     </>
   );
 }
@@ -258,6 +260,7 @@ function PayrollIssues() {
   useStore(staffDirectoryStore);
   const issues = listPayrollIssues();
   const staff = listStaffDirectory();
+  const activeStaff = listActiveStaffDirectory();
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s.name])), [staff]);
   const [picked, setPicked] = useState<Record<string, string>>({});
 
@@ -289,7 +292,7 @@ function PayrollIssues() {
                 value={chosen}
                 onChange={(e) => setPicked((p) => ({ ...p, [issue.id]: e.target.value }))}
               >
-                {staff.map((s) => (
+                {activeStaff.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
                   </option>

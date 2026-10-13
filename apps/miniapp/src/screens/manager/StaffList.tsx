@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { createStaffInvite, formatSalaryModel, listStaffDirectory, listStaffInvites, staffDirectoryStore, staffInvitesStore } from "@/data/repo";
+import { createStaffInvite, formatSalaryModel, listActiveStaffDirectory, listStaffDirectory, listStaffInvites, staffDirectoryStore, staffInvitesStore } from "@/data/repo";
 import type { StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
@@ -73,7 +73,12 @@ function RecentInvites() {
 
 export default function StaffList() {
   useStore(staffDirectoryStore);
-  const staff = listStaffDirectory();
+  // Активный ростер — для основного списка; уволенные (archived) больше
+  // здесь не показываются как "сотрудники", но их карточка (и вся история ЗП/
+  // штрафов) никуда не делась — доступна отдельным свёрнутым списком ниже,
+  // см. запрос Никиты 14.10.2026 про сохранение данных после удаления.
+  const staff = listActiveStaffDirectory();
+  const archivedStaff = listStaffDirectory().filter((s) => s.archived);
   const [inviting, setInviting] = useState(false);
 
   return (
@@ -135,6 +140,36 @@ export default function StaffList() {
         ))}
         {staff.length === 0 && <div style={{ padding: 14 }} className="muted">Сотрудников пока нет</div>}
       </div>
+
+      {archivedStaff.length > 0 && (
+        <>
+          <div className="eyebrow" style={{ marginTop: 16 }}>
+            Уволены ({archivedStaff.length})
+          </div>
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            {archivedStaff.map((s, idx) => (
+              <Link
+                key={s.id}
+                to={`/manager/staff/${s.id}`}
+                style={{
+                  textDecoration: "none",
+                  color: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "12px 14px",
+                  borderTop: idx === 0 ? "none" : "1px solid var(--border)",
+                  opacity: 0.6,
+                }}
+              >
+                <span>{s.name}</span>
+                <span className="muted" style={{ fontSize: 12 }}>история ЗП сохранена →</span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
 
       <RecentInvites />
     </div>
