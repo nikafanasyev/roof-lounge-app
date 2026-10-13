@@ -583,15 +583,42 @@ async function resolveActualWorkedStaffIds(
  * графике на дату/роль, без сверки с терминалом. Именно так раньше начисляли
  * вручную бэкфиллом — теперь то же самое делает бот сам каждый день.
  */
+/**
+ * Уведомляет один раз на дату (см. schedule_notices в
+ * supabase/migrations/0012_salary_screen.sql), что на эту дату вообще не
+ * был выставлен график — раньше processScheduledDate в этом случае просто
+ * молча завершался (ни начисления, ни уведомления, ни записи в
+ * payroll_issues), и пропущенный день было невозможно заметить. Как
+ * только руководитель задним числом внесёт график на эту дату, следующий
+ * же запуск ежедневного задания (оно само пересматривает последние 7 дней,
+ * см. runDailyPayrollJob) подхватит его и начислит автоматически — отдельный
+ * бэкфилл не нужен, если прошло не больше недели (для более старых дат есть
+ * /accrue, см. index.ts).
+ */
+async function notifyMissingScheduleOnce(
+  supabase: SupabaseClient,
+  onMissingSchedule: (dateIso: string) => void | Promise<void>,
+  dateIso: string,
+) {
+  const { error: insertError } = await supabase.from("schedule_notices").insert({ date: dateIso });
+  if (insertError) return; // уже уведомляли по этой дате (unique violation) — не спамим
+  console.log(`Quick Resto: график на ${dateIso} не выставлен — ЗП не начислена, уведомляю руководителя.`);
+  await onMissingSchedule(dateIso);
+}
+
 async function processScheduledDate(
   supabase: SupabaseClient,
   onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  onMissingSchedule: (dateIso: string) => void | Promise<void>,
   dateIso: string,
   reconcile: boolean,
 ) {
   const { data: scheduleRows, error } = await supabase.from("schedule_entries").select("staff_id, role").eq("date", dateIso);
   if (error) return console.error(`Quick Resto: не удалось прочитать график на ${dateIso}:`, error.message);
-  if (!scheduleRows?.length) return; // на эту дату график не выставлен — нечего сверять
+  if (!scheduleRows?.length) {
+    await notifyMissingScheduleOnce(supabase, onMissingSchedule, dateIso);
+    return;
+  }
 
   const pendingRoles: { staff_id: string; role: "bar" | "hookah" }[] = [];
   for (const row of scheduleRows as { staff_id: string; role: "bar" | "hookah" }[]) {
@@ -665,10 +692,11 @@ function mskDateIso(offsetDays: number): string {
 async function runDailyPayrollJob(
   supabase: SupabaseClient,
   onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  onMissingSchedule: (dateIso: string) => void | Promise<void>,
   reconcile: boolean,
 ) {
   for (let offset = -1; offset >= -7; offset--) {
-    await processScheduledDate(supabase, onIssue, mskDateIso(offset), reconcile);
+    await processScheduledDate(supabase, onIssue, onMissingSchedule, mskDateIso(offset), reconcile);
   }
 }
 
@@ -700,12 +728,13 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
  */
 export function scheduleDailyPayrollJob(
   onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  onMissingSchedule: (dateIso: string) => void | Promise<void>,
   options: { reconcile?: boolean } = {},
 ) {
   const reconcile = options.reconcile ?? false; // см. processScheduledDate — сверка по ПИНу пока недоступна
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   function run() {
-    runDailyPayrollJob(supabase, onIssue, reconcile).catch((err) => console.error("Quick Resto: ошибка ежедневного начисления ЗП:", err));
+    runDailyPayrollJob(supabase, onIssue, onMissingSchedule, reconcile).catch((err) => console.error("Quick Resto: ошибка ежедневного начисления ЗП:", err));
     setTimeout(run, ONE_DAY_MS);
   }
   const delay = msUntilNextMoscowHour(PAYROLL_JOB_HOUR_MSK);
@@ -713,6 +742,21 @@ export function scheduleDailyPayrollJob(
   console.log(
     `Quick Resto: ежедневное начисление ЗП запланировано на ${PAYROLL_JOB_HOUR_MSK}:00 МСК (через ${Math.round(delay / 60000)} мин, reconcile=${reconcile})`,
   );
+}
+
+/**
+ * Ручное начисление ЗП за конкретную дату (команда /accrue в index.ts) — для
+ * бэкфилла, когда график внесли задним числом больше чем на 7 дней назад
+ * (дальше этого окна runDailyPayrollJob уже не заглядывает сам). reconcile
+ * всегда false — сверка по ПИН-коду пока недоступна (см. processScheduledDate).
+ */
+export async function manuallyAccrueDate(
+  dateIso: string,
+  onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
+  onMissingSchedule: (dateIso: string) => void | Promise<void>,
+) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  await processScheduledDate(supabase, onIssue, onMissingSchedule, dateIso, false);
 }
 
 async function fetchEmployees(): Promise<QuickRestoEmployee[]> {

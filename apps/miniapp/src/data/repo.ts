@@ -22,6 +22,8 @@ import type {
   AromaDirection,
   AromaTag,
   ChecklistItem,
+  FixedAccrual,
+  FixedAccrualCadence,
   Flavor,
   Guest,
   KnowledgeArticle,
@@ -38,6 +40,7 @@ import type {
   ServiceCallType,
   Shift,
   ShiftPayrollEntry,
+  StaffInvite,
   StaffProfile,
   StaffRole,
   Task,
@@ -111,6 +114,8 @@ export const adjustmentsStore = new Store<Adjustment[]>(seedAdjustments);
 export const scheduleStore = new Store<ScheduleEntry[]>(seedSchedule);
 export const payrollIssuesStore = new Store<PayrollIssue[]>(seedPayrollIssues);
 export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
+export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
+export const staffInvitesStore = new Store<StaffInvite[]>([]);
 
 const uid = () => crypto.randomUUID();
 
@@ -156,6 +161,8 @@ export async function initData(): Promise<void> {
       loadSchedule(),
       loadPayrollIssues(),
       loadTodayCleaningLog(),
+      loadFixedAccruals(),
+      loadStaffInvites(),
     ]);
     subscribeRealtime();
   } catch (error) {
@@ -421,7 +428,11 @@ async function loadTasks() {
 }
 
 async function loadStaffDirectory() {
-  const { data, error } = await supabase!.from("staff").select("*");
+  // archived=false — уволенные сотрудники (см. archiveStaff ниже) не должны
+  // показываться в списке "Сотрудники" и в выборе при составлении графика,
+  // хотя вся их история начислений (shift_payroll/adjustments) остаётся как
+  // была — строка staff никогда физически не удаляется.
+  const { data, error } = await supabase!.from("staff").select("*").eq("archived", false);
   if (error) return logSyncError("loadStaffDirectory", error);
   for (const r of data ?? []) staffNameById.set(r.id, r.name);
   staffDirectoryStore.set(
@@ -442,6 +453,40 @@ async function loadStaffDirectory() {
       // когда-то вошёл по ПИН/Telegram, считаются сотрудниками.
       salaryModel: (r.salary_model as SalaryModel | null) ?? DEFAULT_SALARY_MODEL,
       role: (r.work_role as StaffRole | null) ?? undefined,
+      telegramId: typeof r.telegram_id === "number" ? r.telegram_id : undefined,
+      archived: Boolean(r.archived),
+    })),
+  );
+}
+
+async function loadFixedAccruals() {
+  const { data, error } = await supabase!.from("fixed_accruals").select("*").eq("active", true).order("created_at", { ascending: true });
+  if (error) return logSyncError("loadFixedAccruals", error);
+  fixedAccrualsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      staffId: r.staff_id,
+      amount: Number(r.amount),
+      cadence: r.cadence as FixedAccrualCadence,
+      label: r.label ?? undefined,
+      active: Boolean(r.active),
+    })),
+  );
+}
+
+async function loadStaffInvites() {
+  const { data, error } = await supabase!.from("staff_invites").select("*").order("created_at", { ascending: false });
+  if (error) return logSyncError("loadStaffInvites", error);
+  staffInvitesStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      fullName: r.full_name,
+      phone: r.phone ?? undefined,
+      telegramId: r.telegram_id ?? undefined,
+      status: r.status,
+      inviteLink: r.invite_link ?? undefined,
+      error: r.error ?? undefined,
+      createdAt: r.created_at,
     })),
   );
 }
@@ -539,6 +584,8 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "payouts" }, () => loadPayouts())
     .on("postgres_changes", { event: "*", schema: "public", table: "schedule_entries" }, () => loadSchedule())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_issues" }, () => loadPayrollIssues())
+    .on("postgres_changes", { event: "*", schema: "public", table: "fixed_accruals" }, () => loadFixedAccruals())
+    .on("postgres_changes", { event: "*", schema: "public", table: "staff_invites" }, () => loadStaffInvites())
     .subscribe();
 }
 
@@ -1403,6 +1450,122 @@ export function getStaffProfileById(staffId: string): StaffProfile | undefined {
   return staffDirectoryStore.get().find((s) => s.id === staffId);
 }
 
+/**
+ * Правка карточки сотрудника руководителем (роль на смене, модель ЗП,
+ * контакты, фото) — в отличие от updateStaffProfile выше (который правит
+ * только самого текущего вошедшего), это для ЛЮБОГО сотрудника из раздела
+ * "Сотрудники". Пишем оптимистично в стор и, если настроен Supabase, следом
+ * в staff-таблицу.
+ */
+export function updateStaffProfileById(
+  staffId: string,
+  patch: Partial<Pick<StaffProfile, "name" | "phone" | "email" | "role" | "salaryModel" | "photoUrl">>,
+) {
+  staffDirectoryStore.update((list) => list.map((s) => (s.id === staffId ? { ...s, ...patch } : s)));
+  if (!isSupabaseConfigured || !supabase) return;
+  const row: Record<string, unknown> = {};
+  if (patch.name !== undefined) row.name = patch.name;
+  if (patch.phone !== undefined) row.phone = patch.phone;
+  if (patch.email !== undefined) row.email = patch.email;
+  if (patch.role !== undefined) row.work_role = patch.role;
+  if (patch.salaryModel !== undefined) row.salary_model = patch.salaryModel;
+  if (patch.photoUrl !== undefined) row.photo_url = patch.photoUrl;
+  supabase
+    .from("staff")
+    .update(row)
+    .eq("id", staffId)
+    .then(({ error }) => {
+      if (error) logSyncError("updateStaffProfileById", error);
+    });
+}
+
+/** Фото сотрудника — постоянное, публичный бакет staff-photos (см. 0012_salary_screen.sql), не путать с эфемерными фото смен. */
+export function uploadStaffPhoto(staffId: string, blob: Blob): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return Promise.resolve();
+  const path = `${staffId}/${Date.now()}.jpg`;
+  return supabase.storage
+    .from("staff-photos")
+    .upload(path, blob, { contentType: "image/jpeg", upsert: true })
+    .then(({ error }) => {
+      if (error) return logSyncError("uploadStaffPhoto", error);
+      const { data } = supabase!.storage.from("staff-photos").getPublicUrl(path);
+      updateStaffProfileById(staffId, { photoUrl: data.publicUrl });
+    });
+}
+
+/**
+ * "Удалить сотрудника" в разделе "Сотрудники" — на самом деле мягкая
+ * архивация (staff.archived=true), а не DROP строки: shift_payroll /
+ * adjustments / payouts ссылаются на staff.id, и жёсткое удаление стёрло бы
+ * всю его историю начислений. Бот слушает этот переход через Supabase
+ * Realtime (watchStaffArchived в apps/bot/src/notify.ts) и сам выводит
+ * сотрудника из рабочего чата; ПИН на терминале Quick Resto бот снять не
+ * может — это остаётся ручным шагом для руководителя.
+ */
+export function archiveStaff(staffId: string) {
+  staffDirectoryStore.update((list) => list.filter((s) => s.id !== staffId));
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("staff")
+    .update({ archived: true, archived_at: new Date().toISOString() })
+    .eq("id", staffId)
+    .then(({ error }) => {
+      if (error) logSyncError("archiveStaff", error);
+    });
+}
+
+// --- Приглашение сотрудника (кнопка "Пригласить" в разделе "Сотрудники") ---
+
+export function listStaffInvites(): StaffInvite[] {
+  return staffInvitesStore.get();
+}
+
+export function createStaffInvite(input: { fullName: string; phone?: string; telegramId?: string }) {
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("staff_invites")
+    .insert({ full_name: input.fullName, phone: input.phone || null, telegram_id: input.telegramId || null })
+    .then(({ error }) => {
+      if (error) return logSyncError("createStaffInvite", error);
+      loadStaffInvites();
+    });
+}
+
+// --- Фиксированные начисления (см. 0012_salary_screen.sql) ---
+
+export function listFixedAccrualsForStaff(staffId: string): FixedAccrual[] {
+  return fixedAccrualsStore.get().filter((f) => f.staffId === staffId);
+}
+
+export function formatFixedAccrualCadence(cadence: FixedAccrualCadence): string {
+  if (cadence === "weekly") return "раз в неделю";
+  if (cadence === "monthly") return "раз в месяц";
+  return "раз в 2 недели";
+}
+
+export function createFixedAccrual(staffId: string, amount: number, cadence: FixedAccrualCadence, label?: string) {
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("fixed_accruals")
+    .insert({ staff_id: staffId, amount, cadence, label: label || null })
+    .then(({ error }) => {
+      if (error) return logSyncError("createFixedAccrual", error);
+      loadFixedAccruals();
+    });
+}
+
+export function removeFixedAccrual(id: string) {
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("fixed_accruals")
+    .update({ active: false })
+    .eq("id", id)
+    .then(({ error }) => {
+      if (error) return logSyncError("removeFixedAccrual", error);
+      loadFixedAccruals();
+    });
+}
+
 export function yearsOfService(hiredAt: string): { years: number; months: number } {
   const ms = Date.now() - new Date(hiredAt).getTime();
   const totalMonths = Math.max(0, Math.floor(ms / (86400000 * 30.44)));
@@ -1513,6 +1676,58 @@ export function computePayrollSummaryForStaff(staffId: string): PayrollSummary {
 
 export function computePayrollSummary(): PayrollSummary {
   return computePayrollSummaryForStaff(getStaffProfile().id);
+}
+
+// --- Экран "Зарплата" у руководителя (см. обсуждение с Никитой 13.10.2026) ---
+//
+// Отдельно от раздела "Сотрудники" (который про карточку одного человека —
+// контакты, модель ЗП, стаж) — здесь свод по всем сразу: кто сколько
+// заработал по сменам, фиксированные начисления, штрафы, и итог с НДФЛ.
+// Намеренно не переиспользует StaffDetail.tsx целиком, а строит свою
+// агрегацию поверх тех же данных (shift_payroll/adjustments/fixed_accruals),
+// чтобы раскладка была "а-ля таблица" по ФИО, а не карточка-на-экран.
+
+export interface StaffSalaryOverview {
+  staffId: string;
+  name: string;
+  photoUrl?: string;
+  shifts: ShiftPayrollEntry[]; // по смене: дата / выручка / зп
+  shiftsTotal: number;
+  fixedAccruals: FixedAccrual[]; // "Никита 10000 (раз в 2 недели)" и т.п.
+  fixedAccrualsTotal: number;
+  fines: number;
+  bonuses: number;
+  netTotal: number; // смены + фикс.начисления + премии − штрафы, "на руки"
+}
+
+export interface SalaryOverview {
+  staff: StaffSalaryOverview[];
+  netTotal: number; // сумма netTotal по всем сотрудникам — то, что реально выдаётся на руки
+  ndfl: number; // НДФЛ 13%, начисляемый СВЕРХ суммы "на руки" (гросс-ап: net = gross*0.87)
+  grossTotal: number; // netTotal + ndfl — полная стоимость ФОТ с учётом налога
+}
+
+/** НДФЛ 13% сверху суммы "на руки" (netAmount — это net, уже без налога): ndfl = net * 13/87, gross = net + ndfl = net/0.87. */
+export function computeNdflOnTop(netAmount: number): number {
+  return Math.round((netAmount * 13) / 87);
+}
+
+export function computeSalaryOverview(): SalaryOverview {
+  const staff = listStaffDirectory();
+  const rows: StaffSalaryOverview[] = staff.map((s) => {
+    const shifts = listShiftPayrollForStaff(s.id);
+    const shiftsTotal = shifts.reduce((sum, sh) => sum + sh.salary, 0);
+    const fixedAccruals = listFixedAccrualsForStaff(s.id);
+    const fixedAccrualsTotal = fixedAccruals.reduce((sum, f) => sum + f.amount, 0);
+    const adjustments = listAdjustmentsForStaff(s.id);
+    const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
+    const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
+    const netTotal = shiftsTotal + fixedAccrualsTotal + bonuses - fines;
+    return { staffId: s.id, name: s.name, photoUrl: s.photoUrl, shifts, shiftsTotal, fixedAccruals, fixedAccrualsTotal, fines, bonuses, netTotal };
+  });
+  const netTotal = rows.reduce((sum, r) => sum + r.netTotal, 0);
+  const ndfl = computeNdflOnTop(netTotal);
+  return { staff: rows, netTotal, ndfl, grossTotal: netTotal + ndfl };
 }
 
 // --- Зарплатные периоды (см. обсуждение с Никитой 11.10.2026) ---

@@ -148,3 +148,88 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
     ),
   );
 }
+
+interface StaffInviteEvent {
+  id: string;
+  fullName: string;
+  phone: string | null;
+  telegramId: string | null;
+  /** Проставляет итог обработки приглашения (ссылка/ошибка) в saff_invites. */
+  markSent: (inviteLink: string) => Promise<void>;
+  markFailed: (error: string) => Promise<void>;
+}
+
+/**
+ * Подписывается на новые заявки на приглашение сотрудника (кнопка
+ * "Пригласить" в разделе "Сотрудники" у руководителя, см.
+ * supabase/migrations/0012_salary_screen.sql и createStaffInvite в
+ * apps/miniapp/src/data/repo.ts). onInvite сам решает, как создать
+ * инвайт-ссылку (нужны права администратора бота в рабочем чате) — здесь
+ * только доставка события и запись результата обратно в staff_invites.
+ */
+export function watchStaffInvites(onInvite: (event: StaffInviteEvent) => void | Promise<void>) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  resubscribable("staff_invites", () =>
+    supabase.channel(`staff_invites_inserts_${Date.now()}`).on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "staff_invites" },
+      async (payload) => {
+        const row = payload.new as { id: string; full_name: string; phone: string | null; telegram_id: string | null; status: string };
+        if (row.status !== "pending") return;
+        try {
+          await onInvite({
+            id: row.id,
+            fullName: row.full_name,
+            phone: row.phone,
+            telegramId: row.telegram_id,
+            markSent: async (inviteLink: string) => {
+              await supabase.from("staff_invites").update({ status: "sent", invite_link: inviteLink, handled_at: new Date().toISOString() }).eq("id", row.id);
+            },
+            markFailed: async (error: string) => {
+              await supabase.from("staff_invites").update({ status: "failed", error, handled_at: new Date().toISOString() }).eq("id", row.id);
+            },
+          });
+        } catch (err) {
+          console.error("Ошибка при обработке приглашения сотрудника:", err);
+          await supabase.from("staff_invites").update({ status: "failed", error: String(err), handled_at: new Date().toISOString() }).eq("id", row.id);
+        }
+      },
+    ),
+  );
+}
+
+interface StaffArchivedEvent {
+  staffId: string;
+  name: string;
+  telegramId: number | null;
+}
+
+/**
+ * Подписывается на архивацию сотрудника (кнопка "Удалить" в карточке
+ * сотрудника у руководителя — помечает staff.archived=true, саму строку и
+ * историю начислений не трогает, см. 0012_salary_screen.sql). onArchived
+ * должен вывести человека из рабочих чатов; отключение ПИН-кода на
+ * терминале Quick Resto бот сделать не может (нет такого API) — это
+ * остаётся ручным шагом для руководителя.
+ */
+export function watchStaffArchived(onArchived: (event: StaffArchivedEvent) => void | Promise<void>) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  resubscribable("staff_archived", () =>
+    supabase.channel(`staff_archived_updates_${Date.now()}`).on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "staff" },
+      async (payload) => {
+        const before = payload.old as { archived?: boolean };
+        const after = payload.new as { id: string; name: string; telegram_id: number | null; archived?: boolean };
+        if (before.archived || !after.archived) return; // интересует только переход false -> true
+        try {
+          await onArchived({ staffId: after.id, name: after.name, telegramId: after.telegram_id });
+        } catch (err) {
+          console.error("Ошибка при обработке архивации сотрудника:", err);
+        }
+      },
+    ),
+  );
+}
