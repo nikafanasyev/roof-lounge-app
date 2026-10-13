@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
 import { watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
-import { fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
+import { fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -58,6 +58,33 @@ bot.command("revenue", async (ctx) => {
   }
 });
 
+// Превращает результат processScheduledDate/manuallyAccrueDate в человеко-
+// читаемое русское сообщение — раньше /accrue и кнопка пересчёта в миниаппе
+// всегда отвечали обобщённым "Готово", даже если на самом деле ничего не
+// начислилось (см. разбор с Никитой 13.10.2026: 11.10 и 12.10 "Готово"
+// пришло, а начисления не было). Теперь каждая ветка processScheduledDate
+// возвращает статус, и здесь он разворачивается в точный текст с причиной.
+function describeAccrueResult(result: ProcessScheduledDateResult, dateLabel: string): { ok: boolean; text: string } {
+  switch (result.status) {
+    case "no_schedule":
+      return { ok: false, text: `На ${dateLabel} график не выставлен — сначала внесите его в «Руководитель» → «График», затем повторите.` };
+    case "already_handled":
+      return { ok: true, text: `За ${dateLabel} уже всё начислено ранее — повторное начисление не требуется (см. «Руководитель» → «Зарплата»).` };
+    case "read_error":
+      return { ok: false, text: `Не удалось прочитать график на ${dateLabel} из базы: ${result.error}` };
+    case "revenue_fetch_failed":
+      return { ok: false, text: `Не удалось получить выручку из Quick Resto за ${dateLabel}: ${result.error}` };
+    case "employees_fetch_failed":
+      return { ok: false, text: `Не удалось получить список сотрудников из Quick Resto для сверки за ${dateLabel}: ${result.error}` };
+    case "write_failed":
+      return { ok: false, text: `Начисление за ${dateLabel} не записалось в базу: ${result.errors.join("; ")}` };
+    case "deferred":
+      return { ok: true, text: `За ${dateLabel} начисление отложено на сверку (${result.roles.join(", ")}) — см. «Руководитель» → «Проблемы».` };
+    case "accrued":
+      return { ok: true, text: `Начислено за ${dateLabel} (${result.roles.join(", ")}) — см. «Руководитель» → «Зарплата».` };
+  }
+}
+
 // Ручной бэкфилл начисления ЗП за дату, если график внесли задним числом
 // больше чем на 7 дней назад — дальше этого окна ежедневное задание
 // (scheduleDailyPayrollJob) само уже не пересматривает. Для свежих дат (до
@@ -76,18 +103,18 @@ bot.command("accrue", async (ctx) => {
   const [, dd, mm, yyyy] = parsed;
   const dateIso = `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
   await ctx.reply(`Начисляю ЗП за ${dd}.${mm}.${yyyy}...`);
+  const dateLabel = `${dd}.${mm}.${yyyy}`;
   try {
-    await manuallyAccrueDate(
+    const result = await manuallyAccrueDate(
       dateIso,
       async () => {}, // onIssue — актуально только при reconcile:true, здесь не используется
-      async (missingDateIso) => {
-        await ctx.reply(`На ${missingDateIso} по-прежнему нет графика — сначала внесите его в «Руководитель» → «График», затем повторите /accrue.`);
-      },
+      async () => {}, // onMissingSchedule — статус no_schedule ниже даёт то же самое сообщение
     );
-    await ctx.reply("Готово — если график на эту дату был, ЗП начислена (см. «Руководитель» → «Зарплата»).");
+    const { text } = describeAccrueResult(result, dateLabel);
+    await ctx.reply(text);
   } catch (err) {
     console.error("Quick Resto: /accrue ошибка:", err);
-    await ctx.reply("Не удалось начислить — см. логи бота.");
+    await ctx.reply(`Не удалось начислить за ${dateLabel} — см. логи бота. (${String(err)})`);
   }
 });
 
@@ -193,24 +220,19 @@ ${link.invite_link}`,
     const notifyChatId = env.QR_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
     watchPayrollRecalcRequests(async (req) => {
       const dateLabel = new Date(`${req.date}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
-      let missing = false;
       try {
-        await manuallyAccrueDate(
+        const result = await manuallyAccrueDate(
           req.date,
           async () => {}, // onIssue — актуально только при reconcile:true
-          async () => {
-            missing = true;
-          },
+          async () => {}, // onMissingSchedule — статус no_schedule ниже даёт то же самое сообщение
         );
-        const result = missing
-          ? `На ${dateLabel} график так и не выставлен — сначала назначьте бар/кальяны в «Руководитель» → «График».`
-          : `Начислено за ${dateLabel} (см. «Руководитель» → «Зарплата»).`;
-        await req.markDone(result);
-        if (notifyChatId) await bot.api.sendMessage(notifyChatId, `${missing ? "⚠️" : "✅"} Пересчёт ЗП за ${dateLabel}: ${result}`);
+        const { ok, text } = describeAccrueResult(result, dateLabel);
+        await req.markDone(text);
+        if (notifyChatId) await bot.api.sendMessage(notifyChatId, `${ok ? "✅" : "⚠️"} Пересчёт ЗП за ${dateLabel}: ${text}`);
       } catch (err) {
         console.error("Quick Resto: не удалось выполнить пересчёт ЗП по запросу из миниаппа:", err);
         await req.markFailed(String(err));
-        if (notifyChatId) await bot.api.sendMessage(notifyChatId, `⚠️ Не удалось пересчитать ЗП за ${dateLabel} — см. логи бота.`);
+        if (notifyChatId) await bot.api.sendMessage(notifyChatId, `⚠️ Не удалось пересчитать ЗП за ${dateLabel} — см. логи бота. (${String(err)})`);
       }
     });
     console.log("Слушаю payroll_recalc_requests через Supabase Realtime — пересчёт ЗП из миниаппа включён.");

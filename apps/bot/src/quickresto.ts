@@ -475,7 +475,7 @@ async function writeShiftPayrollForRole(
   role: "bar" | "hookah",
   revenue: number,
   isoDate: string,
-) {
+): Promise<{ ok: true } | { ok: false; error: string }> {
   let model = await fetchStaffSalaryModel(supabase, staffId);
   if (!model) model = DEFAULT_SALARY_MODEL; // 8,5% от общей выручки — дефолт для обеих ролей, см. миграцию 0004
   const salary = computeSalary(model, revenue);
@@ -484,12 +484,18 @@ async function writeShiftPayrollForRole(
     .from("shift_payroll")
     .insert({ staff_id: staffId, shift_id: shiftRowId, role, date: isoDate, revenue, salary });
   if (error) {
+    // Раньше ошибка записи только логировалась и терялась — вызывающий код
+    // (processScheduledDate) считал дату обработанной, даже если начисление
+    // по факту не записалось (см. обсуждение с Никитой 13.10.2026: бот
+    // отвечал "Готово", а начисления не было). Теперь ошибка возвращается
+    // наверх и попадает в ответ /accrue и кнопки "Начислить ЗП за день".
     console.error(`Quick Resto: не удалось записать начисление (${role}):`, error.message);
-  } else {
-    console.log(
-      `Quick Resto: начислено ${role === "hookah" ? "кальяны" : "бар/кухня"} — ${salary} ₽ (выручка ${Math.round(revenue)} ₽) за ${isoDate}, staff=${staffId}`,
-    );
+    return { ok: false, error: error.message };
   }
+  console.log(
+    `Quick Resto: начислено ${role === "hookah" ? "кальяны" : "бар/кухня"} — ${salary} ₽ (выручка ${Math.round(revenue)} ₽) за ${isoDate}, staff=${staffId}`,
+  );
+  return { ok: true };
 }
 
 // --- Сверка графика с Quick Resto (см. supabase/migrations/0005_schedule_payroll_issues.sql) ---
@@ -606,25 +612,47 @@ async function notifyMissingScheduleOnce(
   await onMissingSchedule(dateIso);
 }
 
+export type ProcessScheduledDateResult =
+  | { status: "read_error"; error: string }
+  | { status: "no_schedule" }
+  | { status: "already_handled" } // график есть, но по всем ролям уже что-то записано (начисление или расхождение) ранее
+  | { status: "revenue_fetch_failed"; error: string }
+  | { status: "employees_fetch_failed"; error: string }
+  | { status: "accrued"; roles: string[] } // reconcile:false — начислено по этим ролям
+  | { status: "deferred"; roles: string[] } // reconcile:true — расхождение, начисление отложено в payroll_issues
+  | { status: "write_failed"; errors: string[] }; // начисление не записалось (ошибка Supabase) — раньше терялось молча
+
+/**
+ * Возвращает структурированный результат (см. ProcessScheduledDateResult) —
+ * раньше функция в половине случаев молча завершалась без начисления И без
+ * сигнала об этом вызывающему коду: /accrue и кнопка "Начислить ЗП за день"
+ * в ответ всегда писали "Готово", даже если на самом деле ничего не
+ * произошло (не смогли прочитать график, не получили выручку из Quick
+ * Resto, не смогли записать строку в shift_payroll). См. обсуждение с
+ * Никитой 13.10.2026: "а начисления нет... кнопка начисления нужна".
+ */
 async function processScheduledDate(
   supabase: SupabaseClient,
   onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
   onMissingSchedule: (dateIso: string) => void | Promise<void>,
   dateIso: string,
   reconcile: boolean,
-) {
+): Promise<ProcessScheduledDateResult> {
   const { data: scheduleRows, error } = await supabase.from("schedule_entries").select("staff_id, role").eq("date", dateIso);
-  if (error) return console.error(`Quick Resto: не удалось прочитать график на ${dateIso}:`, error.message);
+  if (error) {
+    console.error(`Quick Resto: не удалось прочитать график на ${dateIso}:`, error.message);
+    return { status: "read_error", error: error.message };
+  }
   if (!scheduleRows?.length) {
     await notifyMissingScheduleOnce(supabase, onMissingSchedule, dateIso);
-    return;
+    return { status: "no_schedule" };
   }
 
   const pendingRoles: { staff_id: string; role: "bar" | "hookah" }[] = [];
   for (const row of scheduleRows as { staff_id: string; role: "bar" | "hookah" }[]) {
     if (!(await alreadyHandled(supabase, dateIso, row.role))) pendingRoles.push(row);
   }
-  if (!pendingRoles.length) return; // всё по этой дате уже обработано (начислено или отложено ранее)
+  if (!pendingRoles.length) return { status: "already_handled" };
 
   // Полдень МСК того дня — однозначно попадает в нужный бизнес-день независимо
   // от того, в какой момент по UTC выполняется задание.
@@ -635,16 +663,21 @@ async function processScheduledDate(
     split = await fetchRevenueSplitForDate(middayMsk);
   } catch (err) {
     console.error(`Quick Resto: не удалось получить выручку за ${dateIso}:`, err);
-    return;
+    return { status: "revenue_fetch_failed", error: String(err) };
   }
 
   if (!reconcile) {
     // Начисление теперь считается от общей выручки заведения (не от
     // кальянной/барной по отдельности) — см. DEFAULT_SALARY_MODEL выше.
+    const accruedRoles: string[] = [];
+    const writeErrors: string[] = [];
     for (const { staff_id, role } of pendingRoles) {
-      await writeShiftPayrollForRole(supabase, null, staff_id, role, split.total, dateIso);
+      const result = await writeShiftPayrollForRole(supabase, null, staff_id, role, split.total, dateIso);
+      if (result.ok) accruedRoles.push(role);
+      else writeErrors.push(`${role}: ${result.error}`);
     }
-    return;
+    if (writeErrors.length) return { status: "write_failed", errors: writeErrors };
+    return { status: "accrued", roles: accruedRoles };
   }
 
   let employees: QuickRestoEmployee[];
@@ -652,20 +685,29 @@ async function processScheduledDate(
     employees = await fetchEmployees();
   } catch (err) {
     console.error(`Quick Resto: не удалось получить сотрудников для сверки графика на ${dateIso}:`, err);
-    return;
+    return { status: "employees_fetch_failed", error: String(err) };
   }
 
   const { sinceMs, tillMs } = businessDayRangeMs(middayMsk);
   const workedStaffIds = await resolveActualWorkedStaffIds(supabase, employees, sinceMs, tillMs);
 
+  const accruedRoles: string[] = [];
+  const deferredRoles: string[] = [];
+  const writeErrors: string[] = [];
   for (const { staff_id, role } of pendingRoles) {
     const revenue = split.total;
     if (workedStaffIds.has(staff_id)) {
-      await writeShiftPayrollForRole(supabase, null, staff_id, role, revenue, dateIso);
+      const result = await writeShiftPayrollForRole(supabase, null, staff_id, role, revenue, dateIso);
+      if (result.ok) accruedRoles.push(role);
+      else writeErrors.push(`${role}: ${result.error}`);
     } else {
       await writePayrollIssue(supabase, onIssue, dateIso, role, staff_id, [...workedStaffIds], revenue);
+      deferredRoles.push(role);
     }
   }
+  if (writeErrors.length) return { status: "write_failed", errors: writeErrors };
+  if (deferredRoles.length) return { status: "deferred", roles: deferredRoles };
+  return { status: "accrued", roles: accruedRoles };
 }
 
 function mskDateIso(offsetDays: number): string {
@@ -754,9 +796,9 @@ export async function manuallyAccrueDate(
   dateIso: string,
   onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
   onMissingSchedule: (dateIso: string) => void | Promise<void>,
-) {
+): Promise<ProcessScheduledDateResult> {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-  await processScheduledDate(supabase, onIssue, onMissingSchedule, dateIso, false);
+  return processScheduledDate(supabase, onIssue, onMissingSchedule, dateIso, false);
 }
 
 async function fetchEmployees(): Promise<QuickRestoEmployee[]> {
