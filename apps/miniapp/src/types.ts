@@ -221,6 +221,35 @@ export interface StaffProfile {
   hiredAt: string; // ISO-дата трудоустройства, отсюда считается выслуга лет
   salaryModel: SalaryModel;
   role?: StaffRole; // основная зона ответственности на смене (бар/кальяны), для карточки в разделе "Сотрудники" у руководителя
+  telegramId?: number; // для вывода из рабочего чата при увольнении (см. apps/bot/src/notify.ts watchStaffArchived)
+  archived?: boolean; // "уволен" — сотрудник скрыт из списков и выбора в графике, но вся история ЗП сохраняется (см. 0012_salary_screen.sql)
+}
+
+// Фиксированные начисления вне сменной сетки — не привязаны к выручке
+// конкретной смены (например, доплата руководителю раз в 2 недели). Экран
+// "Зарплата" показывает их отдельным блоком от начислений по сменам.
+export type FixedAccrualCadence = "weekly" | "biweekly" | "monthly";
+
+export interface FixedAccrual {
+  id: string;
+  staffId: string;
+  amount: number;
+  cadence: FixedAccrualCadence;
+  label?: string;
+  active: boolean;
+}
+
+export type StaffInviteStatus = "pending" | "sent" | "failed";
+
+export interface StaffInvite {
+  id: string;
+  fullName: string;
+  phone?: string;
+  telegramId?: string;
+  status: StaffInviteStatus;
+  inviteLink?: string;
+  error?: string;
+  createdAt: string;
 }
 
 export interface ShiftPayrollEntry {

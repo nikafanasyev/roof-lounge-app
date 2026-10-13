@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
-import { watchServiceCalls, watchShiftPhotos } from "./notify";
-import { fetchRevenueSplitForDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
+import { watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
+import { fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -58,6 +58,39 @@ bot.command("revenue", async (ctx) => {
   }
 });
 
+// Ручной бэкфилл начисления ЗП за дату, если график внесли задним числом
+// больше чем на 7 дней назад — дальше этого окна ежедневное задание
+// (scheduleDailyPayrollJob) само уже не пересматривает. Для свежих дат (до
+// недели) бэкфилл не нужен — следующий же ночной прогон подхватит сам.
+bot.command("accrue", async (ctx) => {
+  if (!env.QR_LOGIN || !env.QR_PASSWORD || !env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    await ctx.reply("Интеграция с Quick Resto/Supabase не настроена.");
+    return;
+  }
+  const arg = ctx.match?.toString().trim();
+  const parsed = arg?.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (!parsed) {
+    await ctx.reply("Формат: /accrue ДД.ММ.ГГГГ, например /accrue 02.09.2026 — начислит ЗП за эту дату по уже внесённому графику.");
+    return;
+  }
+  const [, dd, mm, yyyy] = parsed;
+  const dateIso = `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+  await ctx.reply(`Начисляю ЗП за ${dd}.${mm}.${yyyy}...`);
+  try {
+    await manuallyAccrueDate(
+      dateIso,
+      async () => {}, // onIssue — актуально только при reconcile:true, здесь не используется
+      async (missingDateIso) => {
+        await ctx.reply(`На ${missingDateIso} по-прежнему нет графика — сначала внесите его в «Руководитель» → «График», затем повторите /accrue.`);
+      },
+    );
+    await ctx.reply("Готово — если график на эту дату был, ЗП начислена (см. «Руководитель» → «Зарплата»).");
+  } catch (err) {
+    console.error("Quick Resto: /accrue ошибка:", err);
+    await ctx.reply("Не удалось начислить — см. логи бота.");
+  }
+});
+
 bot.catch((err) => {
   console.error("Необработанная ошибка бота:", err);
 });
@@ -81,6 +114,75 @@ async function main() {
     console.log("Слушаю service_calls через Supabase Realtime — уведомления персоналу включены.");
   } else {
     console.log("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / STAFF_CHAT_ID не заданы — уведомления о вызовах выключены.");
+  }
+
+  // Приглашение сотрудника в рабочие чаты (кнопка "Пригласить" в разделе
+  // "Сотрудники" у руководителя — см. supabase/migrations/0012_salary_screen.sql
+  // и watchStaffInvites в notify.ts). Сейчас единственный рабочий чат —
+  // STAFF_CHAT_ID; когда заведут отдельные чаты под бар/кальяны/кухню, сюда
+  // нужно будет добавить создание нескольких ссылок. Боту нужны права
+  // администратора с "Приглашение пользователей" в этом чате — без них
+  // createChatInviteLink вернёт ошибку, и заявка уйдёт в status=failed.
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.STAFF_CHAT_ID) {
+    watchStaffInvites(async (invite) => {
+      try {
+        const link = await bot.api.createChatInviteLink(env.STAFF_CHAT_ID, {
+          name: invite.fullName.slice(0, 32),
+          member_limit: 1,
+        });
+        await invite.markSent(link.invite_link);
+        const contactLine = [invite.phone ? `тел. ${invite.phone}` : null, invite.telegramId ? `Telegram ID ${invite.telegramId}` : null]
+          .filter(Boolean)
+          .join(" · ");
+        await bot.api.sendMessage(
+          env.STAFF_CHAT_ID,
+          `👋 Приглашение для нового сотрудника
+${invite.fullName}${contactLine ? `
+${contactLine}` : ""}
+
+` +
+            `Ссылка (на одного человека, перешлите сотруднику лично — бот не может написать ему первым, пока тот не нажал /start боту):
+${link.invite_link}`,
+        );
+      } catch (err) {
+        console.error("Quick Resto: не удалось создать инвайт-ссылку:", err);
+        await invite.markFailed(String(err));
+        await bot.api.sendMessage(
+          env.STAFF_CHAT_ID,
+          `⚠️ Не удалось создать ссылку-приглашение для ${invite.fullName} — проверьте, что бот админ чата с правом "Приглашение пользователей по ссылке".`,
+        );
+      }
+    });
+    console.log("Слушаю staff_invites через Supabase Realtime — приглашения сотрудников включены.");
+  }
+
+  // Архивация сотрудника (кнопка "Удалить" в карточке сотрудника) — выводим
+  // его из рабочего чата (кик = бан + немедленный разбан, чтобы человек мог
+  // при желании вступить заново по новой ссылке, а не был забанен навсегда).
+  // ПИН-код на терминале Quick Resto бот отключить не может (нет такого API
+  // в текущей интеграции, см. quickresto.ts) — это остаётся ручным шагом.
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.STAFF_CHAT_ID) {
+    watchStaffArchived(async (archived) => {
+      let kicked = false;
+      if (archived.telegramId) {
+        try {
+          await bot.api.banChatMember(env.STAFF_CHAT_ID, archived.telegramId);
+          await bot.api.unbanChatMember(env.STAFF_CHAT_ID, archived.telegramId, { only_if_banned: true });
+          kicked = true;
+        } catch (err) {
+          console.error(`Quick Resto: не удалось вывести ${archived.name} из чата:`, err);
+        }
+      }
+      await bot.api.sendMessage(
+        env.STAFF_CHAT_ID,
+        `🗂 Сотрудник ${archived.name} удалён из раздела «Сотрудники».
+` +
+          `${kicked ? "Из рабочего чата выведен автоматически." : "Из рабочего чата НЕ выведен (нет Telegram ID или не хватило прав у бота) — сделайте это вручную."}
+` +
+          `Не забудьте отключить его ПИН-код на терминале Quick Resto — бот это сделать не может.`,
+      );
+    });
+    console.log("Слушаю архивацию сотрудников через Supabase Realtime — автоматический вывод из чата включён.");
   }
 
   // Фото открытия/закрытия смены: пересылаем руководителю (или в отдельный чат,
@@ -137,6 +239,20 @@ async function main() {
           `По графику: ${issue.expectedStaffName}\n` +
           `По Quick Resto реально работал: ${actual}\n\n` +
           `Проверьте и начислите вручную: «Руководитель» → «График» → «Начислить вручную».`;
+        if (qrChatId) await bot.api.sendMessage(qrChatId, text);
+      },
+      async (missingDateIso) => {
+        // Раньше в этом случае бот молча ничего не делал — ни начисления, ни
+        // уведомления (см. обсуждение с Никитой 13.10.2026). Как только
+        // график на эту дату внесут задним числом, следующий ночной прогон
+        // (смотрит последние 7 дней) сам всё начислит — отдельно нажимать
+        // ничего не нужно, если не прошло больше недели.
+        const [y, m, d] = missingDateIso.split("-");
+        const dateLabel = new Date(`${missingDateIso}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+        const text =
+          `⚠️ График на ${dateLabel} не выставлен — ЗП за этот день не начислена.\n\n` +
+          `Внесите график задним числом: «Руководитель» → «График» → выберите ${dateLabel} → назначьте бар/кальяны. ` +
+          `В течение недели бот подхватит и начислит сам; если дата старше недели — после внесения графика пришлите боту «/accrue ${d}.${m}.${y}».`;
         if (qrChatId) await bot.api.sendMessage(qrChatId, text);
       },
       { reconcile: false },
