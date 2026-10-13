@@ -141,7 +141,7 @@ function RoleShell() {
         <Route path="/employee/mix/:mixId" element={<MixView />} />
         <Route path="/employee/shift" element={<Shift />} />
         <Route path="/employee/calls" element={<ServiceCalls />} />
-        <Route path="/employee/problems" element={<Problems />} />
+        <Route path="/employee/problems" element={<Problems backTo="/employee/more" />} />
         <Route path="/employee/tasks" element={<Tasks />} />
         <Route path="/employee/more" element={<More />} />
         <Route path="/employee/profile" element={<Profile />} />

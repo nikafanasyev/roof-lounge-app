@@ -2,6 +2,7 @@
 // штрафы/премии должен только руководитель. Вернуться к этому, когда появится
 // реальное разделение прав по ролям.
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { addAdjustment, adjustmentsStore, getStaffProfile, listAdjustments, listStaffDirectory } from "@/data/repo";
 import type { AdjustmentType } from "@/types";
@@ -34,6 +35,9 @@ export default function Adjustments() {
 
   return (
     <div className="screen">
+      <Link to="/employee/more" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+        ← Ещё
+      </Link>
       <h1>Штрафы и премии</h1>
 
       {entries.length === 0 && <div className="list-empty">Записей пока нет</div>}

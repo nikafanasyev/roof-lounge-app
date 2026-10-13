@@ -8,6 +8,9 @@ export default function Knowledge() {
 
   return (
     <div className="screen">
+      <Link to="/employee/more" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+        ← Ещё
+      </Link>
       <h1>База знаний</h1>
       {groups.map((group) => (
         <div key={group.category} style={{ marginBottom: 16 }}>

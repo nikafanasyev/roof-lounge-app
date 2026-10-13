@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { addTask, listTasks, tasksStore, toggleTask } from "@/data/repo";
 
@@ -18,6 +19,9 @@ export default function Tasks() {
 
   return (
     <div className="screen">
+      <Link to="/employee/more" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+        ← Ещё
+      </Link>
       <h1>Задачи</h1>
 
       <div className="card">

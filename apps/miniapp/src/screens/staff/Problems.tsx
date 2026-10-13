@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { daysOpen, listProblems, problemsStore, reportProblem, resolveProblem } from "@/data/repo";
 import type { ProblemCategory } from "@/types";
@@ -15,7 +16,11 @@ const CATEGORY_LABELS: Record<ProblemCategory, string> = {
 
 const CURRENT_STAFF_NAME = "Никита Афанасьев";
 
-export default function Problems() {
+// Этот экран открывается двумя путями: у руководителя это отдельная вкладка
+// нижнего меню (там "назад" не нужен — это и так верхний уровень), а у
+// сотрудника — пункт из "Ещё" (нужна ссылка назад). См. App.tsx — на
+// /employee/problems передаём backTo, на /manager/problems не передаём.
+export default function Problems({ backTo }: { backTo?: string }) {
   useStore(problemsStore);
   const problems = listProblems();
   const [showForm, setShowForm] = useState(false);
@@ -31,7 +36,12 @@ export default function Problems() {
 
   return (
     <div className="screen">
-      <div className="card-row">
+      {backTo && (
+        <Link to={backTo} className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+          ← Ещё
+        </Link>
+      )}
+      <div className="card-row" style={{ marginTop: backTo ? 12 : 0 }}>
         <h1 style={{ marginBottom: 0 }}>Проблемы</h1>
         <button className="btn ghost" onClick={() => setShowForm((s) => !s)}>
           {showForm ? "Отмена" : "+ Сообщить"}
