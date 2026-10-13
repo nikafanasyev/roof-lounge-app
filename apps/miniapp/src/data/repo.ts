@@ -1838,6 +1838,64 @@ export function computeSalaryPeriodBreakdown(): SalaryPeriodTotal[] {
     });
 }
 
+export interface StaffSalaryPeriodOverview {
+  staffId: string;
+  name: string;
+  photoUrl?: string;
+  shifts: ShiftPayrollEntry[]; // смены, попавшие в этот период
+  shiftsTotal: number;
+  adjustments: Adjustment[]; // штрафы/премии, попавшие в этот период (по дате)
+  fines: number;
+  bonuses: number;
+  fixedAccruals: FixedAccrual[]; // показываем только в текущем (ещё не закрытом) периоде — см. комментарий ниже
+  fixedAccrualsTotal: number;
+  netTotal: number;
+}
+
+export interface SalaryPeriodOverview {
+  period: PayrollPeriod;
+  staff: StaffSalaryPeriodOverview[];
+  netTotal: number;
+  ndfl: number;
+  grossTotal: number;
+}
+
+/**
+ * Детализация одного зарплатного периода (экран "Зарплата" → клик по
+ * периоду) — то же самое, что попадает в Excel-ведомость за этот период, но
+ * прямо в интерфейсе. periodStartIso — любая дата внутри периода (обычно
+ * сам period.start, см. SalaryPeriodTotal.key) — getPayrollPeriodForDate сам
+ * находит границы периода, которому она принадлежит.
+ *
+ * Фиксированные начисления не привязаны к дате (см. computeSalaryPeriodBreakdown
+ * выше) — условно относим их к текущему периоду (тому, что содержит
+ * сегодняшний день), как к ближайшей выплате, а не ко всем сразу.
+ */
+export function computeSalaryOverviewForPeriod(periodStartIso: string): SalaryPeriodOverview {
+  const period = getPayrollPeriodForDate(periodStartIso);
+  const isCurrentPeriod = period.start === getPayrollPeriodForDate(new Date().toISOString().slice(0, 10)).start;
+  const inRange = (iso: string) => {
+    const d = iso.slice(0, 10);
+    return d >= period.start && d <= period.end;
+  };
+
+  const staff: StaffSalaryPeriodOverview[] = listStaffDirectory().map((s) => {
+    const shifts = listShiftPayrollForStaff(s.id).filter((sh) => inRange(sh.date));
+    const shiftsTotal = shifts.reduce((sum, sh) => sum + sh.salary, 0);
+    const adjustments = listAdjustmentsForStaff(s.id).filter((a) => inRange(a.date));
+    const fines = adjustments.filter((a) => a.type === "fine").reduce((sum, a) => sum + a.amount, 0);
+    const bonuses = adjustments.filter((a) => a.type === "bonus").reduce((sum, a) => sum + a.amount, 0);
+    const fixedAccruals = isCurrentPeriod ? listFixedAccrualsForStaff(s.id) : [];
+    const fixedAccrualsTotal = fixedAccruals.reduce((sum, f) => sum + f.amount, 0);
+    const netTotal = shiftsTotal + fixedAccrualsTotal + bonuses - fines;
+    return { staffId: s.id, name: s.name, photoUrl: s.photoUrl, shifts, shiftsTotal, adjustments, fines, bonuses, fixedAccruals, fixedAccrualsTotal, netTotal };
+  });
+
+  const netTotal = staff.reduce((sum, r) => sum + r.netTotal, 0);
+  const ndfl = computeNdflOnTop(netTotal);
+  return { period, staff, netTotal, ndfl, grossTotal: netTotal + ndfl };
+}
+
 export function computeSalaryOverview(): SalaryOverview {
   const staff = listStaffDirectory();
   const rows: StaffSalaryOverview[] = staff.map((s) => {
