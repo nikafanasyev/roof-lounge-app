@@ -1,14 +1,14 @@
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import {
-  averageReactionMinutes,
-  daysOpen,
-  problemsStore,
-  serviceCallsStore,
-  shiftStore,
-  tasksStore,
-} from "@/data/repo";
+import { averageReactionMinutes, problemsStore, serviceCallsStore, shiftStore, tasksStore } from "@/data/repo";
 
+// Блок "Автоматические предупреждения" раньше дублировал то, что уже видно
+// в плитках выше (открытые вызовы/проблемы) — на "Сводке" это лишняя,
+// отвлекающая информация при каждой загрузке экрана (см. обсуждение с
+// Никитой 14.10.2026). Сами же предупреждения (чек-лист не открыт,
+// просроченные проблемы, вызов без реакции) по смыслу ближе к разделам
+// "Проблемы"/"Вызовы" — здесь не убираем логику целиком, просто не рисуем
+// список на "Сводке".
 export default function Summary() {
   const calls = useStore(serviceCallsStore);
   const problems = useStore(problemsStore);
@@ -17,16 +17,8 @@ export default function Summary() {
 
   const openCalls = calls.filter((c) => c.status === "open");
   const openProblems = problems.filter((p) => p.status !== "done");
-  const overdueProblems = openProblems.filter((p) => daysOpen(p.createdAt) >= 3);
   const openTasks = tasks.filter((t) => !t.done);
   const avgReaction = averageReactionMinutes();
-
-  const alerts: string[] = [];
-  if (shift.status === "closed" && !shift.closedAt) alerts.push("Чек-лист смены сегодня ещё не открывали");
-  overdueProblems.forEach((p) => alerts.push(`Проблема не решается ${daysOpen(p.createdAt)} дн.: «${p.description}»`));
-  if (openCalls.some((c) => Date.now() - new Date(c.createdAt).getTime() > 10 * 60000)) {
-    alerts.push("Есть вызов гостя без реакции больше 10 минут");
-  }
 
   return (
     <div className="screen">
@@ -58,14 +50,6 @@ export default function Summary() {
           {shift.status === "open" ? `Открыта${shift.openedBy ? ` · ${shift.openedBy}` : ""}` : "Закрыта"}
         </div>
       </div>
-
-      <h2>Автоматические предупреждения</h2>
-      {alerts.length === 0 && <div className="card muted">Всё под контролем — ничего не требует внимания</div>}
-      {alerts.map((a, i) => (
-        <div key={i} className="card" style={{ borderColor: "var(--warn)" }}>
-          ⚠️ {a}
-        </div>
-      ))}
     </div>
   );
 }
