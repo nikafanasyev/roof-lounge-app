@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, yearsOfService } from "@/data/repo";
 import { getTelegramUser } from "@/lib/telegram";
@@ -35,6 +36,9 @@ export default function Profile() {
 
   return (
     <div className="screen">
+      <Link to="/employee/more" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+        ← Ещё
+      </Link>
       <h1>Профиль</h1>
 
       <div className="card" style={{ display: "flex", gap: 14, alignItems: "center" }}>

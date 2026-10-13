@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { listMySchedule, scheduleStore } from "@/data/repo";
 import type { ScheduleEntry, StaffRole } from "@/types";
@@ -121,6 +122,9 @@ export default function Schedule() {
 
   return (
     <div className="screen">
+      <Link to="/employee/more" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+        ← Ещё
+      </Link>
       <h1>График смен</h1>
 
       <div className="tabs">
