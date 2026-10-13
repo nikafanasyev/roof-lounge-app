@@ -280,6 +280,13 @@ export interface Adjustment {
   amount: number; // ₽, всегда положительное число
   reason: string;
   date: string; // ISO-дата
+  // Удаление не жёсткое (DELETE), а пометка — запись остаётся для аудита
+  // (кто и почему отменил начисление), см. 0014_soft_delete_adjustments.sql.
+  // Удалённые записи не входят в расчёт ЗП (listAdjustmentsForStaff их
+  // отфильтровывает), но видны зачёркнутыми в "Штрафы".
+  deletedAt?: string;
+  deletedByName?: string;
+  deleteReason?: string;
 }
 
 // График теперь составляет руководитель заранее (кто на какой роли в какой

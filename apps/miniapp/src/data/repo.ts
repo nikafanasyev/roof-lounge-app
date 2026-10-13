@@ -431,23 +431,18 @@ async function loadTasks() {
 }
 
 async function loadStaffDirectory() {
-  // archived=false — уволенные сотрудники (см. archiveStaff ниже) не должны
-  // показываться в списке "Сотрудники" и в выборе при составлении графика,
-  // хотя вся их история начислений (shift_payroll/adjustments) остаётся как
-  // была — строка staff никогда физически не удаляется.
-  //
-  // Миграция 0012_salary_screen.sql (добавляет колонку archived) применяется
-  // в Supabase вручную, отдельно от деплоя кода (см. README) — если её ещё
-  // не выполнили, .eq("archived", false) упадёт с "column does not exist" и
-  // раньше это обнуляло ВЕСЬ список "Сотрудники" (а с ним и "Зарплата"),
-  // хотя до этой правки список загружался без проблем. Поэтому при такой
-  // ошибке откатываемся на запрос без фильтра — список сотрудников не должен
-  // пропадать из-за ещё не применённой миграции.
-  let { data, error } = await supabase!.from("staff").select("*").eq("archived", false);
-  if (error) {
-    logSyncError("loadStaffDirectory:archived", error);
-    ({ data, error } = await supabase!.from("staff").select("*"));
-  }
+  // Загружаем ВСЕХ сотрудников, включая уволенных (archived=true) — раньше
+  // фильтровали .eq("archived", false) прямо в запросе, из-за чего уволенный
+  // пропадал не только из выбора в графике (это и было целью), но и из имён
+  // (staffNameById) и из расчёта ЗП/штрафов везде, где используется
+  // listStaffDirectory() — его прошлые начисления и штрафы переставали
+  // резолвиться в имя ("сотрудник не найден") и выпадали из "Зарплата"/
+  // "Штрафы" целиком, хотя строки в shift_payroll/adjustments никуда не
+  // делись (см. жалобу Никиты 14.10.2026: "штрафы нужно хранить в штрафах
+  // тоже"). Теперь фильтрация "только активные" — на уровне UI
+  // (listActiveStaffDirectory ниже), только там, где нужен выбор "кому
+  // назначить смену/штраф", а не для истории/отчётов.
+  const { data, error } = await supabase!.from("staff").select("*");
   if (error) return logSyncError("loadStaffDirectory", error);
   for (const r of data ?? []) staffNameById.set(r.id, r.name);
   staffDirectoryStore.set(
@@ -546,6 +541,12 @@ async function loadAdjustments() {
       amount: Number(r.amount),
       reason: r.reason,
       date: r.date,
+      // Колонки появляются миграцией 0014_soft_delete_adjustments.sql — пока
+      // она не применена в Supabase, select("*") просто не вернёт их, и здесь
+      // будет undefined (запись ведёт себя как неудалённая) — не ломается.
+      deletedAt: r.deleted_at ?? undefined,
+      deletedByName: r.deleted_by_name ?? undefined,
+      deleteReason: r.delete_reason ?? undefined,
     })),
   );
 }
@@ -1476,6 +1477,16 @@ export function listStaffDirectory(): StaffProfile[] {
   return staffDirectoryStore.get();
 }
 
+/**
+ * Только действующие сотрудники (не уволенные) — для выбора "кому назначить
+ * смену" (график) или "кому начислить штраф/премию" (новая запись). Для
+ * истории/отчётов (Зарплата, Штрафы, экспорт, карточка сотрудника)
+ * используем listStaffDirectory() — там уволенные тоже должны быть видны.
+ */
+export function listActiveStaffDirectory(): StaffProfile[] {
+  return staffDirectoryStore.get().filter((s) => !s.archived);
+}
+
 export function getStaffProfileById(staffId: string): StaffProfile | undefined {
   return staffDirectoryStore.get().find((s) => s.id === staffId);
 }
@@ -1683,15 +1694,31 @@ export function listPayouts(): PayoutRecord[] {
   return listPayoutsForStaff(getStaffProfile().id);
 }
 
+// Штрафы/премии не привязаны к ролям — не считаются по "своему" отфильтрованному
+// начислению. listAdjustmentsForStaff исключает мягко удалённые (см.
+// deleteAdjustment) — они не должны влиять на расчёт ЗП, только оставаться
+// видны для аудита через listAllAdjustments.
 export function listAdjustmentsForStaff(staffId: string): Adjustment[] {
   return adjustmentsStore
     .get()
-    .filter((a) => a.staffId === staffId)
+    .filter((a) => a.staffId === staffId && !a.deletedAt)
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export function listAdjustments(): Adjustment[] {
   return listAdjustmentsForStaff(getStaffProfile().id);
+}
+
+/**
+ * Все штрафы/премии по ВСЕМ сотрудникам (включая мягко удалённые — для
+ * аудита, см. deleteAdjustment) — экран "Штрафы" у руководителя. Раньше там
+ * ошибочно использовался listAdjustments() (= только записи текущего
+ * вошедшего аккаунта) — поэтому штрафы, начисленные другим сотрудникам,
+ * фактически не было видно в "Штрафы" (см. жалобу Никиты 14.10.2026:
+ * "штрафы нужно хранить в штрафах тоже").
+ */
+export function listAllAdjustments(): Adjustment[] {
+  return adjustmentsStore.get().sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export function addAdjustment(type: AdjustmentType, amount: number, reason: string, staffId: string = getStaffProfile().id) {
@@ -1710,6 +1737,26 @@ export function addAdjustment(type: AdjustmentType, amount: number, reason: stri
       })
       .then(({ error }) => error && logSyncError("addAdjustment", error));
   }
+}
+
+/**
+ * "Удаление" штрафа/премии — не жёсткий DELETE, а пометка кто и почему
+ * отменил запись (см. 0014_soft_delete_adjustments.sql и запрос Никиты
+ * 14.10.2026: "у записей должна быть возможность удаления с комментарием и
+ * кто удалил запись"). Запись остаётся в списке (Fines.tsx рисует её
+ * зачёркнутой), но перестаёт учитываться в ЗП (listAdjustmentsForStaff её
+ * отфильтровывает).
+ */
+export function deleteAdjustment(id: string, reason: string) {
+  const deletedAt = new Date().toISOString();
+  const deletedByName = getStaffProfile().name;
+  adjustmentsStore.update((list) => list.map((a) => (a.id === id ? { ...a, deletedAt, deletedByName, deleteReason: reason } : a)));
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("adjustments")
+    .update({ deleted_at: deletedAt, deleted_by: getStaffProfile().id, deleted_by_name: deletedByName, delete_reason: reason })
+    .eq("id", id)
+    .then(({ error }) => error && logSyncError("deleteAdjustment", error));
 }
 
 export interface PayrollSummary {

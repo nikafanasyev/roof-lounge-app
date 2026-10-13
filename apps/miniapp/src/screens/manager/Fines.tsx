@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "@/data/useStore";
-import { addAdjustment, adjustmentsStore, listAdjustments, listStaffDirectory, staffDirectoryStore } from "@/data/repo";
+import { addAdjustment, adjustmentsStore, deleteAdjustment, listActiveStaffDirectory, listAllAdjustments, listStaffDirectory, staffDirectoryStore } from "@/data/repo";
 import type { AdjustmentType } from "@/types";
 
 function money(n: number): string {
@@ -19,15 +19,27 @@ function money(n: number): string {
 export default function Fines() {
   useStore(adjustmentsStore);
   useStore(staffDirectoryStore);
-  const entries = listAdjustments();
-  const staffList = listStaffDirectory();
-  const staffNameById = new Map(staffList.map((s) => [s.id, s.name]));
+  // Раньше здесь был listAdjustments() — он возвращает записи только
+  // текущего вошедшего аккаунта, поэтому штрафы/премии, начисленные другим
+  // сотрудникам, в этом списке фактически не появлялись (см. жалобу Никиты
+  // 14.10.2026: "штрафы нужно хранить в штрафах тоже"). listAllAdjustments()
+  // — все записи по всем сотрудникам, включая удалённые (показываем их
+  // зачёркнутыми, см. ниже).
+  const entries = listAllAdjustments();
+  // Для выбора "Кому" в форме — только действующие сотрудники (уволенному
+  // новый штраф не начислить), но для подписи уже существующих записей
+  // нужны ВСЕ (включая уволенных) — иначе после увольнения его старые
+  // штрафы показывали бы "сотрудник не найден".
+  const pickableStaff = listActiveStaffDirectory();
+  const staffNameById = new Map(listStaffDirectory().map((s) => [s.id, s.name]));
 
   const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState<AdjustmentType>("fine");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
-  const [staffId, setStaffId] = useState(staffList[0]?.id ?? "");
+  const [staffId, setStaffId] = useState(pickableStaff[0]?.id ?? "");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
 
   function submit() {
     const value = Number(amount);
@@ -36,6 +48,13 @@ export default function Fines() {
     setAmount("");
     setReason("");
     setShowForm(false);
+  }
+
+  function confirmDelete(id: string) {
+    if (!deleteReason.trim()) return;
+    deleteAdjustment(id, deleteReason.trim());
+    setDeletingId(null);
+    setDeleteReason("");
   }
 
   return (
@@ -63,7 +82,7 @@ export default function Fines() {
           </div>
           <div className="eyebrow">Кому</div>
           <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={{ marginBottom: 12 }}>
-            {staffList.map((s) => (
+            {pickableStaff.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
@@ -85,20 +104,70 @@ export default function Fines() {
       )}
 
       {entries.length === 0 && <div className="list-empty">Записей пока нет</div>}
-      {entries.map((a) => (
-        <div key={a.id} className="card card-row">
-          <div>
-            <div style={{ fontWeight: 700 }}>{staffNameById.get(a.staffId) ?? "сотрудник не найден"}</div>
-            <div className="muted" style={{ fontSize: 13 }}>
-              {a.reason} · {new Date(a.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}
+      {entries.map((a) => {
+        const isDeleted = Boolean(a.deletedAt);
+        return (
+          <div key={a.id} className="card" style={{ opacity: isDeleted ? 0.55 : 1 }}>
+            <div className="card-row">
+              <div>
+                <div style={{ fontWeight: 700, textDecoration: isDeleted ? "line-through" : "none" }}>
+                  {staffNameById.get(a.staffId) ?? "сотрудник не найден"}
+                </div>
+                <div className="muted" style={{ fontSize: 13, textDecoration: isDeleted ? "line-through" : "none" }}>
+                  {a.reason} · {new Date(a.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}
+                </div>
+                {isDeleted && (
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4, color: "var(--danger)" }}>
+                    Удалено: {a.deletedByName ?? "?"} — {a.deleteReason}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontWeight: 700, color: a.type === "bonus" ? "var(--good)" : "var(--danger)", textDecoration: isDeleted ? "line-through" : "none" }}>
+                {a.type === "bonus" ? "+" : "−"}
+                {money(a.amount)}
+              </span>
             </div>
+
+            {!isDeleted && deletingId !== a.id && (
+              <button className="btn secondary" style={{ marginTop: 10, padding: "6px 10px", fontSize: 13 }} onClick={() => setDeletingId(a.id)}>
+                Удалить запись
+              </button>
+            )}
+
+            {!isDeleted && deletingId === a.id && (
+              <div style={{ marginTop: 10 }}>
+                <input
+                  type="text"
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Причина удаления (обязательно)"
+                  style={{ marginBottom: 8 }}
+                />
+                <div className="btn-row">
+                  <button
+                    className="btn secondary"
+                    style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
+                    onClick={() => {
+                      setDeletingId(null);
+                      setDeleteReason("");
+                    }}
+                  >
+                    Отмена
+                  </button>
+                  <button
+                    className="btn primary"
+                    style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
+                    disabled={!deleteReason.trim()}
+                    onClick={() => confirmDelete(a.id)}
+                  >
+                    Подтвердить удаление
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-          <span style={{ fontWeight: 700, color: a.type === "bonus" ? "var(--good)" : "var(--danger)" }}>
-            {a.type === "bonus" ? "+" : "−"}
-            {money(a.amount)}
-          </span>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
