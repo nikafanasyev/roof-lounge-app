@@ -64,3 +64,15 @@ export function isCurrentUserManager(): boolean {
   if (!tgUser) return true;
   return MANAGER_TELEGRAM_IDS.has(String(tgUser.id));
 }
+
+/**
+ * Открыто ли приложение внутри настоящего Telegram-клиента (есть initData),
+ * в отличие от прямой ссылки в обычном браузере. См. обсуждение с Никитой
+ * 13.10.2026: в браузере — видно оба кабинета с переключателем (для теста),
+ * в Telegram — у каждого аккаунта закреплён ровно один кабинет, без
+ * переключателя (App.tsx RoleShell использует это вместе с
+ * isCurrentUserManager, чтобы решить, показывать ли переключатель).
+ */
+export function isInsideTelegramClient(): boolean {
+  return getTelegramUser() !== null;
+}
