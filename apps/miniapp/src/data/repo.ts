@@ -432,7 +432,19 @@ async function loadStaffDirectory() {
   // показываться в списке "Сотрудники" и в выборе при составлении графика,
   // хотя вся их история начислений (shift_payroll/adjustments) остаётся как
   // была — строка staff никогда физически не удаляется.
-  const { data, error } = await supabase!.from("staff").select("*").eq("archived", false);
+  //
+  // Миграция 0012_salary_screen.sql (добавляет колонку archived) применяется
+  // в Supabase вручную, отдельно от деплоя кода (см. README) — если её ещё
+  // не выполнили, .eq("archived", false) упадёт с "column does not exist" и
+  // раньше это обнуляло ВЕСЬ список "Сотрудники" (а с ним и "Зарплата"),
+  // хотя до этой правки список загружался без проблем. Поэтому при такой
+  // ошибке откатываемся на запрос без фильтра — список сотрудников не должен
+  // пропадать из-за ещё не применённой миграции.
+  let { data, error } = await supabase!.from("staff").select("*").eq("archived", false);
+  if (error) {
+    logSyncError("loadStaffDirectory:archived", error);
+    ({ data, error } = await supabase!.from("staff").select("*"));
+  }
   if (error) return logSyncError("loadStaffDirectory", error);
   for (const r of data ?? []) staffNameById.set(r.id, r.name);
   staffDirectoryStore.set(
