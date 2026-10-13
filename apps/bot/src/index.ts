@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { env } from "./env";
-import { watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
+import { watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
 import { fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
@@ -183,6 +183,37 @@ ${link.invite_link}`,
       );
     });
     console.log("Слушаю архивацию сотрудников через Supabase Realtime — автоматический вывод из чата включён.");
+  }
+
+  // Кнопка "Начислить ЗП за дату" в мини-аппе (см. supabase/migrations/0013_payroll_recalc.sql
+  // и notify.ts watchPayrollRecalcRequests) — тот же manuallyAccrueDate, что
+  // и команда /accrue, просто запущенный по запросу из интерфейса, а не из
+  // Telegram.
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.QR_LOGIN && env.QR_PASSWORD) {
+    const notifyChatId = env.QR_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
+    watchPayrollRecalcRequests(async (req) => {
+      const dateLabel = new Date(`${req.date}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+      let missing = false;
+      try {
+        await manuallyAccrueDate(
+          req.date,
+          async () => {}, // onIssue — актуально только при reconcile:true
+          async () => {
+            missing = true;
+          },
+        );
+        const result = missing
+          ? `На ${dateLabel} график так и не выставлен — сначала назначьте бар/кальяны в «Руководитель» → «График».`
+          : `Начислено за ${dateLabel} (см. «Руководитель» → «Зарплата»).`;
+        await req.markDone(result);
+        if (notifyChatId) await bot.api.sendMessage(notifyChatId, `${missing ? "⚠️" : "✅"} Пересчёт ЗП за ${dateLabel}: ${result}`);
+      } catch (err) {
+        console.error("Quick Resto: не удалось выполнить пересчёт ЗП по запросу из миниаппа:", err);
+        await req.markFailed(String(err));
+        if (notifyChatId) await bot.api.sendMessage(notifyChatId, `⚠️ Не удалось пересчитать ЗП за ${dateLabel} — см. логи бота.`);
+      }
+    });
+    console.log("Слушаю payroll_recalc_requests через Supabase Realtime — пересчёт ЗП из миниаппа включён.");
   }
 
   // Фото открытия/закрытия смены: пересылаем руководителю (или в отдельный чат,

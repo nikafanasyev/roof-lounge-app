@@ -3,13 +3,19 @@ import { useStore } from "@/data/useStore";
 import {
   adjustmentsStore,
   computeSalaryOverview,
+  computeSalaryPeriodBreakdown,
   fixedAccrualsStore,
   formatFixedAccrualCadence,
-  getPayrollPeriodForDate,
+  groupShiftsByPayrollPeriod,
+  listAdjustmentsForStaff,
+  listFixedAccrualsForStaff,
+  listShiftPayrollForStaff,
+  listStaffDirectory,
   shiftPayrollStore,
   staffDirectoryStore,
 } from "@/data/repo";
-import type { ShiftPayrollEntry, StaffRole } from "@/types";
+import { exportSalaryWorkbook } from "@/lib/salaryExport";
+import type { StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
@@ -23,39 +29,6 @@ function formatShiftDate(iso: string): string {
 
 type SortOrder = "desc" | "asc";
 
-interface PeriodGroup {
-  key: string; // period.start — уникален и сортируется как строка
-  label: string; // "11–24 октября"
-  payoutDate: string;
-  total: number;
-  shifts: ShiftPayrollEntry[];
-}
-
-/**
- * Смены разбиваются по тем же зарплатным периодам (11–24 / 25–10 число, см.
- * getPayrollPeriodForDate в data/repo.ts), что уже используются в карточке
- * сотрудника ("К выплате ДД.ММ") — так привычнее, чем один длинный список
- * вперемешку. См. запрос Никиты 14.10.2026: "выделим по периодам".
- */
-function groupShiftsByPeriod(shifts: ShiftPayrollEntry[], order: SortOrder): PeriodGroup[] {
-  const groups = new Map<string, PeriodGroup>();
-  for (const s of shifts) {
-    const period = getPayrollPeriodForDate(s.date);
-    const existing = groups.get(period.start);
-    if (existing) {
-      existing.shifts.push(s);
-      existing.total += s.salary;
-    } else {
-      groups.set(period.start, { key: period.start, label: period.label, payoutDate: period.payoutDate, total: s.salary, shifts: [s] });
-    }
-  }
-  const sortedGroups = Array.from(groups.values()).sort((a, b) => (order === "desc" ? b.key.localeCompare(a.key) : a.key.localeCompare(b.key)));
-  for (const g of sortedGroups) {
-    g.shifts.sort((a, b) => (order === "desc" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)));
-  }
-  return sortedGroups;
-}
-
 /**
  * Карточка одного сотрудника: ФИО в заголовке, дальше посменно дата/выручка/
  * зп (сгруппировано по зарплатным периодам), отдельно фиксированные
@@ -65,7 +38,7 @@ function groupShiftsByPeriod(shifts: ShiftPayrollEntry[], order: SortOrder): Per
  * редактирования, здесь свод для быстрого обзора.
  */
 function StaffSalaryCard({ overview, order }: { overview: ReturnType<typeof computeSalaryOverview>["staff"][number]; order: SortOrder }) {
-  const periods = useMemo(() => groupShiftsByPeriod(overview.shifts, order), [overview.shifts, order]);
+  const periods = useMemo(() => groupShiftsByPayrollPeriod(overview.shifts, order), [overview.shifts, order]);
 
   return (
     <div className="card">
@@ -147,6 +120,39 @@ function StaffSalaryCard({ overview, order }: { overview: ReturnType<typeof comp
   );
 }
 
+/**
+ * Выгрузка в Excel "как раньше", но с формулами, а не только цифрами (см.
+ * запрос Никиты 14.10.2026) — exportSalaryWorkbook сам пересчитывает ЗП
+ * каждой смены формулой от выручки по salary_model сотрудника.
+ */
+function ExportButton() {
+  const [busy, setBusy] = useState(false);
+
+  async function handleExport() {
+    setBusy(true);
+    try {
+      const staffInputs = listStaffDirectory().map((profile) => ({
+        profile,
+        shifts: listShiftPayrollForStaff(profile.id),
+        adjustments: listAdjustmentsForStaff(profile.id),
+        fixedAccruals: listFixedAccrualsForStaff(profile.id),
+      }));
+      await exportSalaryWorkbook(staffInputs);
+    } catch (err) {
+      console.error("Не удалось выгрузить ведомость:", err);
+      alert("Не удалось сформировать файл — попробуйте ещё раз.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button className="btn secondary" style={{ width: "100%", marginBottom: 14 }} disabled={busy} onClick={handleExport}>
+      {busy ? "Формирую файл…" : "⬇️ Выгрузить ведомость в Excel"}
+    </button>
+  );
+}
+
 export default function Salary() {
   useStore(staffDirectoryStore);
   useStore(shiftPayrollStore);
@@ -155,6 +161,11 @@ export default function Salary() {
   const [order, setOrder] = useState<SortOrder>("desc");
 
   const overview = useMemo(() => computeSalaryOverview(), [staffDirectoryStore.get(), shiftPayrollStore.get(), adjustmentsStore.get(), fixedAccrualsStore.get()]);
+  const periodTotals = useMemo(
+    () => computeSalaryPeriodBreakdown(),
+    [staffDirectoryStore.get(), shiftPayrollStore.get(), adjustmentsStore.get(), fixedAccrualsStore.get()],
+  );
+  const orderedPeriodTotals = order === "desc" ? periodTotals : [...periodTotals].reverse();
   const staffWithData = overview.staff.filter((s) => s.shifts.length > 0 || s.fixedAccruals.length > 0 || s.fines > 0 || s.bonuses > 0);
   const staffWithoutData = overview.staff.filter((s) => !staffWithData.includes(s));
 
@@ -177,7 +188,7 @@ export default function Salary() {
 
       <div className="card" style={{ background: "var(--accent-soft, var(--surface))" }}>
         <div className="card-row">
-          <span className="muted">Итого на руки</span>
+          <span className="muted">Итого на руки (всё время)</span>
           <span style={{ fontWeight: 700 }}>{money(overview.netTotal)}</span>
         </div>
         <div className="card-row" style={{ marginTop: 6 }}>
@@ -189,6 +200,27 @@ export default function Salary() {
           <span style={{ fontWeight: 700, color: "var(--accent)" }}>{money(overview.grossTotal)}</span>
         </div>
       </div>
+
+      {periodTotals.length > 0 && (
+        <>
+          <div className="eyebrow" style={{ marginTop: 14 }}>
+            По периодам
+          </div>
+          {orderedPeriodTotals.map((p) => (
+            <div key={p.key} className="card">
+              <div className="card-row">
+                <span style={{ fontWeight: 600 }}>{p.label}</span>
+                <span style={{ fontWeight: 700, color: "var(--accent)" }}>{money(p.net)}</span>
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                НДФЛ {money(p.ndfl)} · итого + НДФЛ {money(p.gross)}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      <ExportButton />
 
       {staffWithData.map((s) => (
         <StaffSalaryCard key={s.staffId} overview={s} order={order} />

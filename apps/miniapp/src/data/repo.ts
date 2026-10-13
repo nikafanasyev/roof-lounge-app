@@ -31,6 +31,7 @@ import type {
   MixItem,
   PayoutRecord,
   PayrollIssue,
+  PayrollRecalcRequest,
   Problem,
   ProblemCategory,
   RoleChecklists,
@@ -116,6 +117,7 @@ export const payrollIssuesStore = new Store<PayrollIssue[]>(seedPayrollIssues);
 export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
 export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
 export const staffInvitesStore = new Store<StaffInvite[]>([]);
+export const payrollRecalcRequestsStore = new Store<PayrollRecalcRequest[]>([]);
 
 const uid = () => crypto.randomUUID();
 
@@ -163,6 +165,7 @@ export async function initData(): Promise<void> {
       loadTodayCleaningLog(),
       loadFixedAccruals(),
       loadStaffInvites(),
+      loadPayrollRecalcRequests(),
     ]);
     subscribeRealtime();
   } catch (error) {
@@ -503,6 +506,20 @@ async function loadStaffInvites() {
   );
 }
 
+async function loadPayrollRecalcRequests() {
+  const { data, error } = await supabase!.from("payroll_recalc_requests").select("*").order("created_at", { ascending: false }).limit(20);
+  if (error) return logSyncError("loadPayrollRecalcRequests", error);
+  payrollRecalcRequestsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      date: r.date,
+      status: r.status,
+      result: r.result ?? undefined,
+      createdAt: r.created_at,
+    })),
+  );
+}
+
 async function loadShiftPayroll() {
   const { data, error } = await supabase!.from("shift_payroll").select("*").order("date", { ascending: false });
   if (error) return logSyncError("loadShiftPayroll", error);
@@ -598,6 +615,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_issues" }, () => loadPayrollIssues())
     .on("postgres_changes", { event: "*", schema: "public", table: "fixed_accruals" }, () => loadFixedAccruals())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff_invites" }, () => loadStaffInvites())
+    .on("postgres_changes", { event: "*", schema: "public", table: "payroll_recalc_requests" }, () => loadPayrollRecalcRequests())
     .subscribe();
 }
 
@@ -1532,6 +1550,34 @@ export function listStaffInvites(): StaffInvite[] {
   return staffInvitesStore.get();
 }
 
+// --- Пересчёт ЗП за дату (кнопка в "Руководитель" → "График", см. 0013_payroll_recalc.sql) ---
+
+export function listPayrollRecalcRequests(): PayrollRecalcRequest[] {
+  return payrollRecalcRequestsStore.get();
+}
+
+export function latestPayrollRecalcRequestForDate(dateIso: string): PayrollRecalcRequest | undefined {
+  return payrollRecalcRequestsStore.get().find((r) => r.date === dateIso);
+}
+
+/**
+ * Пишет запрос на пересчёт — миниапп не может сам дёрнуть Quick Resto
+ * (credentials только у бота), поэтому просит бота через ту же схему, что
+ * staff_invites: insert → бот слушает через Realtime (watchPayrollRecalcRequests
+ * в apps/bot/src/notify.ts) → сам вызывает manuallyAccrueDate и проставляет
+ * статус обратно.
+ */
+export function requestPayrollRecalc(dateIso: string) {
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("payroll_recalc_requests")
+    .insert({ date: dateIso })
+    .then(({ error }) => {
+      if (error) return logSyncError("requestPayrollRecalc", error);
+      loadPayrollRecalcRequests();
+    });
+}
+
 export function createStaffInvite(input: { fullName: string; phone?: string; telegramId?: string }) {
   if (!isSupabaseConfigured || !supabase) return;
   supabase
@@ -1722,6 +1768,74 @@ export interface SalaryOverview {
 /** НДФЛ 13% сверху суммы "на руки" (netAmount — это net, уже без налога): ndfl = net * 13/87, gross = net + ndfl = net/0.87. */
 export function computeNdflOnTop(netAmount: number): number {
   return Math.round((netAmount * 13) / 87);
+}
+
+export interface PayrollPeriodShiftGroup {
+  key: string; // period.start
+  label: string;
+  payoutDate: string;
+  total: number;
+  shifts: ShiftPayrollEntry[];
+}
+
+/** Смены одного сотрудника, сгруппированные по зарплатным периодам (11–24 / 25–10) — общая раскладка для экрана «Зарплата» и экспорта в Excel. */
+export function groupShiftsByPayrollPeriod(shifts: ShiftPayrollEntry[], order: "asc" | "desc" = "desc"): PayrollPeriodShiftGroup[] {
+  const groups = new Map<string, PayrollPeriodShiftGroup>();
+  for (const s of shifts) {
+    const period = getPayrollPeriodForDate(s.date);
+    const existing = groups.get(period.start);
+    if (existing) {
+      existing.shifts.push(s);
+      existing.total += s.salary;
+    } else {
+      groups.set(period.start, { key: period.start, label: period.label, payoutDate: period.payoutDate, total: s.salary, shifts: [s] });
+    }
+  }
+  const sorted = Array.from(groups.values()).sort((a, b) => (order === "desc" ? b.key.localeCompare(a.key) : a.key.localeCompare(b.key)));
+  for (const g of sorted) g.shifts.sort((a, b) => (order === "desc" ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date)));
+  return sorted;
+}
+
+export interface SalaryPeriodTotal {
+  key: string; // period.start
+  label: string;
+  payoutDate: string;
+  net: number;
+  ndfl: number;
+  gross: number;
+}
+
+/**
+ * То же самое "Итого на руки" / НДФЛ / "Итого + НДФЛ", что в общей сводке
+ * (computeSalaryOverview), но разбитое по зарплатным периодам (см. запрос
+ * Никиты 14.10.2026: "итого на руки надо передать в периоды тоже") — те же
+ * периоды 11–24 / 25–10, что уже используются в карточке сотрудника.
+ * Фиксированные начисления не привязаны к дате (идут "раз в N недель" без
+ * конкретного дня) — условно относим их к текущему периоду, как к ближайшей
+ * выплате.
+ */
+export function computeSalaryPeriodBreakdown(): SalaryPeriodTotal[] {
+  const staff = listStaffDirectory();
+  const buckets = new Map<string, { label: string; payoutDate: string; net: number }>();
+  function addToBucket(dateIso: string, amount: number) {
+    const period = getPayrollPeriodForDate(dateIso);
+    const existing = buckets.get(period.start);
+    if (existing) existing.net += amount;
+    else buckets.set(period.start, { label: period.label, payoutDate: period.payoutDate, net: amount });
+  }
+  for (const s of staff) {
+    for (const sh of listShiftPayrollForStaff(s.id)) addToBucket(sh.date, sh.salary);
+    for (const a of listAdjustmentsForStaff(s.id)) addToBucket(a.date, a.type === "bonus" ? a.amount : -a.amount);
+  }
+  const fixedTotal = staff.reduce((sum, s) => sum + listFixedAccrualsForStaff(s.id).reduce((a, f) => a + f.amount, 0), 0);
+  if (fixedTotal > 0) addToBucket(new Date().toISOString().slice(0, 10), fixedTotal);
+
+  return Array.from(buckets.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([key, b]) => {
+      const ndfl = computeNdflOnTop(b.net);
+      return { key, label: b.label, payoutDate: b.payoutDate, net: b.net, ndfl, gross: b.net + ndfl };
+    });
 }
 
 export function computeSalaryOverview(): SalaryOverview {

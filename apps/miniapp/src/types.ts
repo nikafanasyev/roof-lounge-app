@@ -309,6 +309,16 @@ export interface PayrollIssue {
   resolved: boolean;
 }
 
+export type PayrollRecalcStatus = "pending" | "done" | "failed";
+
+export interface PayrollRecalcRequest {
+  id: string;
+  date: string; // ISO-дата
+  status: PayrollRecalcStatus;
+  result?: string;
+  createdAt: string;
+}
+
 export interface KnowledgeArticle {
   id: string;
   category: string;
