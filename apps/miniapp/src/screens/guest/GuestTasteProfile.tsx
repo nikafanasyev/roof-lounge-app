@@ -46,7 +46,7 @@ export default function GuestTasteProfile({ guest, onDone }: { guest: Guest; onD
               <button
                 key={d}
                 type="button"
-                className={`chip${active ? " accent" : ""}`}
+                className={`chip chip-pick${active ? " accent" : ""}`}
                 style={{ cursor: "pointer", border: active ? "1px solid var(--accent)" : "1px solid var(--border)" }}
                 onClick={() => toggleDirection(d)}
               >
