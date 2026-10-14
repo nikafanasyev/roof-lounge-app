@@ -72,6 +72,23 @@ function DataSyncBanner() {
   );
 }
 
+/**
+ * Пока идёт самая первая загрузка данных с сервера (dataSyncStatusStore ===
+ * "loading"), все сторы ещё хранят дефолтные значения из data/seed.ts —
+ * без этого экрана они на долю секунды реально отрисовывались бы на
+ * экране как настоящие (см. разбор записи экрана с Никитой 14.10.2026:
+ * при "Обновить страницу" в Telegram между перезагрузкой страницы и
+ * ответом Supabase видна вспышка старых demo-цифр). Показываем вместо
+ * этого нейтральный "Загрузка…" и ничего из seed не рендерим вовсе.
+ */
+function LoadingScreen() {
+  return (
+    <div className="screen" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "70vh" }}>
+      <div className="muted">Загрузка…</div>
+    </div>
+  );
+}
+
 // Навигация переехала из нижней панели в выдвижное меню слева (гамбургер ☰
 // в шапке) — см. обсуждение с Никитой 13.10.2026: с пятью кнопками внизу
 // было неудобно переключаться между разделами. Пункты и иконки те же, что
@@ -151,6 +168,7 @@ function RoleShell() {
   // бота (не по QR-ссылке стола) — иначе он попадал в кабинет "Сотрудник",
   // как любой другой Telegram-аккаунт (см. обсуждение 14.10.2026).
   const isGuestScreen = location.pathname.startsWith("/table/") || isGuestTestAccount();
+  const syncStatus = useStore(dataSyncStatusStore);
 
   // Меню само закрывается при переходе на другой экран (в т.ч. кнопкой
   // "назад" в Telegram) — чтобы не оставалось открытым поверх нового экрана.
@@ -159,6 +177,7 @@ function RoleShell() {
   }, [location.pathname]);
 
   if (isGuestScreen) {
+    if (syncStatus === "loading") return <LoadingScreen />;
     return (
       <Routes>
         <Route path="/table/:token" element={<TableGuestScreen />} />
@@ -222,6 +241,9 @@ function RoleShell() {
         </div>
       )}
 
+      {syncStatus === "loading" ? (
+        <LoadingScreen />
+      ) : (
       <Routes>
         <Route path="/" element={<Navigate to={DEFAULT_ROUTE[role]} replace />} />
 
@@ -254,6 +276,7 @@ function RoleShell() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      )}
     </div>
   );
 }
