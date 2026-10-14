@@ -119,6 +119,19 @@ export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
 export const staffInvitesStore = new Store<StaffInvite[]>([]);
 export const payrollRecalcRequestsStore = new Store<PayrollRecalcRequest[]>([]);
 
+// Статус загрузки реальных данных — см. initData() ниже. Пока он не "ok",
+// сотрудник/руководитель видит примерные данные из data/seed.ts (гости,
+// сотрудники, смены, ЗП, штрафы — правдоподобные цифры "для верстки",
+// неотличимые от настоящих на глаз). Раньше это никак не показывалось в
+// интерфейсе: если Supabase не настроен на конкретном деплое или загрузка
+// реальных данных по какой-то причине не прошла, экраны молча оставались
+// на seed-данных — выглядело как настоящая (но на самом деле выдуманная)
+// зарплатная история (см. разбор с Никитой 14.10.2026 — скриншот "Моя
+// зарплата" с тестового гостевого аккаунта оказался как раз таким случаем:
+// цифры 1-в-1 совпали с data/seed.ts, посчитанными относительно "сегодня").
+export type DataSyncStatus = "unconfigured" | "loading" | "ok" | "error";
+export const dataSyncStatusStore = new Store<DataSyncStatus>(isSupabaseConfigured ? "loading" : "unconfigured");
+
 const uid = () => crypto.randomUUID();
 
 // --- Синхронизация с Supabase (см. заголовок файла) ---
@@ -155,10 +168,33 @@ function logSyncError(scope: string, error: unknown) {
 export async function initData(): Promise<void> {
   if (!isSupabaseConfigured || !supabase || syncInitialized) return;
   syncInitialized = true;
+  dataSyncStatusStore.set("loading");
   const guestOnly = window.location.pathname.startsWith("/table/") || isGuestTestAccount();
+  // Раньше ensureCurrentStaff()/loadTables() ждали друг друга СНАРУЖИ
+  // общего Promise.all — если любой из них бросал необработанное
+  // исключение (не просто ошибку запроса Supabase — та возвращается в
+  // {error} и уже обрабатывается внутри каждой load-функции, — а, например,
+  // сетевой сбой), весь try целиком падал в catch, и НИ ОДНА из остальных
+  // загрузок даже не начиналась: все сторы молча оставались на
+  // seed-данных из data/seed.ts без какого-либо признака в интерфейсе, что
+  // это не настоящие цифры. Теперь каждый шаг обёрнут отдельно — сбой
+  // одного не блокирует остальные, а статус ниже отражает итог честно.
+  let hadError = false;
   try {
-    if (!guestOnly) await ensureCurrentStaff();
-    await loadTables();
+    if (!guestOnly) {
+      try {
+        await ensureCurrentStaff();
+      } catch (error) {
+        hadError = true;
+        logSyncError("initData:ensureCurrentStaff", error);
+      }
+    }
+    try {
+      await loadTables();
+    } catch (error) {
+      hadError = true;
+      logSyncError("initData:loadTables", error);
+    }
     const guestLoads = [loadFlavors(), loadGuests(), loadAromaTags(), loadMixes()];
     const staffLoads = guestOnly
       ? []
@@ -178,14 +214,20 @@ export async function initData(): Promise<void> {
           loadStaffInvites(),
           loadPayrollRecalcRequests(),
         ];
-    await Promise.all([...guestLoads, ...staffLoads]);
+    const results = await Promise.allSettled([...guestLoads, ...staffLoads]);
+    if (results.some((r) => r.status === "rejected")) {
+      hadError = true;
+      results.forEach((r) => r.status === "rejected" && logSyncError("initData:load", r.reason));
+    }
     // Realtime-подписка остаётся общей (один канал на все таблицы, см.
     // subscribeRealtime ниже) — гостю всё равно нужны живые обновления по
     // mixes/guests (мастер мог досыпать микс, пока гость сидит за столом),
     // а лишние события по персонал-таблицам не вредят, просто не используются.
     subscribeRealtime();
+    dataSyncStatusStore.set(hadError ? "error" : "ok");
   } catch (error) {
     logSyncError("initData", error);
+    dataSyncStatusStore.set("error");
   }
 }
 
