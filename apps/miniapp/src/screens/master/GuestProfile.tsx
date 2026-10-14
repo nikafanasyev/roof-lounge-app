@@ -4,6 +4,7 @@ import { useStore } from "@/data/useStore";
 import { mixesStore, computeTasteProfile, endGuestVisit, getFlavor, getGuest, listAromaTags, removeMix } from "@/data/repo";
 import { AROMA_DIRECTION_LABELS } from "@/types";
 import { Stars } from "@/components/Stars";
+import GuestTasteProfile from "@/screens/guest/GuestTasteProfile";
 
 function aromaNames(ids?: string[]): string[] {
   if (!ids || ids.length === 0) return [];
@@ -17,6 +18,13 @@ export default function GuestProfile() {
   useStore(mixesStore); // перерисовываемся при изменениях миксов
   const guest = getGuest(guestId);
   const [tab, setTab] = useState<"profile" | "history">("profile");
+  // Анкету обычно заполняет сам гость в своём кабинете (квиз в GuestFlow),
+  // но не у всех гостей есть телефон/желание возиться с квизом самим — тут
+  // мастер может пройти тот же квиз вместо гостя, глядя ему в лицо и
+  // спрашивая вслух, что нравится (см. запрос Никиты 14.10.2026: "заполнить
+  // вкусовой профиль" для гостя, которого завели вручную). Переиспользуем
+  // тот же компонент квиза 1-в-1 — ничего не дублируем.
+  const [editingTaste, setEditingTaste] = useState(false);
 
   if (!guest) {
     return (
@@ -24,6 +32,10 @@ export default function GuestProfile() {
         <div className="list-empty">Гость не найден</div>
       </div>
     );
+  }
+
+  if (editingTaste) {
+    return <GuestTasteProfile guest={guest} onDone={() => setEditingTaste(false)} />;
   }
 
   const profile = computeTasteProfile(guestId);
@@ -81,7 +93,12 @@ export default function GuestProfile() {
               путать с разделом ниже, который считается по истории миксов. */}
           <div className="eyebrow">Анкета гостя</div>
           {!hasQuizAnswers ? (
-            <div className="card muted">Гость пока не прошёл вкусовой квиз в своём кабинете</div>
+            <div className="card muted">
+              Гость пока не прошёл вкусовой квиз в своём кабинете
+              <button className="btn secondary" style={{ width: "100%", marginTop: 10 }} onClick={() => setEditingTaste(true)}>
+                Заполнить вместе с гостем
+              </button>
+            </div>
           ) : (
             <div className="card">
               {(guest.tasteDirections?.length ?? 0) > 0 && (
@@ -126,6 +143,9 @@ export default function GuestProfile() {
                   </div>
                 </div>
               )}
+              <button className="btn ghost" style={{ width: "100%", marginTop: 12, padding: "8px 12px", fontSize: 13 }} onClick={() => setEditingTaste(true)}>
+                Изменить анкету
+              </button>
             </div>
           )}
 

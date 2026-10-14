@@ -68,7 +68,7 @@ export default function AromaPicker({
             <button
               key={t.id}
               type="button"
-              className={`chip${active ? " accent" : ""}`}
+              className={`chip chip-pick${active ? " accent" : ""}`}
               style={{ cursor: "pointer", border: active ? "1px solid var(--accent)" : "1px solid var(--border)" }}
               onClick={() => onToggle(t.id)}
             >

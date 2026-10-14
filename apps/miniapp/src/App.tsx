@@ -24,6 +24,8 @@ import SalaryPeriodDetail from "@/screens/manager/SalaryPeriodDetail";
 import Fines from "@/screens/manager/Fines";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 import { isCurrentUserManager, isGuestTestAccount, isInsideTelegramClient } from "@/lib/telegram";
+import { dataSyncStatusStore } from "@/data/repo";
+import { useStore } from "@/data/useStore";
 
 // Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
 // реально работает в заведении) и отдельно "Руководитель". Переключатель
@@ -35,6 +37,40 @@ const ROLE_LABEL: Record<AppRole, string> = {
   employee: "Сотрудник",
   manager: "Руководитель",
 };
+
+/**
+ * Предупреждение, если реальные данные не загрузились (см. dataSyncStatusStore
+ * в data/repo.ts) — без него экран молча показывает примерные данные из
+ * data/seed.ts (правдоподобные цифры "для верстки"), неотличимые от
+ * настоящих. См. разбор с Никитой 14.10.2026 — так на тестовом гостевом
+ * аккаунте "Моя зарплата" показала выдуманную историю вместо реальной, и
+ * ничего в интерфейсе на это не намекало.
+ */
+function DataSyncBanner() {
+  const status = useStore(dataSyncStatusStore);
+  if (status === "ok" || status === "loading") return null;
+  const text =
+    status === "unconfigured"
+      ? "Нет связи с сервером (Supabase не настроен на этом деплое) — на экране примерные данные для демонстрации, не настоящие."
+      : "Не удалось загрузить часть данных с сервера — часть цифр ниже может быть устаревшей или демонстрационной.";
+  return (
+    <div
+      style={{
+        background: "var(--danger)",
+        color: "#fff",
+        fontSize: 12,
+        fontWeight: 600,
+        textAlign: "center",
+        padding: "6px 12px",
+        position: "sticky",
+        top: 0,
+        zIndex: 50,
+      }}
+    >
+      ⚠️ {text}
+    </div>
+  );
+}
 
 // Навигация переехала из нижней панели в выдвижное меню слева (гамбургер ☰
 // в шапке) — см. обсуждение с Никитой 13.10.2026: с пятью кнопками внизу
@@ -152,6 +188,7 @@ function RoleShell() {
 
   return (
     <div className="app">
+      <DataSyncBanner />
       <div className="top-bar">
         <button className="hamburger-btn" onClick={() => setDrawerOpen(true)} aria-label="Меню">
           <span />

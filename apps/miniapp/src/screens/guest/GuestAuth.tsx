@@ -7,6 +7,15 @@ import type { Guest } from "@/types";
  * Никитой 11.10.2026) — номер уже есть в базе -> сразу авторизован,
  * нет -> короткая регистрация (ФИО, телефон, дата рождения).
  */
+// Если начали печатать номер с "9" (а не с "+7"/"8") — подставляем "+7"
+// впереди: так привычнее печатать мобильный номер без кода страны, не
+// думая о нём (см. запрос Никиты 14.10.2026). Срабатывает только пока вся
+// строка состоит из цифр, начинающихся с 9 — после подстановки строка уже
+// начинается на "+7" и под регулярку не попадает повторно.
+function autoPrefixPhone(raw: string): string {
+  return /^9\d*$/.test(raw) ? `+7${raw}` : raw;
+}
+
 export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew: boolean) => void }) {
   const [phone, setPhone] = useState("");
   const [checking, setChecking] = useState(false);
@@ -64,7 +73,7 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
           type="tel"
           placeholder="+7 900 000-00-00"
           value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={(e) => setPhone(autoPrefixPhone(e.target.value))}
           style={{ marginTop: 16, marginBottom: 12, fontSize: 18, textAlign: "center" }}
         />
         <button className="btn primary" disabled={!phone.trim() || checking} onClick={handleCheck}>
@@ -90,7 +99,19 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
       </p>
       <div className="card" style={{ marginTop: 16 }}>
         <input type="text" placeholder="ФИО" value={name} onChange={(e) => setName(e.target.value)} style={{ marginBottom: 10 }} />
-        <input type="tel" placeholder="Телефон" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ marginBottom: 10 }} />
+        <input
+          type="tel"
+          placeholder="Телефон"
+          value={phone}
+          onChange={(e) => setPhone(autoPrefixPhone(e.target.value))}
+          style={{ marginBottom: 10 }}
+        />
+        {/* Пустой input[type=date] без подписи не объясняет, что он вводит —
+            выглядит "поплывшим" полем без смысла (см. скриншот и обсуждение
+            с Никитой 14.10.2026). Подпись над полем снимает вопрос. */}
+        <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+          Дата рождения
+        </div>
         <input type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} style={{ marginBottom: 10 }} />
         <button
           className="btn primary"
