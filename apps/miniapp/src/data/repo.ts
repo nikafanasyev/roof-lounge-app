@@ -69,7 +69,7 @@ import {
   type WeekBlock,
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { getTelegramUser } from "@/lib/telegram";
+import { getTelegramUser, isGuestTestAccount } from "@/lib/telegram";
 import { computeShiftSalary, DEFAULT_SALARY_MODEL } from "@/lib/payroll";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
@@ -140,33 +140,49 @@ function logSyncError(scope: string, error: unknown) {
   console.error(`[supabase:${scope}]`, error);
 }
 
-/** Вызывается один раз при старте приложения (см. main.tsx). Без Supabase — no-op. */
+/**
+ * Вызывается один раз при старте приложения (см. main.tsx), ДО того как
+ * React-роутер решил, какой это экран — гостевой /table/<token> или обычный
+ * кабинет. Раньше звала ensureCurrentStaff() безусловно для любого
+ * Telegram-аккаунта, из-за чего КАЖДЫЙ, кто открыл мини-апп — включая
+ * гостя по QR-ссылке со стола и тестовый гостевой аккаунт — записывался в
+ * таблицу staff и видел кабинет "Сотрудник" вместо гостевого сценария (см.
+ * обсуждение с Никитой 14.10.2026, скриншоты). Для гостевого контекста
+ * (путь /table/... или тестовый гостевой telegram_id, см. lib/telegram.ts)
+ * пропускаем и upsert в staff, и загрузку персонал-данных (график, ЗП,
+ * штрафы и т.д.) — гостю они не нужны.
+ */
 export async function initData(): Promise<void> {
   if (!isSupabaseConfigured || !supabase || syncInitialized) return;
   syncInitialized = true;
+  const guestOnly = window.location.pathname.startsWith("/table/") || isGuestTestAccount();
   try {
-    await ensureCurrentStaff();
+    if (!guestOnly) await ensureCurrentStaff();
     await loadTables();
-    await Promise.all([
-      loadFlavors(),
-      loadGuests(),
-      loadAromaTags(),
-      loadMixes(),
-      loadServiceCalls(),
-      loadShift(),
-      loadProblems(),
-      loadTasks(),
-      loadStaffDirectory(),
-      loadShiftPayroll(),
-      loadAdjustments(),
-      loadPayouts(),
-      loadSchedule(),
-      loadPayrollIssues(),
-      loadTodayCleaningLog(),
-      loadFixedAccruals(),
-      loadStaffInvites(),
-      loadPayrollRecalcRequests(),
-    ]);
+    const guestLoads = [loadFlavors(), loadGuests(), loadAromaTags(), loadMixes()];
+    const staffLoads = guestOnly
+      ? []
+      : [
+          loadServiceCalls(),
+          loadShift(),
+          loadProblems(),
+          loadTasks(),
+          loadStaffDirectory(),
+          loadShiftPayroll(),
+          loadAdjustments(),
+          loadPayouts(),
+          loadSchedule(),
+          loadPayrollIssues(),
+          loadTodayCleaningLog(),
+          loadFixedAccruals(),
+          loadStaffInvites(),
+          loadPayrollRecalcRequests(),
+        ];
+    await Promise.all([...guestLoads, ...staffLoads]);
+    // Realtime-подписка остаётся общей (один канал на все таблицы, см.
+    // subscribeRealtime ниже) — гостю всё равно нужны живые обновления по
+    // mixes/guests (мастер мог досыпать микс, пока гость сидит за столом),
+    // а лишние события по персонал-таблицам не вредят, просто не используются.
     subscribeRealtime();
   } catch (error) {
     logSyncError("initData", error);
