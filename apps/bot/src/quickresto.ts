@@ -1352,7 +1352,9 @@ function displayNameFromCrmCustomer(c: CrmCustomerRaw): string {
  * удалённых (deleted=true) и записи без имени. Батчами по 500, чтобы не
  * упереться в лимит размера запроса на ~2500+ строк разом.
  */
-export async function syncCrmCustomers(supabase: SupabaseClient): Promise<{ synced: number; total: number }> {
+export async function syncCrmCustomers(
+  supabase: SupabaseClient,
+): Promise<{ synced: number; total: number; deletedRemoved: number; deletedUnlinked: number }> {
   const customers = await fetchAllCrmCustomers();
   const rows = customers
     .filter((c) => !c.deleted)
@@ -1374,7 +1376,48 @@ export async function syncCrmCustomers(supabase: SupabaseClient): Promise<{ sync
     }
     synced += batch.length;
   }
-  return { synced, total: customers.length };
+
+  // Клиента удалили/пометили удалённым в Quick Resto (см. обсуждение с
+  // Никитой 08.11.2026: "а если я удалил гостя, он исчезнет из миниаппа?")
+  // — раньше такие просто пропускались (см. .filter((c) => !c.deleted)
+  // выше) и навсегда оставались висеть в guests как есть. Теперь:
+  // - гостей без телефона (чистое зеркало CRM Quick Resto, своей истории
+  //   миксов/визитов у нас для них нет) удаляем целиком;
+  // - гостей с телефоном (зарегистрировались сами или карту завёл
+  //   сотрудник — есть своя история в приложении) НЕ удаляем, чтобы не
+  //   потерять вкусовой квиз/историю миксов, а просто отвязываем от
+  //   удалённого клиента Quick Resto — карта лояльности внутри приложения
+  //   остаётся, а отметка "работает на кассе" пропадает.
+  const deletedIds = customers.filter((c) => c.deleted).map((c) => c.id);
+  let deletedRemoved = 0;
+  let deletedUnlinked = 0;
+  if (deletedIds.length > 0) {
+    const { data: removed, error: removeError } = await supabase
+      .from("guests")
+      .delete()
+      .in("quickresto_customer_id", deletedIds)
+      .is("phone", null)
+      .select("id");
+    if (removeError) {
+      console.error("Quick Resto: ошибка удаления гостей с удалённым клиентом CRM:", removeError);
+    } else {
+      deletedRemoved = removed?.length ?? 0;
+    }
+
+    const { data: unlinked, error: unlinkError } = await supabase
+      .from("guests")
+      .update({ quickresto_customer_id: null, quickresto_qr_key: null })
+      .in("quickresto_customer_id", deletedIds)
+      .not("phone", "is", null)
+      .select("id");
+    if (unlinkError) {
+      console.error("Quick Resto: ошибка отвязки гостей от удалённого клиента CRM:", unlinkError);
+    } else {
+      deletedUnlinked = unlinked?.length ?? 0;
+    }
+  }
+
+  return { synced, total: customers.length, deletedRemoved, deletedUnlinked };
 }
 
 const CRM_SYNC_JOB_HOUR_MSK = 9;
@@ -1387,7 +1430,14 @@ export function scheduleDailyCrmCustomerSync() {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
   function runOnce() {
     return syncCrmCustomers(supabase)
-      .then(({ synced, total }) => console.log(`Quick Resto: синхронизация клиентов CRM — ${synced}/${total}`))
+      .then(({ synced, total, deletedRemoved, deletedUnlinked }) => {
+        console.log(`Quick Resto: синхронизация клиентов CRM — ${synced}/${total}`);
+        if (deletedRemoved || deletedUnlinked) {
+          console.log(
+            `Quick Resto: удалённые в CRM клиенты — убрано из guests: ${deletedRemoved}, отвязано (есть своя карта): ${deletedUnlinked}`,
+          );
+        }
+      })
       .catch((err) => console.error("Quick Resto: ошибка синхронизации клиентов CRM:", err));
   }
   function scheduleNext() {
