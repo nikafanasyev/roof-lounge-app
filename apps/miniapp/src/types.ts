@@ -15,7 +15,13 @@ export interface Guest {
   // SMS-кода на старте (см. обсуждение с Никитой 11.10.2026).
   phone?: string;
   birthDate?: string; // ISO-дата
-  loyaltyCode?: string; // короткий код для QR лояльности и ручного ввода на кассе
+  lastName?: string; // Фамилия — отдельно от displayName, нужна для создания клиента в Quick Resto
+  firstName?: string; // Имя
+  middleName?: string; // Отчество — нужна для создания клиента в Quick Resto
+  gender?: "male" | "female"; // Quick Resto требует пол при создании клиента crm.customer
+  loyaltyCode?: string; // короткий код для QR лояльности и ручного ввода на кассе — работает только внутри приложения
+  quickrestoCustomerId?: number; // id клиента в Quick Resto, если карта уже создана там
+  quickrestoQrKey?: string; // QR-идентификатор, который реально сканируется на кассе Quick Resto (см. supabase/migrations/0016_loyalty_card_requests.sql)
   bonusPoints?: number;
   lastVisitAt?: string; // ISO-дата последнего визита (обновляется при открытии гостевого экрана)
 

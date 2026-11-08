@@ -71,10 +71,14 @@ export default function GuestHome({
 
       <div className="card" style={{ textAlign: "center", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "center" }}>
-          <QRCodeSVG value={guest.loyaltyCode ?? guest.id} size={160} />
+          <QRCodeSVG value={guest.quickrestoQrKey ?? guest.loyaltyCode ?? guest.id} size={160} />
         </div>
         <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-          Код лояльности: {guest.loyaltyCode ?? "—"}
+          {guest.quickrestoQrKey ? (
+            <>Код лояльности: {guest.loyaltyCode ?? "—"} · работает на кассе</>
+          ) : (
+            <>Код лояльности: {guest.loyaltyCode ?? "—"} · карта пока создаётся, скоро заработает на кассе</>
+          )}
         </div>
       </div>
 

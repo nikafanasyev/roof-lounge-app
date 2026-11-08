@@ -1,7 +1,8 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
+import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
-import { watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
-import { fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
+import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
+import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -236,6 +237,57 @@ ${link.invite_link}`,
       }
     });
     console.log("Слушаю payroll_recalc_requests через Supabase Realtime — пересчёт ЗП из миниаппа включён.");
+  }
+
+  // "Создать карту лояльности" в мини-аппе (см. supabase/migrations/0016_loyalty_card_requests.sql
+  // и notify.ts watchLoyaltyCardRequests) — создаёт клиента в Quick Resto,
+  // привязывает телефон и QR-идентификатор, пишет id/ключ обратно в guests.
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.QR_LOGIN && env.QR_PASSWORD) {
+    const notifyChatId = env.QR_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
+    const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    watchLoyaltyCardRequests(async (req) => {
+      const { data: guest, error } = await supabaseAdmin
+        .from("guests")
+        .select("display_name, last_name, first_name, middle_name, birth_date, gender, phone")
+        .eq("id", req.guestId)
+        .maybeSingle();
+      if (error || !guest) {
+        await req.markFailed(`Гость не найден: ${error?.message ?? req.guestId}`);
+        return;
+      }
+      if (!guest.last_name || !guest.first_name || !guest.birth_date || !guest.gender || !guest.phone) {
+        await req.markFailed("У гостя не заполнены фамилия/имя/дата рождения/пол/телефон — карту в Quick Resto не создать.");
+        return;
+      }
+      try {
+        const { customerId, qrKey } = await createLoyaltyCardInQuickResto({
+          lastName: guest.last_name,
+          firstName: guest.first_name,
+          middleName: guest.middle_name ?? undefined,
+          birthDate: guest.birth_date,
+          gender: guest.gender as "male" | "female",
+          phone: guest.phone,
+        });
+        await supabaseAdmin
+          .from("guests")
+          .update({ quickresto_customer_id: customerId, quickresto_qr_key: qrKey })
+          .eq("id", req.guestId);
+        await req.markDone(`Создано, id клиента в Quick Resto: ${customerId}`);
+        if (notifyChatId) {
+          await bot.api.sendMessage(notifyChatId, `✅ Карта лояльности создана в Quick Resto для ${guest.display_name}.`);
+        }
+      } catch (err) {
+        console.error("Quick Resto: не удалось создать карту лояльности по запросу из миниаппа:", err);
+        await req.markFailed(String(err));
+        if (notifyChatId) {
+          await bot.api.sendMessage(
+            notifyChatId,
+            `⚠️ Не удалось создать карту лояльности в Quick Resto для ${guest.display_name} — см. логи бота. (${String(err)})`,
+          );
+        }
+      }
+    });
+    console.log("Слушаю loyalty_card_requests через Supabase Realtime — создание карт лояльности в Quick Resto включено.");
   }
 
   // Фото открытия/закрытия смены: пересылаем руководителю (или в отдельный чат,

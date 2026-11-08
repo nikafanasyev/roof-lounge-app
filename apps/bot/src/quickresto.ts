@@ -336,6 +336,111 @@ async function qrFetchJson<T>(path: string): Promise<T> {
   return JSON.parse(text) as T;
 }
 
+async function qrFetchJsonPost<T>(path: string, body: unknown): Promise<T> {
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(body),
+  };
+  let res = await qrFetch(path, init);
+  if (res.status === 401 || res.status === 403) {
+    await withAuthLock(() => refreshAccessToken());
+    res = await qrFetch(path, init);
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`Quick Resto: HTTP ${res.status} на ${path} — ${text.slice(0, 500)}`);
+  }
+  return JSON.parse(text) as T;
+}
+
+// businessDayOffsetInMs/timeZone повторяются во всех запросах к этому
+// кабинету Quick Resto (см. crmCustomerPath ниже) — похоже, это настройки
+// конкретного заведения (часовой пояс -180 = UTC+3, Москва), а не что-то,
+// что нужно считать динамически.
+const QR_TIME_PARAMS = "businessDayOffsetInMs=43200000&timeZone=-180";
+
+const CRM_CUSTOMER_CLASS_NAME = "ru.edgex.quickresto.modules.crm.customer.CrmCustomer";
+
+interface CrmCustomerCreateResult {
+  id: number;
+}
+
+/**
+ * Создание карты лояльности гостю через Quick Resto — реверс-инжинирено из
+ * реального трафика админки Quick Resto (DevTools → Network, снято Никитой
+ * 08.11.2026) при создании тестового клиента + привязке телефона + QR-
+ * идентификатора. Три последовательных POST'а, во всех трёх customerId из
+ * первого шага передаётся как ownerContextId.
+ *
+ * Важно: это ВСЕГДА создаёт НОВОГО клиента в Quick Resto — если у гостя уже
+ * есть карточка в Quick Resto (например, завёл кассир вручную раньше с тем
+ * же номером), получится дубль. Для гостей, кто регистрируется САМ через
+ * приложение (см. обсуждение с Никитой — "создавать будем только через
+ * приложение"), это ожидаемо: наша база guests с телефонным входом
+ * заведомо отдельная от CRM-синхронизации (см. комментарий выше про
+ * syncCrmCustomers — именно поэтому туда НЕ пишется phone).
+ */
+export async function createLoyaltyCardInQuickResto(input: {
+  lastName: string;
+  firstName: string;
+  middleName?: string;
+  birthDate: string; // ISO YYYY-MM-DD
+  gender: "male" | "female";
+  phone: string; // уже нормализован на стороне миниаппа, формат "7XXXXXXXXXX"
+}): Promise<{ customerId: number; qrKey: string }> {
+  const regTime = () => Date.now();
+
+  // Шаг 1 — создать самого клиента.
+  const customer = await qrFetchJsonPost<CrmCustomerCreateResult>(
+    `/platform/data/crm.customer/create?regTime=${regTime()}&${QR_TIME_PARAMS}`,
+    {
+      className: CRM_CUSTOMER_CLASS_NAME,
+      deleted: false,
+      internal: true,
+      hidden: false,
+      originType: "BO",
+      lastFrontRevision: false,
+      disabled: false,
+      blocked: false,
+      title: "",
+      pushToCouchDbLocal: false,
+      pushToCouchDb: false,
+      permanent: false,
+      lastName: input.lastName,
+      firstName: input.firstName,
+      ...(input.middleName ? { middleName: input.middleName } : {}),
+      dateOfBirth: input.birthDate,
+      sex: input.gender,
+    },
+  );
+  const customerId = customer.id;
+  const ownerParams = `ownerContextId=${customerId}&ownerContextClassName=${CRM_CUSTOMER_CLASS_NAME}`;
+
+  // Шаг 2 — привязать телефон. Quick Resto сам отправляет номер с ведущей
+  // "8" (не "+7") — на их же тестовой записи было "88888888888" для
+  // "+7..." номера, поэтому приводим к тому же виду, а не берём наш "7...".
+  const phoneForQr = "8" + input.phone.replace(/^7/, "");
+  await qrFetchJsonPost(`/platform/data/crm.customer.contacts/create?${ownerParams}&regTime=${regTime()}&${QR_TIME_PARAMS}`, {
+    className: "ru.edgex.quickresto.modules.crm.customer.contacts.ContactMethod",
+    type: "phoneNumber",
+    value: phoneForQr,
+  });
+
+  // Шаг 3 — создать QR-идентификатор. В реальном трафике браузер сам
+  // генерирует "key" и отправляет его в запросе (сервер не присваивает его
+  // сам) — воспроизводим тем же способом, случайной строкой.
+  const qrKey = randomBytes(12).toString("hex");
+  await qrFetchJsonPost(`/platform/data/crm.customer.tokens/create?${ownerParams}&regTime=${regTime()}&${QR_TIME_PARAMS}`, {
+    className: "ru.edgex.quickresto.modules.crm.customer.tokens.CrmToken",
+    type: "qrGuest",
+    entry: "qrCode",
+    key: qrKey,
+  });
+
+  return { customerId, qrKey };
+}
+
 // --- Выручка по кальянной категории (перенесено из hookah_bot/quickresto.py,
 // уже работающего в проде для того же заведения — see get_revenue_by_days) ---
 

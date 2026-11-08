@@ -5,7 +5,10 @@ import type { Guest } from "@/types";
 /**
  * Вход гостя по телефону, без SMS-подтверждения на старте (см. обсуждение с
  * Никитой 11.10.2026) — номер уже есть в базе -> сразу авторизован,
- * нет -> короткая регистрация (ФИО, телефон, дата рождения).
+ * нет -> короткая регистрация (Фамилия/Имя/Отчество, телефон, дата
+ * рождения). ФИО разбито на отдельные поля (а не одна строка) — чтобы те
+ * же данные позже можно было передать при создании клиента в Quick Resto
+ * (см. обсуждение с Никитой про карту лояльности).
  */
 // Если начали печатать номер с "9" (а не с "+7"/"8") — подставляем "+7"
 // впереди: так привычнее печатать мобильный номер без кода страны, не
@@ -20,7 +23,10 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
   const [phone, setPhone] = useState("");
   const [checking, setChecking] = useState(false);
   const [notFound, setNotFound] = useState(false);
-  const [name, setName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [middleName, setMiddleName] = useState("");
+  const [gender, setGender] = useState<"male" | "female" | "">("");
   const [birthDate, setBirthDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,13 +50,22 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
   }
 
   async function handleRegister() {
-    if (!name.trim() || !phone.trim() || !birthDate) return;
+    if (!lastName.trim() || !firstName.trim() || !phone.trim() || !birthDate || !gender) return;
     setSaving(true);
     setError(null);
     try {
-      const guest = await registerGuest({ phone, displayName: name.trim(), birthDate });
-      if (guest) {
-        onAuthed(guest, true);
+      const result = await registerGuest({
+        phone,
+        lastName: lastName.trim(),
+        firstName: firstName.trim(),
+        middleName: middleName.trim() || undefined,
+        birthDate,
+        gender,
+      });
+      if ("guest" in result) {
+        onAuthed(result.guest, true);
+      } else if (result.error === "duplicate_phone") {
+        setError("Этот номер уже зарегистрирован — попробуйте войти");
       } else {
         setError("Не получилось зарегистрироваться — попробуйте ещё раз");
       }
@@ -98,7 +113,39 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
         Вы у нас впервые — пара слов о вас
       </p>
       <div className="card" style={{ marginTop: 16 }}>
-        <input type="text" placeholder="ФИО" value={name} onChange={(e) => setName(e.target.value)} style={{ marginBottom: 10 }} />
+        <input
+          type="text"
+          placeholder="Фамилия"
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+          style={{ marginBottom: 10 }}
+        />
+        <input
+          type="text"
+          placeholder="Имя"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          style={{ marginBottom: 10 }}
+        />
+        <input
+          type="text"
+          placeholder="Отчество (если есть)"
+          value={middleName}
+          onChange={(e) => setMiddleName(e.target.value)}
+          style={{ marginBottom: 10 }}
+        />
+        {/* Выбор пола — не просили у Никиты в исходном списке полей, но
+            Quick Resto требует его при создании клиента (crm.customer),
+            поэтому добавили сюда же (см. обсуждение с Никитой). */}
+        <select
+          value={gender}
+          onChange={(e) => setGender(e.target.value as "male" | "female" | "")}
+          style={{ marginBottom: 10, width: "100%" }}
+        >
+          <option value="">Пол</option>
+          <option value="male">Мужской</option>
+          <option value="female">Женский</option>
+        </select>
         <input
           type="tel"
           placeholder="Телефон"
@@ -116,7 +163,7 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
         <button
           className="btn primary"
           style={{ width: "100%" }}
-          disabled={!name.trim() || !phone.trim() || !birthDate || saving}
+          disabled={!lastName.trim() || !firstName.trim() || !phone.trim() || !birthDate || !gender || saving}
           onClick={handleRegister}
         >
           {saving ? "Сохраняем…" : "Готово"}
