@@ -346,7 +346,7 @@ async function loadGuests() {
   const { data, error } = await supabase!
     .from("guests")
     .select(
-      "id, display_name, badges, telegram_id, taste_directions, liked_aroma_ids, disliked_aroma_ids, active_table_number, active_visit_started_at, loyalty_code, quickresto_qr_key",
+      "id, display_name, badges, telegram_id, taste_directions, liked_aroma_ids, disliked_aroma_ids, active_table_number, active_visit_started_at, last_visit_at",
     );
   if (error) return logSyncError("loadGuests", error);
   guestsStore.set(
@@ -360,8 +360,7 @@ async function loadGuests() {
       dislikedAromaIds: r.disliked_aroma_ids ?? [],
       activeTableNumber: r.active_table_number ?? undefined,
       activeVisitStartedAt: r.active_visit_started_at ?? undefined,
-      loyaltyCode: r.loyalty_code ?? undefined,
-      quickrestoQrKey: r.quickresto_qr_key ?? undefined,
+      lastVisitAt: r.last_visit_at ?? undefined,
     })),
   );
 }
@@ -1018,6 +1017,26 @@ export async function registerGuest(
     return { error: error.code === "23505" ? "duplicate_phone" : "unknown" };
   }
   const guest = mapGuestRow(data);
+  // Оптимистично добавляем гостя в общий справочник (guestsStore) —
+  // иначе экран карточки гостя (GuestProfile), на который сразу после
+  // создания переходит мастер, на долю секунды показывает "Гость не
+  // найден": guestsStore обновляется только полной перезагрузкой через
+  // loadGuests()/Realtime, а до этого момента там ещё пусто. Добавляем
+  // только безопасное подмножество полей (без телефона/даты рождения/кода
+  // лояльности — см. комментарий у loadGuests, почему их нельзя светить в
+  // общем справочнике).
+  guestsStore.update((prev) => [
+    ...prev,
+    {
+      id: guest.id,
+      displayName: guest.displayName,
+      badges: guest.badges,
+      tasteDirections: guest.tasteDirections,
+      likedAromaIds: guest.likedAromaIds,
+      dislikedAromaIds: guest.dislikedAromaIds,
+      lastVisitAt: guest.lastVisitAt,
+    },
+  ]);
   await enqueueLoyaltyCardRequest(guest.id);
   return { guest };
 }

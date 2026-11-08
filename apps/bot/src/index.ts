@@ -248,7 +248,7 @@ ${link.invite_link}`,
     watchLoyaltyCardRequests(async (req) => {
       const { data: guest, error } = await supabaseAdmin
         .from("guests")
-        .select("display_name, last_name, first_name, middle_name, birth_date, gender, phone")
+        .select("display_name, last_name, first_name, middle_name, birth_date, gender, phone, quickresto_customer_id")
         .eq("id", req.guestId)
         .maybeSingle();
       if (error || !guest) {
@@ -267,6 +267,7 @@ ${link.invite_link}`,
           birthDate: guest.birth_date,
           gender: guest.gender as "male" | "female",
           phone: guest.phone,
+          existingCustomerId: guest.quickresto_customer_id ?? undefined,
         });
         await supabaseAdmin
           .from("guests")

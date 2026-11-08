@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { registerGuest, findGuestByPhone } from "@/data/repo";
+import { formatPhoneInput } from "@/lib/phone";
 
 /**
  * Создание карты лояльности гостю силами сотрудника/мастера — тот же
@@ -105,7 +106,7 @@ export default function GuestCreate() {
           type="tel"
           placeholder="Телефон"
           value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
           style={{ marginBottom: 10 }}
         />
         <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>

@@ -84,8 +84,14 @@ function DataSyncBanner() {
  */
 function LoadingScreen() {
   return (
-    <div className="screen" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "70vh" }}>
-      <div className="muted">Загрузка…</div>
+    <div
+      className="screen"
+      style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "70vh", gap: 14 }}
+    >
+      <div className="spinner" />
+      <div className="eyebrow" style={{ margin: 0 }}>
+        Roof Lounge
+      </div>
     </div>
   );
 }

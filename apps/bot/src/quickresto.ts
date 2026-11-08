@@ -388,33 +388,44 @@ export async function createLoyaltyCardInQuickResto(input: {
   birthDate: string; // ISO YYYY-MM-DD
   gender: "male" | "female";
   phone: string; // уже нормализован на стороне миниаппа, формат "7XXXXXXXXXX"
+  /**
+   * Если у гостя уже есть клиент в Quick Resto (предыдущая попытка создала
+   * его, но упала на привязке телефона/QR — см. обсуждение с Никитой:
+   * номер оказался уже занят другим клиентом) — передать его id сюда,
+   * чтобы повторная попытка не плодила второго клиента, а доделывала
+   * оставшиеся шаги у уже существующего.
+   */
+  existingCustomerId?: number;
 }): Promise<{ customerId: number; qrKey: string }> {
   const regTime = () => Date.now();
 
-  // Шаг 1 — создать самого клиента.
-  const customer = await qrFetchJsonPost<CrmCustomerCreateResult>(
-    `/platform/data/crm.customer/create?regTime=${regTime()}&${QR_TIME_PARAMS}`,
-    {
-      className: CRM_CUSTOMER_CLASS_NAME,
-      deleted: false,
-      internal: true,
-      hidden: false,
-      originType: "BO",
-      lastFrontRevision: false,
-      disabled: false,
-      blocked: false,
-      title: "",
-      pushToCouchDbLocal: false,
-      pushToCouchDb: false,
-      permanent: false,
-      lastName: input.lastName,
-      firstName: input.firstName,
-      ...(input.middleName ? { middleName: input.middleName } : {}),
-      dateOfBirth: input.birthDate,
-      sex: input.gender,
-    },
-  );
-  const customerId = customer.id;
+  // Шаг 1 — создать самого клиента (пропускаем, если уже создан раньше).
+  let customerId = input.existingCustomerId;
+  if (!customerId) {
+    const customer = await qrFetchJsonPost<CrmCustomerCreateResult>(
+      `/platform/data/crm.customer/create?regTime=${regTime()}&${QR_TIME_PARAMS}`,
+      {
+        className: CRM_CUSTOMER_CLASS_NAME,
+        deleted: false,
+        internal: true,
+        hidden: false,
+        originType: "BO",
+        lastFrontRevision: false,
+        disabled: false,
+        blocked: false,
+        title: "",
+        pushToCouchDbLocal: false,
+        pushToCouchDb: false,
+        permanent: false,
+        lastName: input.lastName,
+        firstName: input.firstName,
+        ...(input.middleName ? { middleName: input.middleName } : {}),
+        dateOfBirth: input.birthDate,
+        sex: input.gender,
+      },
+    );
+    customerId = customer.id;
+  }
   const ownerParams = `ownerContextId=${customerId}&ownerContextClassName=${CRM_CUSTOMER_CLASS_NAME}`;
 
   // Шаг 2 — привязать телефон. Quick Resto сам отправляет номер с ведущей
@@ -438,7 +449,7 @@ export async function createLoyaltyCardInQuickResto(input: {
     key: qrKey,
   });
 
-  return { customerId, qrKey };
+  return { customerId: customerId!, qrKey };
 }
 
 // --- Выручка по кальянной категории (перенесено из hookah_bot/quickresto.py,
