@@ -1,8 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "@/data/useStore";
-import { mixesStore, computeTasteProfile, endGuestVisit, getFlavor, getGuest, listAromaTags, removeMix, requestLoyaltyCardCreation } from "@/data/repo";
+import {
+  mixesStore,
+  computeTasteProfile,
+  endGuestVisit,
+  getFlavor,
+  getGuest,
+  getGuestByIdRemote,
+  listAromaTags,
+  removeMix,
+  requestLoyaltyCardCreation,
+} from "@/data/repo";
+import type { Guest } from "@/types";
 import { AROMA_DIRECTION_LABELS } from "@/types";
 import { Stars } from "@/components/Stars";
 import GuestTasteProfile from "@/screens/guest/GuestTasteProfile";
@@ -27,11 +38,38 @@ export default function GuestProfile() {
   // тот же компонент квиза 1-в-1 — ничего не дублируем.
   const [editingTaste, setEditingTaste] = useState(false);
   const [requestingLoyaltyCard, setRequestingLoyaltyCard] = useState(false);
+  // Телефон/дата рождения/код лояльности/QR-ключ гостя НЕ хранятся в общем
+  // guestsStore (см. комментарий у loadGuests в data/repo.ts — он грузится
+  // даже анонимному сканеру QR-ссылки стола, светить там чужие коды
+  // лояльности нельзя). Поэтому для карты лояльности тянем конкретного
+  // гостя точечно, как уже делает гостевой вход по телефону.
+  const [cardGuest, setCardGuest] = useState<Guest | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGuestByIdRemote(guestId).then((g) => {
+      if (!cancelled) setCardGuest(g);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [guestId]);
 
   async function handleRequestLoyaltyCard() {
     setRequestingLoyaltyCard(true);
     try {
       await requestLoyaltyCardCreation(guestId);
+      // Бот обрабатывает запрос асинхронно (обычно пара секунд) — опрашиваем
+      // несколько раз, чтобы карта обновилась сама, без перезахода на экран.
+      for (let i = 0; i < 6; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const updated = await getGuestByIdRemote(guestId);
+        if (updated?.quickrestoQrKey) {
+          setCardGuest(updated);
+          break;
+        }
+        setCardGuest(updated);
+      }
     } finally {
       setRequestingLoyaltyCard(false);
     }
@@ -103,23 +141,22 @@ export default function GuestProfile() {
           {/* Карта лояльности — тот же QR, что гость видит у себя в кабинете
               (см. screens/guest/GuestHome.tsx), но здесь мастер может
               показать его гостю с экрана телефона сотрудника, если у гостя
-              своего телефона с собой нет. Пока работает только внутри
-              приложения — сканирование на кассе Quick Resto не реализовано
-              (см. обсуждение с Никитой, нужен снимок реального запроса из
-              админки Quick Resto). */}
+              своего телефона с собой нет. quickrestoQrKey — реальный
+              идентификатор, который сканируется на кассе Quick Resto (см.
+              supabase/migrations/0016_loyalty_card_requests.sql). */}
           <div className="eyebrow">Карта лояльности</div>
           <div className="card" style={{ textAlign: "center", padding: 20, marginBottom: 16 }}>
             <div style={{ display: "flex", justifyContent: "center" }}>
-              <QRCodeSVG value={guest.quickrestoQrKey ?? guest.loyaltyCode ?? guest.id} size={140} />
+              <QRCodeSVG value={cardGuest?.quickrestoQrKey ?? cardGuest?.loyaltyCode ?? guest.id} size={140} />
             </div>
             <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-              {guest.quickrestoQrKey ? (
-                <>Код лояльности: {guest.loyaltyCode ?? "—"} · работает на кассе Quick Resto</>
+              {cardGuest?.quickrestoQrKey ? (
+                <>Код лояльности: {cardGuest?.loyaltyCode ?? "—"} · работает на кассе Quick Resto</>
               ) : (
-                <>Код лояльности: {guest.loyaltyCode ?? "—"} · пока не привязан к кассе Quick Resto</>
+                <>Код лояльности: {cardGuest?.loyaltyCode ?? "—"} · пока не привязан к кассе Quick Resto</>
               )}
             </div>
-            {!guest.quickrestoQrKey && (
+            {!cardGuest?.quickrestoQrKey && (
               <button
                 className="btn secondary"
                 style={{ width: "100%", marginTop: 10 }}

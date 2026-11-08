@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { findGuestByPhone, registerGuest } from "@/data/repo";
+import { formatPhoneInput } from "@/lib/phone";
 import type { Guest } from "@/types";
 
 /**
@@ -10,15 +11,6 @@ import type { Guest } from "@/types";
  * же данные позже можно было передать при создании клиента в Quick Resto
  * (см. обсуждение с Никитой про карту лояльности).
  */
-// Если начали печатать номер с "9" (а не с "+7"/"8") — подставляем "+7"
-// впереди: так привычнее печатать мобильный номер без кода страны, не
-// думая о нём (см. запрос Никиты 14.10.2026). Срабатывает только пока вся
-// строка состоит из цифр, начинающихся с 9 — после подстановки строка уже
-// начинается на "+7" и под регулярку не попадает повторно.
-function autoPrefixPhone(raw: string): string {
-  return /^9\d*$/.test(raw) ? `+7${raw}` : raw;
-}
-
 export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew: boolean) => void }) {
   const [phone, setPhone] = useState("");
   const [checking, setChecking] = useState(false);
@@ -88,7 +80,7 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
           type="tel"
           placeholder="+7 900 000-00-00"
           value={phone}
-          onChange={(e) => setPhone(autoPrefixPhone(e.target.value))}
+          onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
           style={{ marginTop: 16, marginBottom: 12, fontSize: 18, textAlign: "center" }}
         />
         <button className="btn primary" disabled={!phone.trim() || checking} onClick={handleCheck}>
@@ -150,7 +142,7 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
           type="tel"
           placeholder="Телефон"
           value={phone}
-          onChange={(e) => setPhone(autoPrefixPhone(e.target.value))}
+          onChange={(e) => setPhone(formatPhoneInput(e.target.value))}
           style={{ marginBottom: 10 }}
         />
         {/* Пустой input[type=date] без подписи не объясняет, что он вводит —
