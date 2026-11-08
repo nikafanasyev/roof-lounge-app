@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import GuestsList from "@/screens/master/GuestsList";
+import GuestCreate from "@/screens/master/GuestCreate";
 import GuestProfile from "@/screens/master/GuestProfile";
 import MixBuilder from "@/screens/master/MixBuilder";
 import MixView from "@/screens/master/MixView";
@@ -249,6 +250,7 @@ function RoleShell() {
 
         <Route path="/employee/dashboard" element={<Dashboard />} />
         <Route path="/employee/guests" element={<GuestsList />} />
+        <Route path="/employee/guests/new" element={<GuestCreate />} />
         <Route path="/employee/guests/:guestId" element={<GuestProfile />} />
         <Route path="/employee/guests/:guestId/mix" element={<MixBuilder />} />
         <Route path="/employee/mix/:mixId" element={<MixView />} />

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "@/data/useStore";
-import { mixesStore, computeTasteProfile, endGuestVisit, getFlavor, getGuest, listAromaTags, removeMix } from "@/data/repo";
+import { mixesStore, computeTasteProfile, endGuestVisit, getFlavor, getGuest, listAromaTags, removeMix, requestLoyaltyCardCreation } from "@/data/repo";
 import { AROMA_DIRECTION_LABELS } from "@/types";
 import { Stars } from "@/components/Stars";
 import GuestTasteProfile from "@/screens/guest/GuestTasteProfile";
@@ -25,6 +26,16 @@ export default function GuestProfile() {
   // вкусовой профиль" для гостя, которого завели вручную). Переиспользуем
   // тот же компонент квиза 1-в-1 — ничего не дублируем.
   const [editingTaste, setEditingTaste] = useState(false);
+  const [requestingLoyaltyCard, setRequestingLoyaltyCard] = useState(false);
+
+  async function handleRequestLoyaltyCard() {
+    setRequestingLoyaltyCard(true);
+    try {
+      await requestLoyaltyCardCreation(guestId);
+    } finally {
+      setRequestingLoyaltyCard(false);
+    }
+  }
 
   if (!guest) {
     return (
@@ -89,6 +100,37 @@ export default function GuestProfile() {
 
       {tab === "profile" && (
         <>
+          {/* Карта лояльности — тот же QR, что гость видит у себя в кабинете
+              (см. screens/guest/GuestHome.tsx), но здесь мастер может
+              показать его гостю с экрана телефона сотрудника, если у гостя
+              своего телефона с собой нет. Пока работает только внутри
+              приложения — сканирование на кассе Quick Resto не реализовано
+              (см. обсуждение с Никитой, нужен снимок реального запроса из
+              админки Quick Resto). */}
+          <div className="eyebrow">Карта лояльности</div>
+          <div className="card" style={{ textAlign: "center", padding: 20, marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <QRCodeSVG value={guest.quickrestoQrKey ?? guest.loyaltyCode ?? guest.id} size={140} />
+            </div>
+            <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
+              {guest.quickrestoQrKey ? (
+                <>Код лояльности: {guest.loyaltyCode ?? "—"} · работает на кассе Quick Resto</>
+              ) : (
+                <>Код лояльности: {guest.loyaltyCode ?? "—"} · пока не привязан к кассе Quick Resto</>
+              )}
+            </div>
+            {!guest.quickrestoQrKey && (
+              <button
+                className="btn secondary"
+                style={{ width: "100%", marginTop: 10 }}
+                disabled={requestingLoyaltyCard}
+                onClick={handleRequestLoyaltyCard}
+              >
+                {requestingLoyaltyCard ? "Отправляем…" : "Создать/повторить привязку к кассе"}
+              </button>
+            )}
+          </div>
+
           {/* Анкета, которую гость сам заполнил в своём кабинете (квиз) — не
               путать с разделом ниже, который считается по истории миксов. */}
           <div className="eyebrow">Анкета гостя</div>

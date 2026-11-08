@@ -277,3 +277,49 @@ export function watchPayrollRecalcRequests(onRequest: (event: PayrollRecalcReque
     ),
   );
 }
+
+interface LoyaltyCardRequestEvent {
+  id: string;
+  guestId: string;
+  markDone: (result: string) => Promise<void>;
+  markFailed: (error: string) => Promise<void>;
+}
+
+/**
+ * "Создать карту лояльности" в мини-аппе (и у гостя в своём кабинете, и у
+ * мастера в карточке гостя) пишет сюда вместо прямого вызова Quick Resto —
+ * тот же мотив, что у payroll_recalc_requests выше: у миниаппа нет и не
+ * должно быть credentials Quick Resto. onRequest должен сам прочитать
+ * нужные поля гостя из guests (id гостя есть в событии), вызвать
+ * createLoyaltyCardInQuickResto (см. quickresto.ts) и обновить
+ * guests.quickresto_customer_id/quickresto_qr_key.
+ */
+export function watchLoyaltyCardRequests(onRequest: (event: LoyaltyCardRequestEvent) => void | Promise<void>) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+
+  resubscribable("loyalty_card_requests", () =>
+    supabase.channel(`loyalty_card_requests_inserts_${Date.now()}`).on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "loyalty_card_requests" },
+      async (payload) => {
+        const row = payload.new as { id: string; guest_id: string; status: string };
+        if (row.status !== "pending") return;
+        try {
+          await onRequest({
+            id: row.id,
+            guestId: row.guest_id,
+            markDone: async (result: string) => {
+              await supabase.from("loyalty_card_requests").update({ status: "done", result, handled_at: new Date().toISOString() }).eq("id", row.id);
+            },
+            markFailed: async (error: string) => {
+              await supabase.from("loyalty_card_requests").update({ status: "failed", result: error, handled_at: new Date().toISOString() }).eq("id", row.id);
+            },
+          });
+        } catch (err) {
+          console.error("Ошибка при обработке запроса на создание карты лояльности:", err);
+          await supabase.from("loyalty_card_requests").update({ status: "failed", result: String(err), handled_at: new Date().toISOString() }).eq("id", row.id);
+        }
+      },
+    ),
+  );
+}

@@ -346,7 +346,7 @@ async function loadGuests() {
   const { data, error } = await supabase!
     .from("guests")
     .select(
-      "id, display_name, badges, telegram_id, taste_directions, liked_aroma_ids, disliked_aroma_ids, active_table_number, active_visit_started_at",
+      "id, display_name, badges, telegram_id, taste_directions, liked_aroma_ids, disliked_aroma_ids, active_table_number, active_visit_started_at, loyalty_code, quickresto_qr_key",
     );
   if (error) return logSyncError("loadGuests", error);
   guestsStore.set(
@@ -360,6 +360,8 @@ async function loadGuests() {
       dislikedAromaIds: r.disliked_aroma_ids ?? [],
       activeTableNumber: r.active_table_number ?? undefined,
       activeVisitStartedAt: r.active_visit_started_at ?? undefined,
+      loyaltyCode: r.loyalty_code ?? undefined,
+      quickrestoQrKey: r.quickresto_qr_key ?? undefined,
     })),
   );
 }
@@ -906,7 +908,13 @@ function mapGuestRow(r: Record<string, unknown>): Guest {
     tableTelegramId: r.telegram_id ? String(r.telegram_id) : undefined,
     phone: (r.phone as string | null) ?? undefined,
     birthDate: (r.birth_date as string | null) ?? undefined,
+    lastName: (r.last_name as string | null) ?? undefined,
+    firstName: (r.first_name as string | null) ?? undefined,
+    middleName: (r.middle_name as string | null) ?? undefined,
+    gender: (r.gender as "male" | "female" | null) ?? undefined,
     loyaltyCode: (r.loyalty_code as string | null) ?? undefined,
+    quickrestoCustomerId: (r.quickresto_customer_id as number | null) ?? undefined,
+    quickrestoQrKey: (r.quickresto_qr_key as string | null) ?? undefined,
     bonusPoints: Number(r.bonus_points ?? 0),
     lastVisitAt: (r.last_visit_at as string | null) ?? undefined,
     tasteDirections: (r.taste_directions as AromaDirection[] | null) ?? [],
@@ -946,19 +954,72 @@ export async function getGuestByIdRemote(guestId: string): Promise<Guest | null>
   return data ? mapGuestRow(data) : null;
 }
 
-export async function registerGuest(input: { phone: string; displayName: string; birthDate: string }): Promise<Guest | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
+export type RegisterGuestError = "duplicate_phone" | "unknown";
+
+/**
+ * Поставить в очередь создание карты лояльности в Quick Resto (клиент +
+ * телефон + QR-идентификатор) — делает бот (см. supabase/migrations/0016_loyalty_card_requests.sql
+ * и watchLoyaltyCardRequests в apps/bot), у миниаппа нет credentials
+ * Quick Resto. Не блокирует регистрацию гостя — если вставка запроса не
+ * получилась, гость всё равно создан, просто карта в Quick Resto не
+ * появится (можно будет повторить вручную позже).
+ */
+async function enqueueLoyaltyCardRequest(guestId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { error } = await supabase.from("loyalty_card_requests").insert({ guest_id: guestId });
+  if (error) logSyncError("enqueueLoyaltyCardRequest", error);
+}
+
+/**
+ * Запросить (повторно) создание/привязку карты лояльности в Quick Resto —
+ * для гостей, у которых это не случилось автоматически при регистрации
+ * (например, были заведены до появления этой функции, или первая попытка
+ * провалилась — см. apps/bot watchLoyaltyCardRequests). Результат не
+ * возвращается напрямую — guestsStore обновится через Realtime, когда бот
+ * обработает запрос.
+ */
+export async function requestLoyaltyCardCreation(guestId: string): Promise<void> {
+  await enqueueLoyaltyCardRequest(guestId);
+}
+
+export async function registerGuest(
+  input: {
+    phone: string;
+    lastName: string;
+    firstName: string;
+    middleName?: string;
+    birthDate: string;
+    gender: "male" | "female";
+  },
+): Promise<{ guest: Guest } | { error: RegisterGuestError }> {
+  if (!isSupabaseConfigured || !supabase) return { error: "unknown" };
   const normalized = normalizePhone(input.phone);
+  const lastName = input.lastName.trim();
+  const firstName = input.firstName.trim();
+  const middleName = input.middleName?.trim() || null;
+  const displayName = [lastName, firstName].filter(Boolean).join(" ");
   const { data, error } = await supabase
     .from("guests")
-    .insert({ phone: normalized, display_name: input.displayName, birth_date: input.birthDate, last_visit_at: new Date().toISOString() })
+    .insert({
+      phone: normalized,
+      display_name: displayName,
+      last_name: lastName,
+      first_name: firstName,
+      middle_name: middleName,
+      gender: input.gender,
+      birth_date: input.birthDate,
+      last_visit_at: new Date().toISOString(),
+    })
     .select("*")
     .single();
   if (error) {
     logSyncError("registerGuest", error);
-    return null;
+    // 23505 — уникальный телефон уже занят (кто-то уже зарегистрирован с этим номером).
+    return { error: error.code === "23505" ? "duplicate_phone" : "unknown" };
   }
-  return mapGuestRow(data);
+  const guest = mapGuestRow(data);
+  await enqueueLoyaltyCardRequest(guest.id);
+  return { guest };
 }
 
 export async function saveGuestTasteProfile(
