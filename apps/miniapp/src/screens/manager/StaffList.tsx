@@ -8,10 +8,11 @@ const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кал�
 
 /**
  * Форма приглашения (кнопка "+ Пригласить") — ФИО/телефон/Telegram ID, см.
- * запрос Никиты 13.10.2026. Бот сам создаёт инвайт-ссылку на рабочий чат
- * (watchStaffInvites в apps/bot/src/notify.ts) — Telegram не даёт боту
- * написать человеку первым, поэтому ссылка уходит руководителю в чат, а не
- * сразу новому сотруднику.
+ * запрос Никиты 13.10.2026. Бот создаёт инвайт-ссылку на рабочий чат
+ * (watchStaffInvites в apps/bot/src/notify.ts) и просто пишет результат в
+ * staff_invites — готовую ссылку (или ошибку) показываем прямо здесь, в
+ * списке "Приглашения" ниже, без отдельного сообщения в Telegram (см.
+ * обсуждение с Никитой 09.11.2026).
  */
 function InviteForm({ onClose }: { onClose: () => void }) {
   const [fullName, setFullName] = useState("");
@@ -46,9 +47,57 @@ function InviteForm({ onClose }: { onClose: () => void }) {
 
 const INVITE_STATUS_LABEL: Record<string, string> = {
   pending: "готовим ссылку…",
-  sent: "ссылка готова — переслана в рабочий чат",
+  sent: "ссылка готова",
   failed: "не удалось создать ссылку",
 };
+
+/**
+ * Строка одного приглашения. Пока status="pending" — просто крутим
+ * статус-текст (бот обычно отвечает за секунды через Realtime). Когда
+ * готово — показываем саму ссылку с кнопкой "Скопировать" (переслать
+ * сотруднику решает сам руководитель — в WhatsApp, личным сообщением и
+ * т.д., бот не может написать новому человеку первым). Когда провалилось —
+ * показываем текст ошибки бота (обычно это про права бота в рабочем чате).
+ */
+function InviteRow({ inv }: { inv: ReturnType<typeof listStaffInvites>[number] }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyLink() {
+    if (!inv.inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inv.inviteLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // буфер обмена недоступен (например, не https) — ссылку всё равно
+      // видно текстом, можно выделить и скопировать руками.
+    }
+  }
+
+  return (
+    <div className="card-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 4, padding: "8px 0" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+        <span>{inv.fullName}</span>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {INVITE_STATUS_LABEL[inv.status] ?? inv.status}
+        </span>
+      </div>
+      {inv.status === "sent" && inv.inviteLink && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="text" readOnly value={inv.inviteLink} style={{ fontSize: 12, flex: 1 }} onFocus={(e) => e.target.select()} />
+          <button className="btn secondary" style={{ padding: "6px 10px", fontSize: 12, whiteSpace: "nowrap" }} onClick={copyLink}>
+            {copied ? "Скопировано" : "Скопировать"}
+          </button>
+        </div>
+      )}
+      {inv.status === "failed" && inv.error && (
+        <div className="muted" style={{ fontSize: 12, color: "var(--danger, #c0392b)" }}>
+          {inv.error}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function RecentInvites() {
   useStore(staffInvitesStore);
@@ -60,12 +109,7 @@ function RecentInvites() {
         Приглашения
       </div>
       {invites.map((inv) => (
-        <div key={inv.id} className="card-row" style={{ padding: "8px 0" }}>
-          <span>{inv.fullName}</span>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {INVITE_STATUS_LABEL[inv.status] ?? inv.status}
-          </span>
-        </div>
+        <InviteRow key={inv.id} inv={inv} />
       ))}
     </>
   );

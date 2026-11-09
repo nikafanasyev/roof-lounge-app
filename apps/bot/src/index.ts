@@ -151,14 +151,13 @@ async function main() {
   // нужно будет добавить создание нескольких ссылок. Боту нужны права
   // администратора с "Приглашение пользователей" в этом чате — без них
   // createChatInviteLink вернёт ошибку, и заявка уйдёт в status=failed.
+  //
+  // Результат (готовая ссылка или текст ошибки) никуда не шлём отдельным
+  // сообщением — просто пишем в staff_invites, а раздел "Сотрудники" в
+  // приложении сам подхватывает это через Realtime и показывает ссылку (с
+  // кнопкой "Скопировать") прямо под формой приглашения — см. обсуждение с
+  // Никитой 09.11.2026.
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.STAFF_CHAT_ID) {
-    // Саму ссылку-приглашение создаём на рабочий чат (STAFF_CHAT_ID) — это
-    // и есть чат, в который она ведёт. А вот текст с готовой ссылкой шлём
-    // не в этот же чат всем на обозрение, а в личку тому, кто и так
-    // отправит её новому сотруднику (OWNER_CHAT_ID; см. обсуждение с
-    // Никитой 09.11.2026). Если OWNER_CHAT_ID не задан — падаем обратно в
-    // STAFF_CHAT_ID, как было раньше.
-    const inviteNotifyChatId = env.OWNER_CHAT_ID || env.STAFF_CHAT_ID;
     watchStaffInvites(async (invite) => {
       try {
         const link = await bot.api.createChatInviteLink(env.STAFF_CHAT_ID, {
@@ -166,26 +165,9 @@ async function main() {
           member_limit: 1,
         });
         await invite.markSent(link.invite_link);
-        const contactLine = [invite.phone ? `тел. ${invite.phone}` : null, invite.telegramId ? `Telegram ID ${invite.telegramId}` : null]
-          .filter(Boolean)
-          .join(" · ");
-        await bot.api.sendMessage(
-          inviteNotifyChatId,
-          `👋 Приглашение для нового сотрудника
-${invite.fullName}${contactLine ? `
-${contactLine}` : ""}
-
-` +
-            `Ссылка (на одного человека, перешлите сотруднику лично — бот не может написать ему первым, пока тот не нажал /start боту):
-${link.invite_link}`,
-        );
       } catch (err) {
         console.error("Quick Resto: не удалось создать инвайт-ссылку:", err);
         await invite.markFailed(String(err));
-        await bot.api.sendMessage(
-          inviteNotifyChatId,
-          `⚠️ Не удалось создать ссылку-приглашение для ${invite.fullName} — проверьте, что бот админ чата с правом "Приглашение пользователей по ссылке".`,
-        );
       }
     });
     console.log("Слушаю staff_invites через Supabase Realtime — приглашения сотрудников включены.");
