@@ -1636,26 +1636,51 @@ export function getStaffProfileById(staffId: string): StaffProfile | undefined {
  * "Сотрудники". Пишем оптимистично в стор и, если настроен Supabase, следом
  * в staff-таблицу.
  */
+/**
+ * telegramId — отдельно от остальных полей: staff.telegram_id уникален в
+ * БД, поэтому его нельзя применять оптимистично (можем показать значение,
+ * которое Supabase тут же отклонит как дубликат). Остальные поля
+ * обновляем в staffDirectoryStore сразу, telegramId — только после
+ * успешного ответа. Возвращаем промис с { error: "duplicate_telegram_id" }
+ * на случай конфликта уникальности (23505) — экран редактирования
+ * сотрудника (StaffDetail.tsx) показывает это как понятную ошибку, а не
+ * молча проваливается (см. запрос Никиты 09.11.2026 про привязку
+ * существующего сотрудника к его Telegram ID, чтобы не плодить дубли при
+ * приглашении в рабочий чат).
+ */
 export function updateStaffProfileById(
   staffId: string,
-  patch: Partial<Pick<StaffProfile, "name" | "phone" | "email" | "role" | "salaryModel" | "photoUrl">>,
-) {
-  staffDirectoryStore.update((list) => list.map((s) => (s.id === staffId ? { ...s, ...patch } : s)));
-  if (!isSupabaseConfigured || !supabase) return;
+  patch: Partial<Pick<StaffProfile, "name" | "phone" | "email" | "role" | "salaryModel" | "photoUrl" | "telegramId">>,
+): Promise<{ error?: "duplicate_telegram_id" | "unknown" } | void> {
+  const { telegramId, ...rest } = patch;
+  if (Object.keys(rest).length > 0) {
+    staffDirectoryStore.update((list) => list.map((s) => (s.id === staffId ? { ...s, ...rest } : s)));
+  }
+  if (!isSupabaseConfigured || !supabase) return Promise.resolve();
   const row: Record<string, unknown> = {};
-  if (patch.name !== undefined) row.name = patch.name;
-  if (patch.phone !== undefined) row.phone = patch.phone;
-  if (patch.email !== undefined) row.email = patch.email;
-  if (patch.role !== undefined) row.work_role = patch.role;
-  if (patch.salaryModel !== undefined) row.salary_model = patch.salaryModel;
-  if (patch.photoUrl !== undefined) row.photo_url = patch.photoUrl;
-  supabase
-    .from("staff")
-    .update(row)
-    .eq("id", staffId)
-    .then(({ error }) => {
-      if (error) logSyncError("updateStaffProfileById", error);
-    });
+  if (rest.name !== undefined) row.name = rest.name;
+  if (rest.phone !== undefined) row.phone = rest.phone;
+  if (rest.email !== undefined) row.email = rest.email;
+  if (rest.role !== undefined) row.work_role = rest.role;
+  if (rest.salaryModel !== undefined) row.salary_model = rest.salaryModel;
+  if (rest.photoUrl !== undefined) row.photo_url = rest.photoUrl;
+  if (telegramId !== undefined) row.telegram_id = telegramId;
+  return Promise.resolve(
+    supabase
+      .from("staff")
+      .update(row)
+      .eq("id", staffId)
+      .then(({ error }) => {
+        if (error) {
+          logSyncError("updateStaffProfileById", error);
+          const code: "duplicate_telegram_id" | "unknown" = error.code === "23505" ? "duplicate_telegram_id" : "unknown";
+          return { error: code };
+        }
+        if (telegramId !== undefined) {
+          staffDirectoryStore.update((list) => list.map((s) => (s.id === staffId ? { ...s, telegramId } : s)));
+        }
+      }),
+  );
 }
 
 /** Фото сотрудника — постоянное, публичный бакет staff-photos (см. 0012_salary_screen.sql), не путать с эфемерными фото смен. */
