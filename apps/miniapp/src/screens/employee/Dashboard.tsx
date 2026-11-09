@@ -36,13 +36,14 @@ export default function Dashboard() {
         <div style={{ fontSize: 22, fontWeight: 700 }}>{money(earnedThisMonth)}</div>
       </div>
 
+      {/*
+        "Зарплата (всего)" убрали — это сумма за всё время с момента найма,
+        она только росла и путала рядом с "Заработано за месяц" выше (см.
+        обсуждение с Никитой 09.11.2026: "Зарплата всего будто просто
+        лишнее"). Выплачено/Штрафы/Премии оставили — это за весь период
+        (с последней выплаты), а не за календарный месяц.
+      */}
       <div className="stat-grid">
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--accent)" }}>
-            {money(summary.earned)}
-          </div>
-          <div className="label">Зарплата (всего)</div>
-        </div>
         <div className="stat-tile">
           <div className="value" style={{ color: "var(--good)" }}>
             {money(summary.paid)}
