@@ -152,6 +152,13 @@ async function main() {
   // администратора с "Приглашение пользователей" в этом чате — без них
   // createChatInviteLink вернёт ошибку, и заявка уйдёт в status=failed.
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.STAFF_CHAT_ID) {
+    // Саму ссылку-приглашение создаём на рабочий чат (STAFF_CHAT_ID) — это
+    // и есть чат, в который она ведёт. А вот текст с готовой ссылкой шлём
+    // не в этот же чат всем на обозрение, а в личку тому, кто и так
+    // отправит её новому сотруднику (OWNER_CHAT_ID; см. обсуждение с
+    // Никитой 09.11.2026). Если OWNER_CHAT_ID не задан — падаем обратно в
+    // STAFF_CHAT_ID, как было раньше.
+    const inviteNotifyChatId = env.OWNER_CHAT_ID || env.STAFF_CHAT_ID;
     watchStaffInvites(async (invite) => {
       try {
         const link = await bot.api.createChatInviteLink(env.STAFF_CHAT_ID, {
@@ -163,7 +170,7 @@ async function main() {
           .filter(Boolean)
           .join(" · ");
         await bot.api.sendMessage(
-          env.STAFF_CHAT_ID,
+          inviteNotifyChatId,
           `👋 Приглашение для нового сотрудника
 ${invite.fullName}${contactLine ? `
 ${contactLine}` : ""}
@@ -176,7 +183,7 @@ ${link.invite_link}`,
         console.error("Quick Resto: не удалось создать инвайт-ссылку:", err);
         await invite.markFailed(String(err));
         await bot.api.sendMessage(
-          env.STAFF_CHAT_ID,
+          inviteNotifyChatId,
           `⚠️ Не удалось создать ссылку-приглашение для ${invite.fullName} — проверьте, что бот админ чата с правом "Приглашение пользователей по ссылке".`,
         );
       }
@@ -370,6 +377,17 @@ ${link.invite_link}`,
   } else {
     console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }
+
+  // Кнопка "Открыть Roof Lounge" в ответе на /start — обычное сообщение в
+  // чате, и при активном боте (много уведомлений: вызовы официанта, фото
+  // смен и т.д.) она быстро "улетает наверх" и теряется в истории (см.
+  // обсуждение с Никитой 09.11.2026). Меню-кнопка рядом с полем ввода
+  // (setChatMenuButton) не прокручивается вместе с сообщениями — она
+  // закреплена всегда, открывает тот же мини-апп. Ставим её разом для всех
+  // пользователей бота (без chat_id — дефолт для всех личных чатов).
+  await bot.api.setChatMenuButton({
+    menu_button: { type: "web_app", text: "Roof Lounge", web_app: { url: env.MINI_APP_URL } },
+  });
 
   await bot.start();
 }
