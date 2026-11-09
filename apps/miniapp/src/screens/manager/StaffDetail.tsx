@@ -113,26 +113,46 @@ function ShiftRow({ id, staffId, date, role, revenue, salary }: { id: string; st
 /** Модель ЗП, роль на смене и контакты — редактируются прямо здесь, без отдельного экрана (см. запрос Никиты 13.10.2026). */
 function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnType<typeof getStaffProfileById> }) {
   if (!profile) return null;
+  const currentTelegramId = profile.telegramId;
   const [editing, setEditing] = useState(false);
   const [role, setRole] = useState<StaffRole | "">(profile.role ?? "");
   const [phone, setPhone] = useState(profile.phone ?? "");
   const [email, setEmail] = useState(profile.email ?? "");
+  const [telegramId, setTelegramId] = useState(currentTelegramId != null ? String(currentTelegramId) : "");
+  const [telegramIdError, setTelegramIdError] = useState<string | null>(null);
   const [salaryType, setSalaryType] = useState<SalaryModelType>(profile.salaryModel.type);
   const [salaryValue, setSalaryValue] = useState(String(profile.salaryModel.type === "fixed_plus_percent" ? profile.salaryModel.base : profile.salaryModel.value));
   const [salaryPercent, setSalaryPercent] = useState(String(profile.salaryModel.type === "fixed_plus_percent" ? profile.salaryModel.percent : ""));
 
-  function save() {
+  async function save() {
     let salaryModel: SalaryModel;
     if (salaryType === "fixed") salaryModel = { type: "fixed", value: Number(salaryValue) || 0 };
     else if (salaryType === "percent") salaryModel = { type: "percent", value: Number(salaryValue) || 0 };
     else salaryModel = { type: "fixed_plus_percent", base: Number(salaryValue) || 0, percent: Number(salaryPercent) || 0 };
 
-    updateStaffProfileById(staffId, {
+    const trimmedTelegramId = telegramId.trim();
+    const telegramIdChanged = trimmedTelegramId !== (currentTelegramId != null ? String(currentTelegramId) : "");
+    if (telegramIdChanged && trimmedTelegramId && !/^\d+$/.test(trimmedTelegramId)) {
+      setTelegramIdError("Telegram ID — это число (см. у @userinfobot), без букв и пробелов");
+      return;
+    }
+
+    const result = await updateStaffProfileById(staffId, {
       role: role || undefined,
       phone: phone.trim() || undefined,
       email: email.trim() || undefined,
       salaryModel,
+      ...(telegramIdChanged && trimmedTelegramId ? { telegramId: Number(trimmedTelegramId) } : {}),
     });
+    if (result?.error === "duplicate_telegram_id") {
+      setTelegramIdError("Этот Telegram ID уже привязан к другому сотруднику — проверь, не дублируется ли карточка");
+      return;
+    }
+    if (result?.error) {
+      setTelegramIdError("Не получилось сохранить — попробуй ещё раз");
+      return;
+    }
+    setTelegramIdError(null);
     setEditing(false);
   }
 
@@ -154,6 +174,10 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
         <div className="card-row" style={{ marginTop: 8 }}>
           <span className="muted">Почта</span>
           <span>{profile.email || "не указана"}</span>
+        </div>
+        <div className="card-row" style={{ marginTop: 8 }}>
+          <span className="muted">Telegram ID</span>
+          <span>{profile.telegramId ?? "не указан"}</span>
         </div>
         <div className="card-row" style={{ marginTop: 8 }}>
           <span className="muted">Модель ЗП</span>
@@ -180,6 +204,33 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
 
       <div className="eyebrow">Почта</div>
       <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ marginBottom: 10 }} />
+
+      <div className="eyebrow">Telegram ID</div>
+      <input
+        type="text"
+        inputMode="numeric"
+        value={telegramId}
+        onChange={(e) => {
+          setTelegramId(e.target.value);
+          setTelegramIdError(null);
+        }}
+        placeholder="Например: 123456789"
+        style={{ marginBottom: telegramIdError ? 4 : 10 }}
+      />
+      {telegramIdError && (
+        <div className="muted" style={{ fontSize: 12, color: "var(--danger, #c0392b)", marginBottom: 10 }}>
+          {telegramIdError}
+        </div>
+      )}
+      {/*
+        Чтобы узнать свой числовой Telegram ID, сотрудник пишет любому
+        боту-"узнавалке" (например, @userinfobot) — он сразу присылает
+        число в ответ. Задавать его здесь заранее стоит, когда карточка
+        сотрудника уже существует (ЗП/график/история), а он пока не
+        открывал приложение сам — так первое открытие подвяжется к этой же
+        карточке, а не создаст дубликат (см. обсуждение с Никитой
+        09.11.2026).
+      */}
 
       <div className="eyebrow">Модель ЗП</div>
       <select value={salaryType} onChange={(e) => setSalaryType(e.target.value as SalaryModelType)} style={{ marginBottom: 8 }}>
