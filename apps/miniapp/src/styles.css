@@ -6,15 +6,31 @@
   --bg: #15171b;
   --surface: #1c1f24;
   --surface-2: #24272d;
+  --surface-hover: #2a2d33;
   --ink: #e7e9ec;
   --muted: #8b9099;
   --accent: #b98653;
+  --accent-hover: #c89566;
   --accent-ink: #171310;
   --good: #5f9e77;
   --warn: #c39a4a;
   --danger: #bd5b4d;
   --border: #2b2e34;
   color-scheme: dark;
+
+  /* Единая шкала отступов — используем её вместо произвольных чисел
+     (4/8/12/16/24/32), чтобы интервалы между элементами были предсказуемы
+     и одинаковы по всем экранам (см. обсуждение с Никитой 09.11.2026:
+     "адекватные отступы везде"). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius: 10px;
+  --radius-sm: 8px;
 }
 
 * {
@@ -32,7 +48,29 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* Единая видимая рамка фокуса — раньше её не было нигде (ни на кнопках, ни
+   на полях, ни на ссылках), с клавиатуры/VoiceOver было не понять, что в
+   фокусе. Не трогаем обычный :hover-курсор мышью — только клавиатурная
+   навигация (:focus-visible). */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .app {
@@ -46,7 +84,7 @@ body {
 
 .screen {
   flex: 1;
-  padding: 18px 16px 96px;
+  padding: var(--space-5) var(--space-4) 96px;
   overflow-y: auto;
 }
 
@@ -56,21 +94,26 @@ h3 {
   font-family: inherit;
   font-weight: 600;
   letter-spacing: normal;
+  line-height: 1.25;
   color: var(--ink);
 }
 
 h1 {
-  font-size: 20px;
-  margin: 0 0 14px;
+  font-size: 21px;
+  margin: 0 0 var(--space-4);
 }
 
 h2 {
-  font-size: 15px;
-  margin: 0 0 8px;
+  font-size: 14px;
+  margin: 0 0 var(--space-2);
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 600;
+}
+
+p {
+  line-height: 1.5;
 }
 
 .muted {
@@ -104,9 +147,19 @@ h2 {
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px;
-  margin-bottom: 10px;
+  border-radius: var(--radius);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* Карточка, обёрнутая в <Link> (списки гостей/сотрудников/заявок) — даём
+   видимую обратную связь при наведении/тапе, иначе непонятно, что она
+   кликабельна (раньше только курсор-стрелка браузера это выдавал). */
+a:hover > .card,
+a:active > .card {
+  background: var(--surface-hover);
+  border-color: var(--accent);
 }
 
 .card-row {
@@ -152,12 +205,13 @@ h2 {
 
 .btn {
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 13px 16px;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease, transform 0.05s ease;
 }
 
 .btn.primary {
@@ -166,10 +220,19 @@ h2 {
   width: 100%;
 }
 
+.btn.primary:hover {
+  background: var(--accent-hover);
+}
+
 .btn.secondary {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--ink);
+}
+
+.btn.secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--muted);
 }
 
 .btn.ghost {
@@ -178,10 +241,22 @@ h2 {
   border: 1px solid var(--accent);
 }
 
+.btn.ghost:hover {
+  background: rgba(185, 134, 83, 0.12);
+}
+
 .btn.danger-ghost {
   background: transparent;
   color: var(--danger);
   border: 1px solid var(--danger);
+}
+
+.btn.danger-ghost:hover {
+  background: rgba(189, 91, 77, 0.12);
+}
+
+.btn:not(:disabled):active {
+  transform: scale(0.98);
 }
 
 .btn:disabled {
@@ -205,11 +280,37 @@ select {
   width: 100%;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 11px 12px;
   color: var(--ink);
   font-size: 15px;
   font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: #3a3e46;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+}
+
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 textarea {
@@ -226,7 +327,7 @@ textarea {
 .tab-btn {
   flex: 1;
   padding: 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--muted);
@@ -234,6 +335,11 @@ textarea {
   cursor: pointer;
   font-family: inherit;
   font-size: 13px;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: var(--ink);
 }
 
 .tab-btn.active {
@@ -385,10 +491,16 @@ textarea {
   align-items: center;
   gap: 12px;
   padding: 12px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   text-decoration: none;
   font-size: 15px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.drawer-nav a:hover {
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .drawer-nav a.active {

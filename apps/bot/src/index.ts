@@ -151,6 +151,12 @@ async function main() {
   // нужно будет добавить создание нескольких ссылок. Боту нужны права
   // администратора с "Приглашение пользователей" в этом чате — без них
   // createChatInviteLink вернёт ошибку, и заявка уйдёт в status=failed.
+  //
+  // Результат (готовая ссылка или текст ошибки) никуда не шлём отдельным
+  // сообщением — просто пишем в staff_invites, а раздел "Сотрудники" в
+  // приложении сам подхватывает это через Realtime и показывает ссылку (с
+  // кнопкой "Скопировать") прямо под формой приглашения — см. обсуждение с
+  // Никитой 09.11.2026.
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.STAFF_CHAT_ID) {
     watchStaffInvites(async (invite) => {
       try {
@@ -159,26 +165,9 @@ async function main() {
           member_limit: 1,
         });
         await invite.markSent(link.invite_link);
-        const contactLine = [invite.phone ? `тел. ${invite.phone}` : null, invite.telegramId ? `Telegram ID ${invite.telegramId}` : null]
-          .filter(Boolean)
-          .join(" · ");
-        await bot.api.sendMessage(
-          env.STAFF_CHAT_ID,
-          `👋 Приглашение для нового сотрудника
-${invite.fullName}${contactLine ? `
-${contactLine}` : ""}
-
-` +
-            `Ссылка (на одного человека, перешлите сотруднику лично — бот не может написать ему первым, пока тот не нажал /start боту):
-${link.invite_link}`,
-        );
       } catch (err) {
         console.error("Quick Resto: не удалось создать инвайт-ссылку:", err);
         await invite.markFailed(String(err));
-        await bot.api.sendMessage(
-          env.STAFF_CHAT_ID,
-          `⚠️ Не удалось создать ссылку-приглашение для ${invite.fullName} — проверьте, что бот админ чата с правом "Приглашение пользователей по ссылке".`,
-        );
       }
     });
     console.log("Слушаю staff_invites через Supabase Realtime — приглашения сотрудников включены.");
@@ -370,6 +359,17 @@ ${link.invite_link}`,
   } else {
     console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }
+
+  // Кнопка "Открыть Roof Lounge" в ответе на /start — обычное сообщение в
+  // чате, и при активном боте (много уведомлений: вызовы официанта, фото
+  // смен и т.д.) она быстро "улетает наверх" и теряется в истории (см.
+  // обсуждение с Никитой 09.11.2026). Меню-кнопка рядом с полем ввода
+  // (setChatMenuButton) не прокручивается вместе с сообщениями — она
+  // закреплена всегда, открывает тот же мини-апп. Ставим её разом для всех
+  // пользователей бота (без chat_id — дефолт для всех личных чатов).
+  await bot.api.setChatMenuButton({
+    menu_button: { type: "web_app", text: "Roof Lounge", web_app: { url: env.MINI_APP_URL } },
+  });
 
   await bot.start();
 }
