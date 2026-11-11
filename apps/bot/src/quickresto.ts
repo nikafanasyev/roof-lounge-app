@@ -657,10 +657,24 @@ async function writePayrollIssue(
   await onIssue({ date: dateIso, role, expectedStaffName, actualStaffNames });
 }
 
-async function alreadyHandled(supabase: SupabaseClient, dateIso: string, role: "bar" | "hookah"): Promise<boolean> {
+/**
+ * ВАЖНО: проверка обязательно по staff_id, а не только по date+role — в
+ * schedule_entries на одну дату/роль может быть несколько строк (подмена/
+ * передача смены: один сотрудник открыл, другой закрыл под той же ролью).
+ * Раньше проверялось только date+role — как только ПЕРВЫЙ из них получал
+ * начисление (запись в shift_payroll), роль на эту дату считалась "уже
+ * обработанной" целиком, и второй сотрудник из schedule_entries на ту же
+ * дату/роль тихо пропускался навсегда — ни ежедневное задание, ни ручной
+ * /accrue/пересчёт из приложения его больше не трогали (см. разбор с
+ * Никитой 11.11.2026: "При этом — начисления нет", хотя бот ответил "уже
+ * всё начислено ранее"). payroll_issues — аналогично, expected_staff_id
+ * у отложенного расхождения относится к конкретному человеку, а не ко
+ * всем, кто когда-либо стоял на этой роли в этот день.
+ */
+async function alreadyHandled(supabase: SupabaseClient, dateIso: string, role: "bar" | "hookah", staffId: string): Promise<boolean> {
   const [payroll, issue] = await Promise.all([
-    supabase.from("shift_payroll").select("id").eq("date", dateIso).eq("role", role).limit(1),
-    supabase.from("payroll_issues").select("id").eq("date", dateIso).eq("role", role).limit(1),
+    supabase.from("shift_payroll").select("id").eq("date", dateIso).eq("role", role).eq("staff_id", staffId).limit(1),
+    supabase.from("payroll_issues").select("id").eq("date", dateIso).eq("role", role).eq("expected_staff_id", staffId).limit(1),
   ]);
   return Boolean(payroll.data?.length) || Boolean(issue.data?.length);
 }
@@ -766,7 +780,7 @@ async function processScheduledDate(
 
   const pendingRoles: { staff_id: string; role: "bar" | "hookah" }[] = [];
   for (const row of scheduleRows as { staff_id: string; role: "bar" | "hookah" }[]) {
-    if (!(await alreadyHandled(supabase, dateIso, row.role))) pendingRoles.push(row);
+    if (!(await alreadyHandled(supabase, dateIso, row.role, row.staff_id))) pendingRoles.push(row);
   }
   if (!pendingRoles.length) return { status: "already_handled" };
 
