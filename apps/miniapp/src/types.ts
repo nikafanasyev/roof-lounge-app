@@ -295,6 +295,20 @@ export interface Adjustment {
   deleteReason?: string;
 }
 
+// Расходы заведения — ручной ввод руководителем (закупки, аренда, ремонт и
+// т.п.), см. 0017_expenses.sql. Мягкое удаление — тот же принцип, что у
+// Adjustment выше: запись остаётся для аудита, но не считается в сумме.
+export interface Expense {
+  id: string;
+  amount: number; // ₽
+  category: string; // свободный текст — см. комментарий в 0017_expenses.sql
+  note?: string;
+  date: string; // ISO-дата
+  deletedAt?: string;
+  deletedByName?: string;
+  deleteReason?: string;
+}
+
 // График теперь составляет руководитель заранее (кто на какой роли в какой
 // день) — это и есть источник истины для начисления ЗП: на следующий день
 // бот сверяет график с тем, кто реально работал по Quick Resto (см.
