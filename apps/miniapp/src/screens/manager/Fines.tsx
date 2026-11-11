@@ -33,20 +33,26 @@ export default function Fines() {
   const pickableStaff = listActiveStaffDirectory();
   const staffNameById = new Map(listStaffDirectory().map((s) => [s.id, s.name]));
 
+  const today = new Date().toISOString().slice(0, 10);
   const [showForm, setShowForm] = useState(false);
   const [type, setType] = useState<AdjustmentType>("fine");
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [staffId, setStaffId] = useState(pickableStaff[0]?.id ?? "");
+  // Дата самого события (например, опоздания), а не дата, когда штраф
+  // заносят в приложение — по умолчанию сегодня, но можно выбрать прошлую
+  // дату (см. запрос Никиты 11.11.2026).
+  const [date, setDate] = useState(today);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
 
   function submit() {
     const value = Number(amount);
     if (!value || !reason.trim() || !staffId) return;
-    addAdjustment(type, value, reason.trim(), staffId);
+    addAdjustment(type, value, reason.trim(), staffId, date || today);
     setAmount("");
     setReason("");
+    setDate(today);
     setShowForm(false);
   }
 
@@ -92,6 +98,8 @@ export default function Fines() {
           <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ marginBottom: 12 }} />
           <div className="eyebrow">Причина</div>
           <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} style={{ marginBottom: 12 }} />
+          <div className="eyebrow">Дата события</div>
+          <input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} style={{ marginBottom: 12 }} />
           <div className="btn-row">
             <button className="btn secondary" style={{ flex: 1 }} onClick={() => setShowForm(false)}>
               Отмена

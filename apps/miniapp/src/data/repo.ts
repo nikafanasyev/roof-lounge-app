@@ -1884,8 +1884,16 @@ export function listAllAdjustments(): Adjustment[] {
   return adjustmentsStore.get().sort((a, b) => b.date.localeCompare(a.date));
 }
 
-export function addAdjustment(type: AdjustmentType, amount: number, reason: string, staffId: string = getStaffProfile().id) {
-  const entry: Adjustment = { id: uid(), staffId, type, amount, reason, date: new Date().toISOString() };
+/**
+ * dateIso — необязательная дата события (например, "опоздание 07.11", а
+ * заносим штраф только сегодня, 11.11) — раньше всегда бралась "сегодня",
+ * без возможности указать прошлую дату (см. запрос Никиты 11.11.2026:
+ * "нужно добавить возможность выписать штраф в определённые даты").
+ * Формат — "YYYY-MM-DD", как в колонке date (не timestamptz).
+ */
+export function addAdjustment(type: AdjustmentType, amount: number, reason: string, staffId: string = getStaffProfile().id, dateIso?: string) {
+  const date = dateIso || new Date().toISOString().slice(0, 10);
+  const entry: Adjustment = { id: uid(), staffId, type, amount, reason, date };
   adjustmentsStore.update((list) => [entry, ...list]);
   if (isSupabaseConfigured && supabase) {
     supabase
@@ -1896,7 +1904,7 @@ export function addAdjustment(type: AdjustmentType, amount: number, reason: stri
         type,
         amount,
         reason,
-        date: entry.date.slice(0, 10), // колонка date, не timestamptz
+        date,
       })
       .then(({ error }) => error && logSyncError("addAdjustment", error));
   }
