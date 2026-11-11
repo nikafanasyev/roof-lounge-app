@@ -22,6 +22,7 @@ import type {
   AromaDirection,
   AromaTag,
   ChecklistItem,
+  Expense,
   FixedAccrual,
   FixedAccrualCadence,
   Flavor,
@@ -118,6 +119,7 @@ export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticle
 export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
 export const staffInvitesStore = new Store<StaffInvite[]>([]);
 export const payrollRecalcRequestsStore = new Store<PayrollRecalcRequest[]>([]);
+export const expensesStore = new Store<Expense[]>([]);
 
 // Статус загрузки реальных данных — см. initData() ниже. Пока он не "ok",
 // сотрудник/руководитель видит примерные данные из data/seed.ts (гости,
@@ -213,6 +215,7 @@ export async function initData(): Promise<void> {
           loadFixedAccruals(),
           loadStaffInvites(),
           loadPayrollRecalcRequests(),
+          loadExpenses(),
         ];
     const results = await Promise.allSettled([...guestLoads, ...staffLoads]);
     if (results.some((r) => r.status === "rejected")) {
@@ -655,6 +658,23 @@ async function loadPayrollIssues() {
   );
 }
 
+async function loadExpenses() {
+  const { data, error } = await supabase!.from("expenses").select("*").order("date", { ascending: false });
+  if (error) return logSyncError("loadExpenses", error);
+  expensesStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      amount: Number(r.amount),
+      category: r.category,
+      note: r.note ?? undefined,
+      date: r.date,
+      deletedAt: r.deleted_at ?? undefined,
+      deletedByName: r.deleted_by_name ?? undefined,
+      deleteReason: r.delete_reason ?? undefined,
+    })),
+  );
+}
+
 function subscribeRealtime() {
   if (!supabase) return;
   supabase
@@ -676,6 +696,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "fixed_accruals" }, () => loadFixedAccruals())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff_invites" }, () => loadStaffInvites())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_recalc_requests" }, () => loadPayrollRecalcRequests())
+    .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => loadExpenses())
     .subscribe();
 }
 
@@ -1991,6 +2012,73 @@ export function deleteAdjustment(id: string, reason: string) {
     .update({ deleted_at: deletedAt, deleted_by: getStaffProfile().id, deleted_by_name: deletedByName, delete_reason: reason })
     .eq("id", id)
     .then(({ error }) => error && logSyncError("deleteAdjustment", error));
+}
+
+// --- Расходы заведения (см. 0017_expenses.sql) ---
+
+/**
+ * Все расходы (включая мягко удалённые — для аудита, тот же принцип, что
+ * у listAllAdjustments выше) — экран "Расходы" у руководителя.
+ */
+export function listAllExpenses(): Expense[] {
+  return expensesStore.get().sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/**
+ * Только действующие (не удалённые) расходы — для сумм/агрегатов ("Сводка").
+ */
+export function listActiveExpenses(): Expense[] {
+  return expensesStore.get().filter((e) => !e.deletedAt);
+}
+
+/**
+ * dateIso — "YYYY-MM-DD" (как в adjustments/payouts — колонка date, не
+ * timestamptz), по умолчанию сегодня, но можно указать прошлую дату (та же
+ * логика, что addAdjustment).
+ */
+export function addExpense(amount: number, category: string, note: string | undefined, dateIso?: string) {
+  const date = dateIso || new Date().toISOString().slice(0, 10);
+  const entry: Expense = { id: uid(), amount, category, note: note || undefined, date };
+  expensesStore.update((list) => [entry, ...list]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("expenses")
+      .insert({
+        id: entry.id,
+        amount,
+        category,
+        note: note || null,
+        date,
+        created_by_staff_id: getStaffProfile().id,
+        created_by_name: getStaffProfile().name,
+      })
+      .then(({ error }) => error && logSyncError("addExpense", error));
+  }
+}
+
+export function deleteExpense(id: string, reason: string) {
+  const deletedAt = new Date().toISOString();
+  const deletedByName = getStaffProfile().name;
+  expensesStore.update((list) => list.map((e) => (e.id === id ? { ...e, deletedAt, deletedByName, deleteReason: reason } : e)));
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("expenses")
+    .update({ deleted_at: deletedAt, deleted_by_name: deletedByName, delete_reason: reason })
+    .eq("id", id)
+    .then(({ error }) => error && logSyncError("deleteExpense", error));
+}
+
+/**
+ * Сумма расходов за последние 30 дней от referenceDate (включительно) —
+ * та же логика окна, что computeRevenueTrend ниже, чтобы цифры на "Сводка"
+ * сравнивались за одинаковый период.
+ */
+export function computeExpensesLast30(referenceDate: Date = new Date()): number {
+  const end = referenceDate.toISOString().slice(0, 10);
+  const start = new Date(referenceDate.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return listActiveExpenses()
+    .filter((e) => e.date >= start && e.date <= end)
+    .reduce((sum, e) => sum + e.amount, 0);
 }
 
 export interface PayrollSummary {

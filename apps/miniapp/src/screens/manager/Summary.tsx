@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { averageReactionMinutes, computeRevenueTrend, problemsStore, serviceCallsStore, shiftPayrollStore, shiftStore, tasksStore } from "@/data/repo";
+import { averageReactionMinutes, computeExpensesLast30, computeRevenueTrend, expensesStore, problemsStore, serviceCallsStore, shiftPayrollStore, shiftStore, tasksStore } from "@/data/repo";
 
 function money(n: number): string {
   return n.toLocaleString("ru-RU") + " ₽";
@@ -23,6 +23,7 @@ export default function Summary() {
   const tasks = useStore(tasksStore);
   const shift = useStore(shiftStore);
   useStore(shiftPayrollStore);
+  useStore(expensesStore);
 
   const openCalls = calls.filter((c) => c.status === "open");
   const openProblems = problems.filter((p) => p.status !== "done");
@@ -31,10 +32,13 @@ export default function Summary() {
   // Финансовая часть сводки — выручка за 30 дней с динамикой к предыдущим
   // 30 дням, плюс последний день, за который есть данные (см. запрос
   // Никиты 11.11.2026: "может быть финансовые показатели сюда добавить и
-  // динамику?"). ABC-анализ по позициям и расходы — отдельные доработки
-  // позже (нужна новая интеграция с Quick Resto по продажам и новый
-  // раздел "Расходы" соответственно).
+  // динамику?"), и расходы за те же 30 дней (ручной ввод в "Расходы", см.
+  // 0017_expenses.sql) — итог "Чистыми" прямо тут, чтобы не считать в
+  // уме. ABC-анализ по позициям — отдельная доработка позже (нужна новая
+  // интеграция с Quick Resto по продажам).
   const revenue = computeRevenueTrend();
+  const expenses30 = computeExpensesLast30();
+  const net30 = revenue.last30 - expenses30;
 
   return (
     <div className="screen">
@@ -71,6 +75,14 @@ export default function Summary() {
           <div style={{ fontSize: 24, fontWeight: 700 }}>
             {revenue.lastRecordedDay ? money(revenue.lastRecordedDay.revenue) : "—"}
           </div>
+        </div>
+        <Link to="/manager/expenses" className="card" style={{ display: "block" }}>
+          <div className="eyebrow">Расходы за 30 дней</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--danger)" }}>{money(expenses30)}</div>
+        </Link>
+        <div className="card">
+          <div className="eyebrow">Чистыми за 30 дней</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: net30 >= 0 ? "var(--good)" : "var(--danger)" }}>{money(net30)}</div>
         </div>
       </div>
 
