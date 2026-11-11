@@ -1853,6 +1853,27 @@ export function listPayoutsForStaff(staffId: string): PayoutRecord[] {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+/**
+ * Записать фактическую выплату — раньше таблица payouts только читалась
+ * (listPayoutsForStaff/"Выплачено"/"К выплате"), создать запись было
+ * негде, "Остаток к выплате" не мог никогда уменьшиться (см. запрос
+ * Никиты 11.11.2026: "у нас вроде не реализована функция выплат").
+ * Кнопка "Отметить выплаченным" у карточки периода (PayrollPeriods.tsx,
+ * только в кабинете руководителя) вызывает это с суммой "К выплате" этого
+ * периода по умолчанию — можно поправить вручную, если выплатили не всё.
+ */
+export function addPayout(staffId: string, amount: number, dateIso?: string, note?: string) {
+  const date = dateIso || new Date().toISOString().slice(0, 10);
+  const entry: PayoutRecord = { id: uid(), staffId, date, amount, note: note || undefined };
+  payoutsStore.update((list) => [entry, ...list]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("payouts")
+      .insert({ id: entry.id, staff_id: staffId, date, amount, note: note || null })
+      .then(({ error }) => error && logSyncError("addPayout", error));
+  }
+}
+
 export function listPayouts(): PayoutRecord[] {
   return listPayoutsForStaff(getStaffProfile().id);
 }

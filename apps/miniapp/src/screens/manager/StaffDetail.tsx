@@ -428,7 +428,7 @@ export default function StaffDetail() {
       <div className="eyebrow">Карточка</div>
       <EditableCard staffId={staffId} profile={profile} />
 
-      <PayrollPeriods summaries={periods} />
+      <PayrollPeriods summaries={periods} staffId={staffId} />
 
       <div className="stat-grid">
         <div className="stat-tile">
