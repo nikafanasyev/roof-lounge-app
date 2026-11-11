@@ -11,18 +11,19 @@ function formatPayoutDate(iso: string): string {
 /**
  * Две карточки "К выплате" — по одной на каждый актуальный зарплатный период
  * (см. getActivePayrollPeriods в data/repo.ts). Раньше была одна общая сумма
- * "К выплате" — легко спутать, за какой период она уже посчитана.
+ * "К выплате" — легко спутать, за какой период она уже посчитана. Свой
+ * .payroll-period-card вместо общего .stat-tile — чёткая иерархия: диапазон
+ * дат сверху мелко, сумма крупно, дата выплаты отдельной строкой снизу
+ * (см. обсуждение с Никитой 09.11.2026).
  */
 export default function PayrollPeriods({ summaries }: { summaries: PayrollPeriodSummary[] }) {
   return (
-    <div className="stat-grid">
+    <div className="payroll-period-grid">
       {summaries.map((s) => (
-        <div className="stat-tile" key={s.period.payoutDate}>
-          <div className="value">{money(Math.max(0, s.due))}</div>
-          <div className="label">
-            К выплате {formatPayoutDate(s.period.payoutDate)}
-            <div style={{ marginTop: 2 }}>{s.period.label}</div>
-          </div>
+        <div className="payroll-period-card" key={s.period.payoutDate}>
+          <div className="range">{s.period.label}</div>
+          <div className="amount">{money(Math.max(0, s.due))}</div>
+          <div className="payout-date">К выплате {formatPayoutDate(s.period.payoutDate)}</div>
         </div>
       ))}
     </div>

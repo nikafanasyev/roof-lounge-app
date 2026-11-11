@@ -83,10 +83,8 @@ export default function GuestHome({
       </div>
 
       <div className="stat-grid">
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--accent)" }}>
-            {guest.bonusPoints ?? 0}
-          </div>
+        <div className="stat-tile accent">
+          <div className="value">{guest.bonusPoints ?? 0}</div>
           <div className="label">Бонусов</div>
         </div>
         <div className="stat-tile">

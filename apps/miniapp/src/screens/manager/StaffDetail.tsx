@@ -442,28 +442,20 @@ export default function StaffDetail() {
       </div>
 
       <div className="stat-grid">
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--accent)" }}>
-            {money(summary.earned)}
-          </div>
+        <div className="stat-tile accent">
+          <div className="value">{money(summary.earned)}</div>
           <div className="label">Начислено (всего)</div>
         </div>
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--good)" }}>
-            {money(summary.paid)}
-          </div>
+        <div className="stat-tile good">
+          <div className="value">{money(summary.paid)}</div>
           <div className="label">Выплачено</div>
         </div>
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--danger)" }}>
-            {money(summary.fines)}
-          </div>
+        <div className="stat-tile danger">
+          <div className="value">{money(summary.fines)}</div>
           <div className="label">Штрафы</div>
         </div>
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--good)" }}>
-            {money(summary.bonuses)}
-          </div>
+        <div className="stat-tile good">
+          <div className="value">{money(summary.bonuses)}</div>
           <div className="label">Премии</div>
         </div>
       </div>

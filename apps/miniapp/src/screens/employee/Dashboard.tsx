@@ -29,11 +29,9 @@ export default function Dashboard() {
 
       <PayrollPeriods summaries={periods} />
 
-      <div className="card" style={{ textAlign: "center", padding: "14px 16px", marginBottom: 16 }}>
-        <div className="eyebrow" style={{ marginBottom: 4 }}>
-          Заработано за месяц
-        </div>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>{money(earnedThisMonth)}</div>
+      <div className="hero-stat-card">
+        <div className="eyebrow">Заработано за месяц</div>
+        <div className="value">{money(earnedThisMonth)}</div>
       </div>
 
       {/*
@@ -41,25 +39,21 @@ export default function Dashboard() {
         она только росла и путала рядом с "Заработано за месяц" выше (см.
         обсуждение с Никитой 09.11.2026: "Зарплата всего будто просто
         лишнее"). Выплачено/Штрафы/Премии оставили — это за весь период
-        (с последней выплаты), а не за календарный месяц.
+        (с последней выплаты), а не за календарный месяц. cols-3 — чтобы
+        три плашки легли в один ровный ряд, а не переносились (см. тот же
+        скриншот).
       */}
-      <div className="stat-grid">
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--good)" }}>
-            {money(summary.paid)}
-          </div>
+      <div className="stat-grid cols-3">
+        <div className="stat-tile good">
+          <div className="value">{money(summary.paid)}</div>
           <div className="label">Выплачено</div>
         </div>
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--danger)" }}>
-            {money(summary.fines)}
-          </div>
+        <div className="stat-tile danger">
+          <div className="value">{money(summary.fines)}</div>
           <div className="label">Штрафы</div>
         </div>
-        <div className="stat-tile">
-          <div className="value" style={{ color: "var(--good)" }}>
-            {money(summary.bonuses)}
-          </div>
+        <div className="stat-tile good">
+          <div className="value">{money(summary.bonuses)}</div>
           <div className="label">Премии</div>
         </div>
       </div>
