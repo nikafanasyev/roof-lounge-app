@@ -514,6 +514,47 @@ textarea {
   text-align: center;
 }
 
+/* Нижний модальный лист (bottom sheet) — для коротких форм поверх экрана
+   (например, запись выплаты в PayrollPeriods.tsx), когда форма прямо в
+   карточке выглядит перегруженно (см. обсуждение с Никитой 11.11.2026).
+   Тот же принцип, что у .drawer-backdrop/.drawer-panel (бургер-меню), но
+   выезжает снизу и по центру, а не сбоку на всю высоту. */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+}
+
+.sheet-panel {
+  width: 100%;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: var(--space-4);
+  padding-bottom: var(--space-5);
+  animation: sheet-slide-up 0.18s ease-out;
+}
+
+@keyframes sheet-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+  font-weight: 700;
+}
+
 .role-switch {
   display: flex;
   gap: 4px;

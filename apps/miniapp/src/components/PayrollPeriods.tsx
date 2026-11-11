@@ -11,34 +11,80 @@ function formatPayoutDate(iso: string): string {
 }
 
 /**
- * Карточка одного периода + (только у руководителя, когда передан staffId)
- * форма выплаты — пишет запись в payouts (см. addPayout в data/repo.ts).
- * Раньше такой возможности не было нигде в приложении — payouts только
- * читался ("Выплачено"/"К выплате"), создать запись было негде, и "К
- * выплате" никогда не уменьшалось (см. запрос Никиты 11.11.2026).
- *
- * Сумма — всегда руками, без кнопки "в один клик на весь остаток": на
- * практике выплачивают круглыми суммами (кратно 100 ₽), а не "до копейки"
- * от расчёта, поэтому подставляем остаток, округлённый до ближайших
- * 100 ₽, как стартовое значение в поле — не отправляем её автоматически
- * (см. обсуждение с Никитой 11.11.2026: "проще суммы, округлённые до 100,
- * поэтому просто кнопка не подойдёт").
+ * Модалка записи выплаты — вынесена из самой карточки периода (см.
+ * обсуждение с Никитой 11.11.2026: инлайн-форма прямо в карточке
+ * выглядела перегруженно). Открывается кнопкой "Записать выплату" на
+ * карточке. Сумма — всегда руками: на практике выплачивают круглыми
+ * суммами (кратно 100 ₽), а не "до копейки" от расчёта, поэтому
+ * подставляем остаток, округлённый до ближайших 100 ₽, как стартовое
+ * значение — не отправляем её автоматически.
  */
-function PeriodCard({ s, staffId }: { s: PayrollPeriodSummary; staffId?: string }) {
-  const due = Math.max(0, s.due);
+function PayoutSheet({
+  periodLabel,
+  due,
+  staffId,
+  onClose,
+}: {
+  periodLabel: string;
+  due: number;
+  staffId: string;
+  onClose: () => void;
+}) {
   const roundedDue = Math.round(due / 100) * 100;
   const [amount, setAmount] = useState(String(roundedDue));
   const [note, setNote] = useState("");
-  const [saved, setSaved] = useState(false);
 
   function submit() {
     const value = Number(amount);
-    if (!value || !staffId) return;
-    addPayout(staffId, value, new Date().toISOString().slice(0, 10), note.trim() || s.period.label);
-    setNote("");
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    if (!value) return;
+    addPayout(staffId, value, new Date().toISOString().slice(0, 10), note.trim() || periodLabel);
+    onClose();
   }
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-header">
+          <span>Выплата · {periodLabel}</span>
+          <button className="btn ghost" style={{ padding: "4px 8px", fontSize: 13 }} onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div className="eyebrow">Сумма, ₽</div>
+        <input
+          type="number"
+          step={100}
+          autoFocus
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          style={{ marginBottom: 10 }}
+        />
+        <div className="eyebrow">Комментарий (необязательно)</div>
+        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} style={{ marginBottom: 14 }} />
+        <div className="btn-row">
+          <button className="btn secondary" style={{ flex: 1 }} onClick={onClose}>
+            Отмена
+          </button>
+          <button className="btn primary" style={{ flex: 1 }} disabled={!Number(amount)} onClick={submit}>
+            Записать выплату
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Карточка одного периода + (только у руководителя, когда передан staffId)
+ * кнопка "Записать выплату", открывающая PayoutSheet. Раньше такой
+ * возможности не было нигде в приложении — payouts (см. addPayout в
+ * data/repo.ts) только читался ("Выплачено"/"К выплате"), создать запись
+ * было негде, и "К выплате" никогда не уменьшалось (см. запрос Никиты
+ * 11.11.2026: "у нас вроде не реализована функция выплат").
+ */
+function PeriodCard({ s, staffId }: { s: PayrollPeriodSummary; staffId?: string }) {
+  const due = Math.max(0, s.due);
+  const [paying, setPaying] = useState(false);
 
   return (
     <div className="payroll-period-card">
@@ -47,19 +93,17 @@ function PeriodCard({ s, staffId }: { s: PayrollPeriodSummary; staffId?: string 
       <div className="payout-date">К выплате {formatPayoutDate(s.period.payoutDate)}</div>
 
       {staffId && due > 0 && (
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-          <input type="number" step={100} value={amount} onChange={(e) => setAmount(e.target.value)} style={{ fontSize: 13 }} />
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Комментарий (необязательно)"
-            style={{ fontSize: 13 }}
-          />
-          <button className="btn primary" style={{ padding: "6px 10px", fontSize: 12 }} disabled={!Number(amount)} onClick={submit}>
-            {saved ? "Записано" : "Записать выплату"}
-          </button>
-        </div>
+        <button
+          className="btn secondary"
+          style={{ marginTop: 8, width: "100%", padding: "6px 10px", fontSize: 12 }}
+          onClick={() => setPaying(true)}
+        >
+          Записать выплату
+        </button>
+      )}
+
+      {paying && staffId && (
+        <PayoutSheet periodLabel={s.period.label} due={due} staffId={staffId} onClose={() => setPaying(false)} />
       )}
     </div>
   );
@@ -74,7 +118,7 @@ function PeriodCard({ s, staffId }: { s: PayrollPeriodSummary; staffId?: string 
  * (см. обсуждение с Никитой 09.11.2026).
  *
  * staffId передаётся только из кабинета руководителя (StaffDetail.tsx) —
- * там же появляется форма записи выплаты. На "Моя зарплата" у сотрудника
+ * там же появляется кнопка записи выплаты. На "Моя зарплата" у сотрудника
  * (Dashboard.tsx) staffId не передаётся — это просмотр, без возможности
  * самому себе проставить выплату.
  */
