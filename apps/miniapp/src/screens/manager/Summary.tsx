@@ -1,6 +1,14 @@
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { averageReactionMinutes, problemsStore, serviceCallsStore, shiftStore, tasksStore } from "@/data/repo";
+import { averageReactionMinutes, computeRevenueTrend, problemsStore, serviceCallsStore, shiftPayrollStore, shiftStore, tasksStore } from "@/data/repo";
+
+function money(n: number): string {
+  return n.toLocaleString("ru-RU") + " ₽";
+}
+
+function formatDay(iso: string): string {
+  return new Date(`${iso}T12:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
 
 // Блок "Автоматические предупреждения" раньше дублировал то, что уже видно
 // в плитках выше (открытые вызовы/проблемы) — на "Сводке" это лишняя,
@@ -14,16 +22,59 @@ export default function Summary() {
   const problems = useStore(problemsStore);
   const tasks = useStore(tasksStore);
   const shift = useStore(shiftStore);
+  useStore(shiftPayrollStore);
 
   const openCalls = calls.filter((c) => c.status === "open");
   const openProblems = problems.filter((p) => p.status !== "done");
   const openTasks = tasks.filter((t) => !t.done);
   const avgReaction = averageReactionMinutes();
+  // Финансовая часть сводки — выручка за 30 дней с динамикой к предыдущим
+  // 30 дням, плюс последний день, за который есть данные (см. запрос
+  // Никиты 11.11.2026: "может быть финансовые показатели сюда добавить и
+  // динамику?"). ABC-анализ по позициям и расходы — отдельные доработки
+  // позже (нужна новая интеграция с Quick Resto по продажам и новый
+  // раздел "Расходы" соответственно).
+  const revenue = computeRevenueTrend();
 
   return (
     <div className="screen">
       <h1>Сводка</h1>
 
+      <div className="eyebrow" style={{ marginTop: 4 }}>
+        Финансы
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <div className="card">
+          <div className="eyebrow">Выручка за 30 дней</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{money(revenue.last30)}</div>
+          {revenue.changePercent === null ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              нет данных за пред. 30 дней
+            </div>
+          ) : (
+            <div
+              style={{
+                fontSize: 12,
+                marginTop: 4,
+                color: revenue.changePercent >= 0 ? "var(--good)" : "var(--danger)",
+              }}
+            >
+              {revenue.changePercent >= 0 ? "▲" : "▼"} {revenue.changePercent >= 0 ? "+" : ""}
+              {revenue.changePercent}% к пред. 30 дням
+            </div>
+          )}
+        </div>
+        <div className="card">
+          <div className="eyebrow">
+            {revenue.lastRecordedDay ? `Выручка · ${formatDay(revenue.lastRecordedDay.date)}` : "Выручка"}
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>
+            {revenue.lastRecordedDay ? money(revenue.lastRecordedDay.revenue) : "—"}
+          </div>
+        </div>
+      </div>
+
+      <div className="eyebrow">Операционка</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <Link to="/manager/calls" className="card" style={{ display: "block" }}>
           <div className="eyebrow">Открытые вызовы</div>

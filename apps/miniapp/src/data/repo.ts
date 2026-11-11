@@ -1152,6 +1152,48 @@ export function resolveServiceCall(id: string) {
   }
 }
 
+/**
+ * Финансовая сводка для "Сводка" у руководителя — раньше там были только
+ * операционные плашки (вызовы/проблемы/задачи), выручка нигде не
+ * показывалась (см. запрос Никиты 11.11.2026: "может быть финансовые
+ * показатели сюда добавить и динамику?"). Берём то, что уже синхронизирует
+ * бот: shift_payroll.revenue — общая выручка заведения за бизнес-день,
+ * одна и та же у всех ролей в этот день, поэтому дедуплицируем по дате.
+ * "За 30 дней" и "за предыдущие 30 дней" — скользящее окно от сегодня, а
+ * не календарный месяц: так сравнение честное даже в начале месяца, когда
+ * текущий календарный месяц ещё неполный.
+ */
+export interface RevenueTrend {
+  last30: number;
+  prev30: number;
+  changePercent: number | null; // null — нет данных за предыдущие 30 дней для сравнения
+  lastRecordedDay: { date: string; revenue: number } | null;
+}
+
+export function computeRevenueTrend(referenceDate: Date = new Date()): RevenueTrend {
+  const byDate = new Map<string, number>();
+  for (const e of shiftPayrollStore.get()) {
+    if (!byDate.has(e.date)) byDate.set(e.date, e.revenue);
+  }
+  const dayMs = 86400000;
+  const refMs = new Date(`${referenceDate.toISOString().slice(0, 10)}T12:00:00`).getTime();
+
+  let last30 = 0;
+  let prev30 = 0;
+  for (const [date, revenue] of byDate) {
+    const diffDays = Math.floor((refMs - new Date(`${date}T12:00:00`).getTime()) / dayMs);
+    if (diffDays >= 0 && diffDays < 30) last30 += revenue;
+    else if (diffDays >= 30 && diffDays < 60) prev30 += revenue;
+  }
+
+  const changePercent = prev30 > 0 ? Math.round(((last30 - prev30) / prev30) * 100) : null;
+  const dates = [...byDate.keys()].sort();
+  const lastDate = dates[dates.length - 1];
+  const lastRecordedDay = lastDate ? { date: lastDate, revenue: byDate.get(lastDate)! } : null;
+
+  return { last30, prev30, changePercent, lastRecordedDay };
+}
+
 export function averageReactionMinutes(): number | null {
   const resolved = serviceCallsStore.get().filter((c) => c.resolvedAt);
   if (!resolved.length) return null;
