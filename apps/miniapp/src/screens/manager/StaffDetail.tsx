@@ -281,7 +281,7 @@ function FixedAccrualsCard({ staffId }: { staffId: string }) {
   }
 
   return (
-    <>
+    <div style={{ marginBottom: "var(--space-5)" }}>
       <h2>Фиксированные начисления</h2>
       {accruals.map((f) => (
         <div key={f.id} className="card-row">
@@ -321,7 +321,7 @@ function FixedAccrualsCard({ staffId }: { staffId: string }) {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -441,11 +441,14 @@ export default function StaffDetail() {
         </div>
       </div>
 
-      <div className="stat-grid">
-        <div className="stat-tile accent">
-          <div className="value">{money(summary.earned)}</div>
-          <div className="label">Начислено (всего)</div>
-        </div>
+      {/*
+        "Начислено (всего)" убрали — та же лишняя сумма за всё время с
+        момента найма, что раньше убрали с "Моя зарплата" у сотрудника
+        (см. обсуждение с Никитой 09.11.2026 и 11.11.2026: "эти поля с
+        общей зп наверное не нужны, перегружено"). cols-3 — три плашки в
+        ровный ряд вместо четырёх.
+      */}
+      <div className="stat-grid cols-3">
         <div className="stat-tile good">
           <div className="value">{money(summary.paid)}</div>
           <div className="label">Выплачено</div>
