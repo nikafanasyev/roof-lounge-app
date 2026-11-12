@@ -593,10 +593,16 @@ export async function fetchCashCashlessSplit(sinceMs: number, tillMs: number): P
   const data = await qrFetchJson<FinancialReportResponse>(`${FINANCIAL_REPORT_PATH}?${params.toString()}`);
   let cash = 0;
   let cashless = 0;
+  let returns = 0;
   for (const row of data.ds ?? []) {
     if (row.object?.account === "Сумма продаж наличные") cash = Number(row.object.sum ?? 0);
     if (row.object?.account === "Сумма продаж безналичные") cashless = Number(row.object.sum ?? 0);
+    if (row.object?.account === "Возвраты") returns = Number(row.object.sum ?? 0);
   }
+  // "Общая выручка" в Quick Resto = нал + безнал − возвраты (сверено с таблицей
+  // Никиты 12.11.2026: 175 288,5 + 824 938,25 − 12 903 = 987 323,75). Возвраты
+  // уходят с безнала, поэтому вычитаем их оттуда — иначе нал+безнал больше выручки.
+  cashless -= returns;
   return { cash, cashless };
 }
 
@@ -634,15 +640,19 @@ export async function debugCashSplit(fromIso: string, toIso: string) {
   return { days, rows };
 }
 
-// Границы календарного месяца (1-е число 00:00 МСК — 1-е число следующего
-// месяца 00:00 МСК) в UTC-миллисекундах, для fetchCashCashlessSplit — этот
-// отчёт, в отличие от orders_by_storecategory, считает сумму сразу за
-// произвольный диапазон, поэтому нет нужды дробить месяц на бизнес-дни.
+// Границы месяца по бизнес-дням (11:00 МСК — 11:00 МСК), см. комментарий внутри.
 function monthRangeMs(monthKey: string): { sinceMs: number; tillMs: number } {
   const [y, m] = monthKey.split("-").map(Number);
   // 00:00 МСК = 21:00 UTC предыдущего дня (МСК = UTC+3).
-  const sinceMs = Date.UTC(y, m - 1, 1, -3, 0, 0);
-  const tillMs = Date.UTC(y, m, 1, -3, 0, 0);
+  // Бизнес-день Roof Lounge идёт с 11:00 до 11:00 МСК (как в выручке и таблице),
+  // поэтому месяц — от 11:00 1-го числа до 11:00 1-го следующего месяца, а
+  // ещё не закрытый текущий бизнес-день в сумму не берём.
+  const sinceMs = Date.UTC(y, m - 1, 1, 8, 0, 0);
+  let tillMs = Date.UTC(y, m, 1, 8, 0, 0);
+  const nowMs = Date.now();
+  const dayMs = 86400000;
+  const currentDayStart = Math.floor((nowMs - 8 * 3600_000) / dayMs) * dayMs + 8 * 3600_000;
+  if (currentDayStart < tillMs) tillMs = currentDayStart;
   return { sinceMs, tillMs };
 }
 
