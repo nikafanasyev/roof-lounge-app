@@ -41,9 +41,10 @@ async function staffName(supabase: SupabaseClient, id: string | null): Promise<s
 }
 
 export function startShiftNotifier(bot: Bot) {
-  const chatId = () => env.SHIFT_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !chatId()) {
-    console.log("Уведомления об открытии/закрытии смены выключены (нет SHIFT_CHAT_ID/STAFF_CHAT_ID или Supabase).");
+  const openChat = () => env.SHIFT_OPEN_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
+  const closeChat = () => env.SHIFT_CLOSE_CHAT_ID || env.STAFF_CHAT_ID || openChat();
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !openChat()) {
+    console.log("Уведомления об открытии/закрытии смены выключены (нет SHIFT_OPEN_CHAT_ID/STAFF_CHAT_ID или Supabase).");
     return;
   }
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
@@ -65,28 +66,33 @@ export function startShiftNotifier(bot: Bot) {
       return;
     }
     const base: ShiftRow | null = prev && prev.id === cur.id ? prev : null; // новая смена — сравниваем с пустым
-    const lines: string[] = [];
+    const openLines: string[] = [];
+    const closeLines: string[] = [];
 
     for (const z of ZONES) {
       const oAt = cur[`${z.key}_opened_at`];
       const cAt = cur[`${z.key}_closed_at`];
       if (oAt && (!base || base[`${z.key}_opened_at`] !== oAt)) {
-        lines.push(`🟢 Открыта зона «${z.label}» — ${await staffName(supabase, cur[`${z.key}_opened_by`])}, ${fmtTime(oAt)}`);
+        openLines.push(`🟢 Открыта зона «${z.label}» — ${await staffName(supabase, cur[`${z.key}_opened_by`])}, ${fmtTime(oAt)}`);
       }
       if (cAt && (!base || base[`${z.key}_closed_at`] !== cAt)) {
-        lines.push(`🔴 Закрыта зона «${z.label}» — ${await staffName(supabase, cur[`${z.key}_closed_by`])}, ${fmtTime(cAt)}`);
+        closeLines.push(`🔴 Закрыта зона «${z.label}» — ${await staffName(supabase, cur[`${z.key}_closed_by`])}, ${fmtTime(cAt)}`);
       }
     }
     if (cur.closed_at && (!base || base.closed_at !== cur.closed_at)) {
       let text = `⚫ Смена закрыта, ${fmtTime(cur.closed_at)}`;
       if (cur.handover_note) text += `\nПередача смены: ${cur.handover_note}`;
-      lines.push(text);
+      closeLines.push(text);
     }
 
     prev = cur;
-    if (lines.length) {
+    for (const [lines, chat] of [
+      [openLines, openChat()],
+      [closeLines, closeChat()],
+    ] as const) {
+      if (!lines.length) continue;
       try {
-        await bot.api.sendMessage(chatId(), lines.join("\n"));
+        await bot.api.sendMessage(chat, lines.join("\n"));
       } catch (err) {
         console.error("shiftNotifier: не удалось отправить сообщение:", err);
       }

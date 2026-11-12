@@ -19,7 +19,7 @@ bot.api.config.use(async (prev, method, payload, signal) => {
   const newId = (res as { parameters?: { migrate_to_chat_id?: number } }).parameters?.migrate_to_chat_id;
   const oldId = (payload as { chat_id?: string | number }).chat_id;
   if (!res.ok && newId && oldId !== undefined) {
-    for (const key of ["STAFF_CHAT_ID", "SHIFT_PHOTOS_CHAT_ID", "QR_CHAT_ID", "SHIFT_CHAT_ID"] as const) {
+    for (const key of ["STAFF_CHAT_ID", "SHIFT_PHOTOS_CHAT_ID", "QR_CHAT_ID", "SHIFT_OPEN_CHAT_ID", "SHIFT_CLOSE_CHAT_ID"] as const) {
       if (String(env[key]) === String(oldId)) env[key] = String(newId);
     }
     console.warn(`Чат ${oldId} стал супергруппой, новый ID: ${newId} — обновите переменную окружения на Railway.`);
@@ -54,8 +54,8 @@ bot.command("testchat", async (ctx) => {
     return;
   }
   const targets: [string, string][] = [
-    ["SHIFT_CHAT_ID (уведомления смены)", env.SHIFT_CHAT_ID],
-    ["SHIFT_PHOTOS_CHAT_ID (фото смены)", env.SHIFT_PHOTOS_CHAT_ID],
+    ["SHIFT_OPEN_CHAT_ID (открытие смены)", env.SHIFT_OPEN_CHAT_ID],
+    ["SHIFT_CLOSE_CHAT_ID (закрытие смены)", env.SHIFT_CLOSE_CHAT_ID || env.STAFF_CHAT_ID],
     ["STAFF_CHAT_ID (общий чат)", env.STAFF_CHAT_ID],
   ];
   const lines: string[] = [];
@@ -495,14 +495,19 @@ async function main() {
 
   // Фото открытия/закрытия смены: пересылаем руководителю (или в отдельный чат,
   // если задан SHIFT_PHOTOS_CHAT_ID) и сразу стираем из Storage — не храним.
-  const shiftPhotosChatId = env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID;
-  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && shiftPhotosChatId) {
+  // Фото открытия — в чат открытия, фото закрытия — в чат закрытия (если
+  // отдельные чаты не заданы, как раньше: SHIFT_PHOTOS_CHAT_ID или STAFF_CHAT_ID).
+  const photoChatFor = (kind: "open" | "close") =>
+    kind === "open"
+      ? env.SHIFT_OPEN_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID
+      : env.SHIFT_CLOSE_CHAT_ID || env.STAFF_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID;
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && (env.SHIFT_OPEN_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID)) {
     watchShiftPhotos(async (event) => {
       const buffer = await event.downloadPhoto();
       if (!buffer) return;
       const kindLabel = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
       const roleLabel = event.role === "bar" ? "Бар" : "Кальяны";
-      await bot.api.sendPhoto(shiftPhotosChatId, new InputFile(buffer, "shift.jpg"), {
+      await bot.api.sendPhoto(photoChatFor(event.kind), new InputFile(buffer, "shift.jpg"), {
         caption: `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}`,
       });
     });
