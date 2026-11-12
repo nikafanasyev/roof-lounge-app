@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { flavorsStore, computeStrengthFromItems, createMix, getGuest } from "@/data/repo";
+import { flavorMatches } from "@/lib/flavorSearch";
 import type { Flavor, MixItem } from "@/types";
 
 const MAX_ITEMS = 5;
@@ -28,13 +29,13 @@ export default function MixBuilder() {
   const [description, setDescription] = useState("");
 
   const filteredFlavors = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
     if (!q) {
       const selectedIds = new Set(selected.map((s) => s.id));
       const rest = flavors.filter((f) => !selectedIds.has(f.id));
       return [...selected, ...rest.slice(0, Math.max(0, DEFAULT_VISIBLE_FLAVORS - selected.length))];
     }
-    return flavors.filter((f) => f.brand.toLowerCase().includes(q) || f.name.toLowerCase().includes(q));
+    return flavors.filter((f) => flavorMatches(f.brand, f.name, q));
   }, [flavors, query, selected]);
   const isBrowsingAll = query.trim().length > 0;
 
@@ -108,71 +109,75 @@ export default function MixBuilder() {
     );
   }
 
+  const BackBtn = ({ to, label }: { to: () => void; label: string }) => (
+    <button className="mx-back" onClick={to}>
+      {label}
+    </button>
+  );
+
   return (
     <div className="screen">
       {step === "pick" && (
-        <button
-          className="muted"
-          style={{ background: "none", border: "none", padding: 0, marginBottom: 8, cursor: "pointer" }}
-          onClick={() => navigate("/employee/guests")}
-        >
-          ← Все гости
-        </button>
-      )}
-      <div className="muted" style={{ fontSize: 13, marginBottom: 4 }}>
-        для {guest.displayName}
-      </div>
-      {step === "pick" && (
-        <Link to={`/employee/guests/${guest.id}`} className="muted" style={{ fontSize: 13, display: "block", marginBottom: 12 }}>
-          👃 Вкусовой профиль гостя →
-        </Link>
-      )}
-
-      {step === "pick" && (
         <>
-          <h1>Бренды</h1>
+          <BackBtn to={() => navigate("/employee/guests")} label="← Все гости" />
+          <div className="mx-sub">для {guest.displayName}</div>
+          <Link to={`/employee/guests/${guest.id}`} className="muted" style={{ fontSize: 13, display: "block", marginBottom: 16 }}>
+            Вкусовой профиль гостя →
+          </Link>
+          <h1>Выбор вкусов</h1>
           <input
             type="text"
-            placeholder="Поиск по бренду или вкусу"
+            placeholder="Поиск: бренд или вкус (можно по-английски)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            style={{ marginBottom: 12 }}
           />
-          <div className="eyebrow">Вкусы</div>
-          {!isBrowsingAll && (
-            <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
-              Показаны несколько вкусов — начните вводить бренд или название, чтобы найти нужный (всего {flavors.length}).
+
+          {selected.length > 0 && (
+            <div className="mx-tray">
+              <span className="muted" style={{ fontSize: 13 }}>
+                Выбрано {selected.length}/{MAX_ITEMS}:
+              </span>
+              {selected.map((f) => (
+                <div key={f.id} className="mx-tray-chip" onClick={() => toggleFlavor(f)}>
+                  {f.name} <span>×</span>
+                </div>
+              ))}
             </div>
           )}
+
+          <div className="mx-section">{isBrowsingAll ? `Найдено: ${filteredFlavors.length}` : "Вкусы"}</div>
+          {!isBrowsingAll && (
+            <div className="muted" style={{ fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+              Показаны несколько вкусов. Начните вводить бренд или название, чтобы найти нужный (всего {flavors.length}).
+            </div>
+          )}
+          {isBrowsingAll && filteredFlavors.length === 0 && <div className="list-empty">Ничего не найдено</div>}
           {filteredFlavors.map((f) => {
             const isSelected = !!selected.find((s) => s.id === f.id);
             return (
-              <div key={f.id} className="card card-row" onClick={() => toggleFlavor(f)} style={{ cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  {f.code && <span className="chip">{f.code}</span>}
-                  <div>
-                    <div style={{ fontWeight: 700 }}>{f.name.toUpperCase()}</div>
-                    <div className="muted" style={{ fontSize: 13 }}>
-                      {f.brand}
-                      {f.strength ? ` · ${f.strength}` : ""}
-                    </div>
-                    {f.categories.length > 0 && (
-                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                        {f.categories.join(", ")}
-                      </div>
-                    )}
+              <div key={f.id} className={`mx-flavor${isSelected ? " is-selected" : ""}`} onClick={() => toggleFlavor(f)}>
+                <div className="mx-flavor-body">
+                  <div className="mx-flavor-name">{f.name}</div>
+                  <div className="mx-flavor-meta">
+                    {f.brand}
+                    {f.strength ? ` · ${f.strength}` : ""}
                   </div>
+                  {f.categories.length > 0 && (
+                    <div className="mx-flavor-tags">
+                      {f.categories.map((c) => (
+                        <span key={c}>{c}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <span style={{ fontSize: 18, color: isSelected ? "var(--accent-2)" : "var(--muted)" }}>
-                  {isSelected ? "✓" : "+"}
-                </span>
+                <div className="mx-mark">{isSelected ? "✓" : "+"}</div>
               </div>
             );
           })}
 
-          <div style={{ position: "sticky", bottom: 12, marginTop: 20 }}>
+          <div className="mx-footer">
             <button className="btn primary" disabled={selected.length === 0} onClick={goToShares}>
-              К миксу ({selected.length})
+              К долям{selected.length > 0 ? ` (${selected.length})` : ""}
             </button>
           </div>
         </>
@@ -180,88 +185,106 @@ export default function MixBuilder() {
 
       {step === "shares" && (
         <>
-          <button className="muted" style={{ background: "none", border: "none", padding: 0, marginBottom: 8, cursor: "pointer" }} onClick={() => setStep("pick")}>
-            ← Вкусы
-          </button>
+          <BackBtn to={() => setStep("pick")} label="← Вкусы" />
           <h1>Доли</h1>
-          <div className="card-row" style={{ marginBottom: 12 }}>
-            <span>
-              Сумма: <strong style={{ color: totalShare === 100 ? "var(--good)" : "var(--warn)" }}>{totalShare}%</strong> / 100
-            </span>
-            <span className="muted">Крепость: {previewStrength}/5</span>
+          <div className="mx-summary">
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>Сумма</div>
+              <strong style={{ color: totalShare === 100 ? "var(--good)" : "var(--warn)" }}>{totalShare}%</strong>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div className="muted" style={{ fontSize: 12 }}>Крепость {previewStrength}/5</div>
+              <div className="mx-segments" style={{ justifyContent: "flex-end" }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <i key={n} className={n <= Math.round(previewStrength) ? "on" : ""} />
+                ))}
+              </div>
+            </div>
           </div>
 
           {selected.map((f) => (
-            <div key={f.id} className="card">
-              <div style={{ fontWeight: 700, marginBottom: 2 }}>{f.name.toUpperCase()}</div>
-              <div className="muted" style={{ fontSize: 13, marginBottom: 10 }}>
-                {f.brand}
-                {f.code ? ` · ${f.code}` : ""}
-                {f.strength ? ` · ${f.strength}` : ""}
+            <div key={f.id} className="mx-share">
+              <div className="mx-share-top">
+                <div>
+                  <div className="mx-flavor-name">{f.name}</div>
+                  <div className="mx-flavor-meta">
+                    {f.brand}
+                    {f.strength ? ` · ${f.strength}` : ""}
+                  </div>
+                </div>
+                <div className="mx-share-pct">{shares[f.id] ?? 0}%</div>
               </div>
-              <div className="share-row">
-                <div className="stepper">
-                  <button onClick={() => adjustShare(f.id, -5)}>−</button>
-                </div>
-                <strong style={{ minWidth: 44, textAlign: "center" }}>{shares[f.id] ?? 0}%</strong>
-                <div className="stepper">
-                  <button onClick={() => adjustShare(f.id, 5)}>+</button>
-                </div>
+              <div className="mx-bar">
+                <div style={{ width: `${shares[f.id] ?? 0}%` }} />
+              </div>
+              <div className="mx-step-row">
+                <button onClick={() => adjustShare(f.id, -5)}>−5</button>
+                <button onClick={() => adjustShare(f.id, 5)}>+5</button>
               </div>
             </div>
           ))}
 
-          <div className="btn-row" style={{ marginBottom: 20 }}>
+          <div className="btn-row" style={{ margin: "16px 0 24px" }}>
             <button className="btn secondary" style={{ flex: 1 }} onClick={() => setStep("pick")}>
               + Вкус
             </button>
             <button className="btn secondary" style={{ flex: 1 }} onClick={equalize}>
-              = Поровну
+              Поровну
             </button>
           </div>
 
           <button className="btn primary" disabled={totalShare !== 100} onClick={() => setStep("details")}>
-            Сборка →
+            Дальше
           </button>
         </>
       )}
 
       {step === "details" && (
         <>
-          <button className="muted" style={{ background: "none", border: "none", padding: 0, marginBottom: 8, cursor: "pointer" }} onClick={() => setStep("shares")}>
-            ← Доли
-          </button>
+          <BackBtn to={() => setStep("shares")} label="← Доли" />
           <h1>Оформление микса</h1>
 
-          <div className="eyebrow">Название</div>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Например: Бергамотовый бриз" style={{ marginBottom: 12 }} />
+          <div className="mx-field">
+            <div className="eyebrow">Название</div>
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Например: Бергамотовый бриз" />
+          </div>
 
-          <div className="eyebrow">Обложка (эмодзи вместо фото)</div>
-          <input type="text" value={coverEmoji} onChange={(e) => setCoverEmoji(e.target.value.slice(0, 2))} style={{ marginBottom: 12, width: 80 }} />
+          <div className="mx-field">
+            <div className="eyebrow">Обложка (эмодзи)</div>
+            <input type="text" value={coverEmoji} onChange={(e) => setCoverEmoji(e.target.value.slice(0, 2))} style={{ width: 80 }} />
+          </div>
 
-          <div className="eyebrow">Чаша</div>
-          <select value={bowlType} onChange={(e) => setBowlType(e.target.value)} style={{ marginBottom: 12 }}>
-            {BOWL_TYPES.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
+          <div className="mx-field">
+            <div className="eyebrow">Чаша</div>
+            <div className="mx-options">
+              {BOWL_TYPES.map((b) => (
+                <button key={b} className={`mx-option${bowlType === b ? " is-on" : ""}`} onClick={() => setBowlType(b)}>
+                  {b}
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <div className="eyebrow">Плотность</div>
-          <select value={density} onChange={(e) => setDensity(e.target.value)} style={{ marginBottom: 12 }}>
-            {DENSITY_OPTIONS.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
+          <div className="mx-field">
+            <div className="eyebrow">Плотность</div>
+            <div className="mx-options">
+              {DENSITY_OPTIONS.map((d) => (
+                <button key={d} className={`mx-option${density === d ? " is-on" : ""}`} onClick={() => setDensity(d)}>
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
 
-          <div className="eyebrow">Заметка мастера (гостю не видна)</div>
-          <textarea value={masterNote} onChange={(e) => setMasterNote(e.target.value)} placeholder="Например: холодный чай 15, но 5% щавеля" style={{ marginBottom: 12 }} />
+          <div className="mx-field">
+            <div className="eyebrow">Заметка мастера (гостю не видна)</div>
+            <textarea value={masterNote} onChange={(e) => setMasterNote(e.target.value)} placeholder="Например: холодный чай 15, но 5% щавеля" />
+          </div>
 
-          <div className="eyebrow">Описание для гостя</div>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Пара предложений о вкусе" style={{ marginBottom: 20 }} />
+          <div className="mx-field">
+            <div className="eyebrow">Описание для гостя</div>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Пара предложений о вкусе" />
+          </div>
 
           <button className="btn primary" onClick={handleAssemble}>
             Готово

@@ -21,75 +21,89 @@ export default function MixView() {
 
   return (
     <div className="screen">
-      <button
-        className="muted"
-        style={{ background: "none", border: "none", padding: 0, marginBottom: 12, cursor: "pointer" }}
-        onClick={() => navigate(-1)}
-      >
+      <button className="mx-back" onClick={() => navigate(-1)}>
         ← Назад
       </button>
 
-      <div className="card" style={{ textAlign: "center", fontSize: 72, padding: "36px 16px" }}>
-        {mix.coverEmoji}
+      <div className="mx-hero">
+        <div className="mx-hero-emoji">{mix.coverEmoji}</div>
+        <h1>{mix.title}</h1>
+        <div className="muted" style={{ fontSize: 13 }}>
+          собрал {mix.masterName}
+        </div>
+        {mix.tags.length > 0 && (
+          <div className="chip-row" style={{ marginTop: 12 }}>
+            {mix.tags.map((t) => (
+              <span key={t} className="chip accent">
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
-      <h1>{mix.title}</h1>
-
-      <div className="chip-row">
-        <span className="chip">Крепость {mix.strength}/5</span>
-        {mix.bowlType && <span className="chip">Чаша: {mix.bowlType}</span>}
-        {mix.density && <span className="chip">Плотность: {mix.density}</span>}
+      <div className="mx-stats">
+        <div>
+          <small>Крепость</small>
+          <b>{mix.strength} / 5</b>
+        </div>
+        <div>
+          <small>Чаша</small>
+          <b>{mix.bowlType ?? "—"}</b>
+        </div>
+        <div>
+          <small>Плотность</small>
+          <b>{mix.density ?? "—"}</b>
+        </div>
       </div>
 
-      <div className="card">
-        <div className="eyebrow">Автор</div>
-        <div style={{ fontWeight: 700 }}>{mix.masterName}</div>
-      </div>
-
-      {mix.description && <p>{mix.description}</p>}
-
-      <div className="chip-row">
-        {mix.tags.map((t) => (
-          <span key={t} className="chip accent">
-            {t}
-          </span>
-        ))}
-      </div>
-
-      {mix.masterNote && (
+      {mix.description && (
         <>
-          <div className="eyebrow">Заметка мастера</div>
-          <div className="card muted">{mix.masterNote}</div>
+          <div className="mx-section">Вкус</div>
+          <p className="mx-text">{mix.description}</p>
         </>
       )}
 
-      <div className="eyebrow">Состав</div>
+      <div className="mx-section">Состав</div>
       {mix.items.map((item) => {
         const flavor = getFlavor(item.flavorId);
         if (!flavor) return null;
         return (
-          <div key={item.flavorId} className="card card-row">
-            <div>
-              <div style={{ fontWeight: 700 }}>{flavor.name.toUpperCase()}</div>
-              <div className="muted" style={{ fontSize: 13 }}>
-                {flavor.brand}
+          <div key={item.flavorId} className="mx-comp">
+            <div className="mx-share-top">
+              <div>
+                <div className="mx-flavor-name">{flavor.name}</div>
+                <div className="mx-flavor-meta">{flavor.brand}</div>
               </div>
+              <div className="mx-share-pct">{item.sharePercent}%</div>
             </div>
-            <strong>{item.sharePercent}%</strong>
+            <div className="mx-bar" style={{ marginBottom: 0 }}>
+              <div style={{ width: `${item.sharePercent}%` }} />
+            </div>
           </div>
         );
       })}
 
-      <div className="card">
-        <div className="eyebrow">Оценка гостя {guest ? `(${guest.displayName})` : ""}</div>
+      {mix.masterNote && (
+        <>
+          <div className="mx-section">Заметка мастера</div>
+          <div className="mx-comp muted" style={{ lineHeight: 1.5 }}>
+            {mix.masterNote}
+          </div>
+        </>
+      )}
+
+      <div className="mx-section">Оценка гостя{guest ? ` · ${guest.displayName}` : ""}</div>
+      <div className="mx-comp">
         <Stars value={mix.rating ?? 0} onRate={(v) => rateMix(mix.id, v)} />
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          В прод-версии гость ставит оценку сам в своём мини-аппе — здесь можно проставить за него, чтобы посмотреть, как это повлияет на вкусовой профиль.
-        </div>
       </div>
 
       {guest && (
-        <Link to={`/employee/guests/${guest.id}`} className="btn secondary" style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 12 }}>
+        <Link
+          to={`/employee/guests/${guest.id}`}
+          className="btn secondary"
+          style={{ display: "block", textAlign: "center", textDecoration: "none", marginTop: 16 }}
+        >
           К профилю гостя
         </Link>
       )}
