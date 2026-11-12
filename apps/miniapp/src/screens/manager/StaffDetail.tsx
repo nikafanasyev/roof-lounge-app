@@ -292,13 +292,14 @@ function FixedAccrualsCard({ staffId }: { staffId: string }) {
     <div style={{ marginBottom: "var(--space-5)" }}>
       <h2>Фиксированные начисления</h2>
       {accruals.map((f) => (
-        <div key={f.id} className="card-row">
-          <span>
-            {f.label || "Начисление"} · {formatFixedAccrualCadence(f.cadence)}
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontWeight: 700 }}>{money(f.amount)}</span>
-            <button className="muted" style={{ background: "none", border: "none", fontSize: 12, textDecoration: "underline", cursor: "pointer" }} onClick={() => removeFixedAccrual(f.id)}>
+        <div key={f.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 600 }}>{f.label || "Начисление"}</div>
+            <div className="muted" style={{ fontSize: 13 }}>{formatFixedAccrualCadence(f.cadence)}</div>
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{money(f.amount)}</div>
+            <button className="muted" style={{ background: "none", border: "none", padding: 0, fontSize: 12, textDecoration: "underline", cursor: "pointer" }} onClick={() => removeFixedAccrual(f.id)}>
               убрать
             </button>
           </div>
