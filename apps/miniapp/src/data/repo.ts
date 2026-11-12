@@ -666,6 +666,10 @@ async function loadExpenses() {
       id: r.id,
       amount: Number(r.amount),
       category: r.category,
+      // Колонка появляется миграцией 0018_expenses_supplier.sql — пока она
+      // не применена, select("*") просто не вернёт её, и здесь будет
+      // undefined (тот же принцип, что у deletedAt выше).
+      supplier: r.supplier ?? undefined,
       note: r.note ?? undefined,
       date: r.date,
       deletedAt: r.deleted_at ?? undefined,
@@ -2036,9 +2040,9 @@ export function listActiveExpenses(): Expense[] {
  * timestamptz), по умолчанию сегодня, но можно указать прошлую дату (та же
  * логика, что addAdjustment).
  */
-export function addExpense(amount: number, category: string, note: string | undefined, dateIso?: string) {
+export function addExpense(amount: number, category: string, supplier: string | undefined, note: string | undefined, dateIso?: string) {
   const date = dateIso || new Date().toISOString().slice(0, 10);
-  const entry: Expense = { id: uid(), amount, category, note: note || undefined, date };
+  const entry: Expense = { id: uid(), amount, category, supplier: supplier || undefined, note: note || undefined, date };
   expensesStore.update((list) => [entry, ...list]);
   if (isSupabaseConfigured && supabase) {
     supabase
@@ -2047,6 +2051,7 @@ export function addExpense(amount: number, category: string, note: string | unde
         id: entry.id,
         amount,
         category,
+        supplier: supplier || null,
         note: note || null,
         date,
         created_by_staff_id: getStaffProfile().id,

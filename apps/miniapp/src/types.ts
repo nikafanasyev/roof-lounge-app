@@ -302,6 +302,7 @@ export interface Expense {
   id: string;
   amount: number; // ₽
   category: string; // свободный текст — см. комментарий в 0017_expenses.sql
+  supplier?: string; // см. 0018_expenses_supplier.sql
   note?: string;
   date: string; // ISO-дата
   deletedAt?: string;
