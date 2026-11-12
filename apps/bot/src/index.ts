@@ -272,18 +272,25 @@ async function main() {
         await req.markFailed(`Гость не найден: ${error?.message ?? req.guestId}`);
         return;
       }
-      if (!guest.last_name || !guest.first_name || !guest.birth_date || !guest.gender || !guest.phone) {
-        await req.markFailed("У гостя не заполнены фамилия/имя/дата рождения/пол/телефон — карту в Quick Resto не создать.");
+      // Гости из CRM Quick Resto приходят с одним display_name (без
+      // раздельных ФИО/телефона/пола) — берём имя оттуда. Если карточка уже
+      // есть в кассе (quickresto_customer_id), создавать клиента не нужно,
+      // только добавить QR-код.
+      const parts = (guest.display_name ?? "").trim().split(/\s+/).filter(Boolean);
+      const lastName = guest.last_name || parts[parts.length > 1 ? parts.length - 1 : 0] || "";
+      const firstName = guest.first_name || (parts.length > 1 ? parts[0] : "") || lastName;
+      if (!guest.quickresto_customer_id && !lastName) {
+        await req.markFailed("У гостя нет имени — карту в Quick Resto не создать.");
         return;
       }
       try {
         const { customerId, qrKey } = await createLoyaltyCardInQuickResto({
-          lastName: guest.last_name,
-          firstName: guest.first_name,
+          lastName,
+          firstName,
           middleName: guest.middle_name ?? undefined,
-          birthDate: guest.birth_date,
-          gender: guest.gender as "male" | "female",
-          phone: guest.phone,
+          birthDate: guest.birth_date ?? undefined,
+          gender: (guest.gender as "male" | "female" | null) ?? undefined,
+          phone: guest.phone ?? undefined,
           existingCustomerId: guest.quickresto_customer_id ?? undefined,
         });
         await supabaseAdmin
