@@ -1,6 +1,10 @@
 -- Разовый импорт расходов за 01–12.11.2026 из таблицы (нал + безнал).
 -- Авансы (ЗП аванс) не переносим — они проведены как штрафы/выплаты.
 -- В note стоит метка [нал]/[безнал]. Повторный запуск ничего не дублирует.
+-- Колонки из миграций 0018/0020 на случай, если они ещё не применены.
+alter table expenses add column if not exists supplier text;
+alter table expenses add column if not exists department text;
+
 do $$
 begin
   if exists (select 1 from expenses where created_by_name = 'Импорт из таблицы (12.11)') then
