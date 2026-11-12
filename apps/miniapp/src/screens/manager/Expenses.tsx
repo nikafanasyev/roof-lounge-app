@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "@/data/useStore";
+import { SendReportButton } from "@/components/SendReportButton";
 import {
   addExpense,
   addIncome,
@@ -181,6 +182,9 @@ export default function Expenses() {
       <p className="muted" style={{ fontSize: 13, marginTop: -8, marginBottom: 16 }}>
         Учитываются в «Сводка» автоматически.
       </p>
+      <div style={{ marginBottom: 16 }}>
+        <SendReportButton kind="expenses" param={currentMonthKey()} label="Excel за месяц — отправить мне в Telegram" />
+      </div>
 
       <div className="tabs">
         <button className={`tab-btn ${mode === "expense" ? "active" : ""}`} onClick={() => switchMode("expense")}>

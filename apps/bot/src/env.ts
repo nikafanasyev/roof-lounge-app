@@ -11,6 +11,9 @@ export const env = {
   MINI_APP_URL: required("MINI_APP_URL"), // публичный URL задеплоенного apps/miniapp
   SUPABASE_URL: process.env.SUPABASE_URL ?? "",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  // Кому можно запрашивать Excel-отчёты (telegram_id через запятую). Если не
+  // задано — берём MANAGER_TELEGRAM_IDS (как в мини-аппе); плюс staff.role='manager'.
+  REPORT_ADMIN_IDS: process.env.REPORT_ADMIN_IDS ?? process.env.MANAGER_TELEGRAM_IDS ?? "",
   STAFF_CHAT_ID: process.env.STAFF_CHAT_ID ?? "", // куда падают уведомления о QR-вызовах
   // Куда пересылать фото открытия/закрытия смены. Если не задано — падают в STAFF_CHAT_ID.
   SHIFT_PHOTOS_CHAT_ID: process.env.SHIFT_PHOTOS_CHAT_ID ?? "",

@@ -16,6 +16,7 @@ import {
   staffDirectoryStore,
 } from "@/data/repo";
 import { exportSalaryWorkbook } from "@/lib/salaryExport";
+import { SendReportButton } from "@/components/SendReportButton";
 import type { StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
@@ -160,8 +161,11 @@ function ExportButton({ periods }: { periods: { key: string; label: string }[] }
         ))}
       </select>
       <button className="btn secondary" style={{ width: "100%" }} disabled={busy || !selected} onClick={handleExport}>
-        {busy ? "Формирую файл…" : "⬇️ Выгрузить ведомость"}
+        {busy ? "Формирую файл…" : "Скачать ведомость"}
       </button>
+      <div style={{ marginTop: 8 }}>
+        {selected && <SendReportButton kind="salary" param={selected.key} />}
+      </div>
     </div>
   );
 }

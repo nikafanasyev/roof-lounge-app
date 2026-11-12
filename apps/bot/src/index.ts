@@ -2,6 +2,7 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
 import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
+import { buildExpensesWorkbook, buildSalaryWorkbook, payrollPeriodForDate } from "./reports";
 import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
@@ -146,6 +147,97 @@ bot.command("accrue", async (ctx) => {
     await ctx.reply(`Не удалось начислить за ${dateLabel} — см. логи бота. (${String(err)})`);
   }
 });
+
+// --- Excel-отчёты в личку (см. reports.ts, supabase/migrations/0021_report_requests.sql) ---
+
+async function isReportAdmin(telegramId: number): Promise<boolean> {
+  const ids = env.REPORT_ADMIN_IDS.split(",").map((x) => x.trim()).filter(Boolean);
+  if (ids.includes(String(telegramId))) return true;
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return false;
+  const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const { data } = await supabaseAdmin.from("staff").select("role").eq("telegram_id", telegramId).maybeSingle();
+  return data?.role === "manager";
+}
+
+const todayMsk = () => new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+
+/** Начало последнего ЗАКРЫВШЕГОСЯ зарплатного периода (за ним — ближайшая выплата). */
+function lastClosedPeriodStart(): string {
+  const current = payrollPeriodForDate(todayMsk());
+  const prevDay = new Date(Date.parse(current.start) - 86400_000).toISOString().slice(0, 10);
+  return payrollPeriodForDate(prevDay).start;
+}
+
+async function sendReport(kind: "salary" | "expenses", param: string, chatId: number) {
+  const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const { buffer, filename, caption } = kind === "salary" ? await buildSalaryWorkbook(supabaseAdmin, param) : await buildExpensesWorkbook(supabaseAdmin, param);
+  await bot.api.sendDocument(chatId, new InputFile(buffer, filename), { caption });
+}
+
+bot.command("salary", async (ctx) => {
+  if (!ctx.from || !(await isReportAdmin(ctx.from.id))) {
+    await ctx.reply("Нет доступа: отчёты доступны только руководителям.");
+    return;
+  }
+  const arg = ctx.match?.toString().trim();
+  let start = lastClosedPeriodStart();
+  if (arg) {
+    const m = arg.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (!m) {
+      await ctx.reply("Формат: /salary — прошлый закрытый период, или /salary ДД.ММ.ГГГГ — период, в который попадает дата.");
+      return;
+    }
+    start = payrollPeriodForDate(`${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`).start;
+  }
+  try {
+    await sendReport("salary", start, ctx.from.id);
+  } catch (err) {
+    console.error("/salary ошибка:", err);
+    await ctx.reply(`Не удалось собрать ведомость: ${String(err)}`);
+  }
+});
+
+bot.command("expenses", async (ctx) => {
+  if (!ctx.from || !(await isReportAdmin(ctx.from.id))) {
+    await ctx.reply("Нет доступа: отчёты доступны только руководителям.");
+    return;
+  }
+  const arg = ctx.match?.toString().trim() || todayMsk().slice(0, 7);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(arg)) {
+    await ctx.reply("Формат: /expenses ГГГГ-ММ, например /expenses 2026-11 (без аргумента — текущий месяц).");
+    return;
+  }
+  try {
+    await sendReport("expenses", arg, ctx.from.id);
+  } catch (err) {
+    console.error("/expenses ошибка:", err);
+    await ctx.reply(`Не удалось собрать отчёт: ${String(err)}`);
+  }
+});
+
+// Запросы из мини-аппа (кнопка "Отправить мне в Telegram") — опрос таблицы.
+if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
+  const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const busy = new Set<string>();
+  const pollReports = async () => {
+    const { data } = await supabaseAdmin.from("report_requests").select("id, kind, param, requested_by_telegram_id").eq("status", "pending").order("created_at").limit(5);
+    for (const r of data ?? []) {
+      if (busy.has(r.id)) continue;
+      busy.add(r.id);
+      try {
+        if (!(await isReportAdmin(Number(r.requested_by_telegram_id)))) throw new Error("нет доступа");
+        await sendReport(r.kind as "salary" | "expenses", r.param, Number(r.requested_by_telegram_id));
+        await supabaseAdmin.from("report_requests").update({ status: "done", handled_at: new Date().toISOString() }).eq("id", r.id);
+      } catch (err) {
+        console.error("report_requests ошибка:", err);
+        await supabaseAdmin.from("report_requests").update({ status: "failed", result: String(err), handled_at: new Date().toISOString() }).eq("id", r.id);
+      } finally {
+        busy.delete(r.id);
+      }
+    }
+  };
+  setInterval(() => void pollReports().catch((e) => console.error("pollReports:", e)), 5000);
+}
 
 bot.catch((err) => {
   console.error("Необработанная ошибка бота:", err);
