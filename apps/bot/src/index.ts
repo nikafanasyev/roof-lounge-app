@@ -2,7 +2,7 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
 import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
-import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
+import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -356,6 +356,10 @@ async function main() {
     // Перенос базы клиентов Quick Resto (ФИО + номер карты, без телефона —
     // см. claude/quickresto-shift-integration.md) в наш guests, ежедневно.
     scheduleDailyCrmCustomerSync();
+
+    // Синхронизация нал/безнал по текущему месяцу (отчёт
+    // finances.reports.financial), ежедневно в 7:00 МСК.
+    scheduleDailyCashSplitSync();
   } else {
     console.log("QR_LOGIN / QR_PASSWORD (или SUPABASE_*) не заданы — интеграция с Quick Resto выключена.");
   }

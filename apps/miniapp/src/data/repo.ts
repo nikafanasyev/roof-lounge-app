@@ -120,6 +120,11 @@ export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
 export const staffInvitesStore = new Store<StaffInvite[]>([]);
 export const payrollRecalcRequestsStore = new Store<PayrollRecalcRequest[]>([]);
 export const expensesStore = new Store<Expense[]>([]);
+// Нал/безнал по месяцам — заполняется ботом (apps/bot/src/quickresto.ts,
+// syncMonthlyCashSplit) раз в сутки из отчёта Quick Resto
+// finances.reports.financial. Пока синхронизации не было для месяца —
+// просто нет строки (см. getCashSplitForMonth ниже).
+export const cashSplitStore = new Store<MonthCashSplit[]>([]);
 
 // Статус загрузки реальных данных — см. initData() ниже. Пока он не "ok",
 // сотрудник/руководитель видит примерные данные из data/seed.ts (гости,
@@ -216,6 +221,7 @@ export async function initData(): Promise<void> {
           loadStaffInvites(),
           loadPayrollRecalcRequests(),
           loadExpenses(),
+          loadCashSplit(),
         ];
     const results = await Promise.allSettled([...guestLoads, ...staffLoads]);
     if (results.some((r) => r.status === "rejected")) {
@@ -679,6 +685,19 @@ async function loadExpenses() {
   );
 }
 
+async function loadCashSplit() {
+  const { data, error } = await supabase!.from("monthly_cash_split").select("*");
+  if (error) return logSyncError("loadCashSplit", error);
+  cashSplitStore.set(
+    (data ?? []).map((r) => ({
+      monthKey: r.month_key,
+      cash: Number(r.cash),
+      cashless: Number(r.cashless),
+      syncedAt: r.synced_at,
+    })),
+  );
+}
+
 function subscribeRealtime() {
   if (!supabase) return;
   supabase
@@ -701,6 +720,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "staff_invites" }, () => loadStaffInvites())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_recalc_requests" }, () => loadPayrollRecalcRequests())
     .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => loadExpenses())
+    .on("postgres_changes", { event: "*", schema: "public", table: "monthly_cash_split" }, () => loadCashSplit())
     .subscribe();
 }
 
@@ -1248,6 +1268,26 @@ export function computeMonthFinancials(monthKey: string): MonthFinancials {
   const expenses = expensesByCategory.reduce((sum, c) => sum + c.amount, 0);
 
   return { monthKey, revenue, prevMonthRevenue, changePercent, expenses, net: revenue - expenses, expensesByCategory };
+}
+
+/**
+ * Нал/безнал за месяц — отдельно от computeMonthFinancials, так как это не
+ * вычисляется из shift_payroll, а приходит из Quick Resto (отчёт
+ * finances.reports.financial, см. claude/quickresto-shift-integration.md)
+ * через ежедневную синхронизацию бота в таблицу monthly_cash_split. Для
+ * месяца, который бот ещё не синхронизировал (например, прошлые месяцы —
+ * бот синхронизирует только текущий), строки просто нет — возвращаем null,
+ * экран показывает это как "нет данных", а не как 0 ₽.
+ */
+export interface MonthCashSplit {
+  monthKey: string; // "YYYY-MM"
+  cash: number;
+  cashless: number;
+  syncedAt: string;
+}
+
+export function getCashSplitForMonth(monthKey: string): MonthCashSplit | null {
+  return cashSplitStore.get().find((s) => s.monthKey === monthKey) ?? null;
 }
 
 export function averageReactionMinutes(): number | null {
