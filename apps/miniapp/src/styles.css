@@ -1068,3 +1068,165 @@ textarea {
   padding: var(--space-4);
   margin-bottom: var(--space-3);
 }
+
+/* ======================================================================
+   Единый "воздушный" стиль для всего интерфейса (12.11.2026, просьба
+   Никиты: "весь интерфейс в таком стиле" — по мотивам референса: крупные
+   скругления, подписи разделов, больше отступов, пилюли-чипы). Блок стоит
+   в конце файла и переопределяет базовые правила выше — палитру и шрифты
+   не меняем, только форму и ритм.
+   ====================================================================== */
+:root {
+  --radius: 14px;
+  --radius-sm: 12px;
+}
+
+.screen {
+  padding: var(--space-5) var(--space-4) 112px;
+}
+
+h1 {
+  font-size: 24px;
+  font-weight: 650;
+  margin: 0 0 var(--space-5);
+}
+
+h2 {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  margin: var(--space-5) 0 var(--space-3);
+}
+
+/* Подпись раздела/поля: капсом с разрядкой, как в референсе. Внутри карточек
+   — без верхнего отступа. */
+.eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 var(--space-2);
+}
+.screen > .eyebrow,
+.screen > div > .eyebrow:first-child:not(.card .eyebrow) {
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-3);
+}
+.card .eyebrow {
+  margin-top: 0;
+}
+
+.card {
+  border-radius: var(--radius);
+  padding: var(--space-4) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.card-row {
+  gap: var(--space-3);
+}
+
+.chip {
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  background: var(--surface-2);
+  border-color: transparent;
+}
+.chip.accent {
+  background: rgba(185, 134, 83, 0.12);
+  border-color: var(--accent);
+}
+
+.chip-row {
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.chip-pick {
+  border-radius: 999px;
+  padding: 11px 18px;
+}
+
+.btn {
+  border-radius: var(--radius-sm);
+  padding: 15px 18px;
+  font-size: 15px;
+}
+
+.btn-row {
+  gap: var(--space-3);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="tel"],
+input[type="date"],
+input[type="search"],
+input[type="email"],
+textarea,
+select {
+  border-radius: var(--radius-sm);
+  padding: 13px 14px;
+}
+
+.tabs {
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.tab-btn {
+  border-radius: 999px;
+  padding: 11px 10px;
+}
+
+.tab-btn.active {
+  background: rgba(185, 134, 83, 0.14);
+  color: var(--accent);
+}
+
+.bar-track {
+  height: 8px;
+}
+
+.bottom-nav {
+  position: sticky;
+  bottom: var(--space-3);
+  margin: 0 var(--space-3) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.hamburger-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.top-bar {
+  padding: var(--space-3) var(--space-4) 0;
+}
+
+.drawer-panel {
+  border-radius: 0 20px 20px 0;
+}
+
+.drawer-nav a {
+  padding: 14px 12px;
+  border-radius: var(--radius-sm);
+}
+
+.drawer-nav a.active {
+  background: rgba(185, 134, 83, 0.14);
+  color: var(--accent);
+}
+
+.sheet-panel {
+  border-radius: 20px 20px 0 0;
+}
+
+.list-empty {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--muted);
+}
