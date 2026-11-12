@@ -385,9 +385,9 @@ export async function createLoyaltyCardInQuickResto(input: {
   lastName: string;
   firstName: string;
   middleName?: string;
-  birthDate: string; // ISO YYYY-MM-DD
-  gender: "male" | "female";
-  phone: string; // уже нормализован на стороне миниаппа, формат "7XXXXXXXXXX"
+  birthDate?: string; // ISO YYYY-MM-DD; у гостей из CRM Quick Resto может не быть
+  gender?: "male" | "female";
+  phone?: string; // уже нормализован на стороне миниаппа, формат "7XXXXXXXXXX"
   /**
    * Если у гостя уже есть клиент в Quick Resto (предыдущая попытка создала
    * его, но упала на привязке телефона/QR — см. обсуждение с Никитой:
@@ -420,8 +420,8 @@ export async function createLoyaltyCardInQuickResto(input: {
         lastName: input.lastName,
         firstName: input.firstName,
         ...(input.middleName ? { middleName: input.middleName } : {}),
-        dateOfBirth: input.birthDate,
-        sex: input.gender,
+        ...(input.birthDate ? { dateOfBirth: input.birthDate } : {}),
+        ...(input.gender ? { sex: input.gender } : {}),
       },
     );
     customerId = customer.id;
@@ -431,12 +431,14 @@ export async function createLoyaltyCardInQuickResto(input: {
   // Шаг 2 — привязать телефон. Quick Resto сам отправляет номер с ведущей
   // "8" (не "+7") — на их же тестовой записи было "88888888888" для
   // "+7..." номера, поэтому приводим к тому же виду, а не берём наш "7...".
-  const phoneForQr = "8" + input.phone.replace(/^7/, "");
-  await qrFetchJsonPost(`/platform/data/crm.customer.contacts/create?${ownerParams}&regTime=${regTime()}&${QR_TIME_PARAMS}`, {
-    className: "ru.edgex.quickresto.modules.crm.customer.contacts.ContactMethod",
-    type: "phoneNumber",
-    value: phoneForQr,
-  });
+  if (input.phone) {
+    const phoneForQr = "8" + input.phone.replace(/^7/, "");
+    await qrFetchJsonPost(`/platform/data/crm.customer.contacts/create?${ownerParams}&regTime=${regTime()}&${QR_TIME_PARAMS}`, {
+      className: "ru.edgex.quickresto.modules.crm.customer.contacts.ContactMethod",
+      type: "phoneNumber",
+      value: phoneForQr,
+    });
+  }
 
   // Шаг 3 — создать QR-идентификатор. В реальном трафике браузер сам
   // генерирует "key" и отправляет его в запросе (сервер не присваивает его
