@@ -1050,6 +1050,21 @@ export async function requestLoyaltyCardCreation(guestId: string): Promise<void>
   await enqueueLoyaltyCardRequest(guestId);
 }
 
+/** Статус последнего запроса карты лояльности — чтобы показать причину сбоя. */
+export async function getLatestLoyaltyRequest(
+  guestId: string,
+): Promise<{ status: "pending" | "done" | "failed"; result: string | null } | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data } = await supabase
+    .from("loyalty_card_requests")
+    .select("status, result")
+    .eq("guest_id", guestId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { status: "pending" | "done" | "failed"; result: string | null } | null) ?? null;
+}
+
 export async function registerGuest(
   input: {
     phone: string;

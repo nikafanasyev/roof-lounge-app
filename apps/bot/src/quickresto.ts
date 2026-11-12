@@ -1470,34 +1470,36 @@ export async function syncCrmCustomers(
   //   потерять вкусовой квиз/историю миксов, а просто отвязываем от
   //   удалённого клиента Quick Resto — карта лояльности внутри приложения
   //   остаётся, а отметка "работает на кассе" пропадает.
+  // Решение Никиты 12.11.2026: удалённые в Quick Resto карточки должны
+  // исчезать и из миниаппа — удаляем гостей целиком (и помеченных deleted,
+  // и тех, кого в Quick Resto уже нет совсем), независимо от телефона.
   const deletedIds = customers.filter((c) => c.deleted).map((c) => c.id);
+  const aliveIds = new Set(customers.filter((c) => !c.deleted).map((c) => c.id));
   let deletedRemoved = 0;
   let deletedUnlinked = 0;
-  if (deletedIds.length > 0) {
-    const { data: removed, error: removeError } = await supabase
+  if (customers.length > 0) {
+    const { data: linked, error: linkedError } = await supabase
       .from("guests")
-      .delete()
-      .in("quickresto_customer_id", deletedIds)
-      .is("phone", null)
-      .select("id");
-    if (removeError) {
-      console.error("Quick Resto: ошибка удаления гостей с удалённым клиентом CRM:", removeError);
+      .select("id, quickresto_customer_id")
+      .not("quickresto_customer_id", "is", null);
+    if (linkedError) {
+      console.error("Quick Resto: ошибка чтения привязанных гостей:", linkedError);
     } else {
-      deletedRemoved = removed?.length ?? 0;
-    }
-
-    const { data: unlinked, error: unlinkError } = await supabase
-      .from("guests")
-      .update({ quickresto_customer_id: null, quickresto_qr_key: null })
-      .in("quickresto_customer_id", deletedIds)
-      .not("phone", "is", null)
-      .select("id");
-    if (unlinkError) {
-      console.error("Quick Resto: ошибка отвязки гостей от удалённого клиента CRM:", unlinkError);
-    } else {
-      deletedUnlinked = unlinked?.length ?? 0;
+      const toRemove = ((linked ?? []) as { id: string; quickresto_customer_id: number }[])
+        .filter((g) => !aliveIds.has(g.quickresto_customer_id as number))
+        .map((g) => g.id as string);
+      for (let i = 0; i < toRemove.length; i += 200) {
+        const { data: removed, error: removeError } = await supabase
+          .from("guests")
+          .delete()
+          .in("id", toRemove.slice(i, i + 200))
+          .select("id");
+        if (removeError) console.error("Quick Resto: ошибка удаления гостей:", removeError);
+        else deletedRemoved += removed?.length ?? 0;
+      }
     }
   }
+  void deletedIds;
 
   return { synced, total: customers.length, deletedRemoved, deletedUnlinked };
 }
