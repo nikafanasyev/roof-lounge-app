@@ -12,6 +12,7 @@ import {
   listAromaTags,
   removeMix,
   requestLoyaltyCardCreation,
+  getLatestLoyaltyRequest,
 } from "@/data/repo";
 import type { Guest } from "@/types";
 import { AROMA_DIRECTION_LABELS } from "@/types";
@@ -55,20 +56,25 @@ export default function GuestProfile() {
     };
   }, [guestId]);
 
+  const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
+
   async function handleRequestLoyaltyCard() {
     setRequestingLoyaltyCard(true);
     try {
       await requestLoyaltyCardCreation(guestId);
       // Бот обрабатывает запрос асинхронно (обычно пара секунд) — опрашиваем
       // несколько раз, чтобы карта обновилась сама, без перезахода на экран.
-      for (let i = 0; i < 6; i++) {
+      setLoyaltyError(null);
+      for (let i = 0; i < 8; i++) {
         await new Promise((resolve) => setTimeout(resolve, 2500));
         const updated = await getGuestByIdRemote(guestId);
-        if (updated?.quickrestoQrKey) {
-          setCardGuest(updated);
+        setCardGuest(updated);
+        if (updated?.quickrestoQrKey) break;
+        const req = await getLatestLoyaltyRequest(guestId);
+        if (req?.status === "failed") {
+          setLoyaltyError(req.result ?? "Неизвестная ошибка");
           break;
         }
-        setCardGuest(updated);
       }
     } finally {
       setRequestingLoyaltyCard(false);
@@ -165,6 +171,11 @@ export default function GuestProfile() {
               >
                 {requestingLoyaltyCard ? "Отправляем…" : "Создать/повторить привязку к кассе"}
               </button>
+            )}
+            {loyaltyError && (
+              <div className="muted" style={{ marginTop: 8, fontSize: 12, color: "var(--danger, #e5484d)", wordBreak: "break-word" }}>
+                Не удалось: {loyaltyError}
+              </div>
             )}
           </div>
 
