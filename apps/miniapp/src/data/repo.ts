@@ -1,3 +1,4 @@
+import { flavorMatches } from "../lib/flavorSearch";
 // Единая точка доступа к данным приложения.
 //
 // Без настроенного Supabase-проекта (см. .env.example) работает поверх
@@ -796,11 +797,8 @@ export function getFlavor(id: string): Flavor | undefined {
 }
 
 export function searchFlavors(query: string): Flavor[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return flavorsStore.get();
-  return flavorsStore
-    .get()
-    .filter((f) => f.brand.toLowerCase().includes(q) || f.name.toLowerCase().includes(q));
+  if (!query.trim()) return flavorsStore.get();
+  return flavorsStore.get().filter((f) => flavorMatches(f.brand, f.name, query));
 }
 
 /** Вкусовой профиль гостя, посчитанный из истории миксов (аналог taste_profile). */

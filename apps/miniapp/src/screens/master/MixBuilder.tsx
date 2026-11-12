@@ -6,7 +6,7 @@ import type { Flavor, MixItem } from "@/types";
 
 const MAX_ITEMS = 5;
 const DEFAULT_VISIBLE_FLAVORS = 7; // без поиска показываем короткий список, а не все 300+ позиций
-const BOWL_TYPES = ["классика", "фунтик", "самса"];
+const BOWL_TYPES = ["классика", "фаннел (фунтик)", "вортекс", "киллер", "турка", "самса"];
 const DENSITY_OPTIONS = ["лёгкое касание", "оверпак", "без касания"];
 
 export default function MixBuilder() {
