@@ -303,6 +303,22 @@ export interface Expense {
   amount: number; // ₽
   category: string; // свободный текст — см. комментарий в 0017_expenses.sql
   supplier?: string; // см. 0018_expenses_supplier.sql
+  department?: string; // Бар/Кухня/Кальян/Общее — см. 0020_expense_department_and_incomes.sql
+  note?: string;
+  date: string; // ISO-дата
+  deletedAt?: string;
+  deletedByName?: string;
+  deleteReason?: string;
+}
+
+/**
+ * Доходы — ручной учёт, отдельно от автоматической выручки из Quick Resto
+ * (см. 0020_expense_department_and_incomes.sql и запрос Никиты 12.11.2026).
+ */
+export interface Income {
+  id: string;
+  amount: number; // ₽
+  category: string; // свободный текст, подсказки в Expenses.tsx
   note?: string;
   date: string; // ISO-дата
   deletedAt?: string;
