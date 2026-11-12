@@ -25,7 +25,19 @@ export default function Fines() {
   // 14.10.2026: "штрафы нужно хранить в штрафах тоже"). listAllAdjustments()
   // — все записи по всем сотрудникам, включая удалённые (показываем их
   // зачёркнутыми, см. ниже).
-  const entries = listAllAdjustments();
+  const allEntries = listAllAdjustments();
+  // Фильтр "Актуальные/Удалённые/Все" — список разросся и вперемешку
+  // показывал зачёркнутые удалённые записи среди действующих, что мешало
+  // (см. фидбек Никиты 12.11.2026: "будто бы пора удалить" + "может быть
+  // сделать фильтры? типа удаленные штрафы, актуальные"). По умолчанию —
+  // только актуальные, удалённые остаются доступны отдельной вкладкой (не
+  // теряем аудит, просто не показываем по умолчанию).
+  const [filter, setFilter] = useState<"active" | "deleted" | "all">("active");
+  const entries = allEntries.filter((a) => {
+    if (filter === "all") return true;
+    if (filter === "deleted") return Boolean(a.deletedAt);
+    return !a.deletedAt;
+  });
   // Для выбора "Кому" в форме — только действующие сотрудники (уволенному
   // новый штраф не начислить), но для подписи уже существующих записей
   // нужны ВСЕ (включая уволенных) — иначе после увольнения его старые
@@ -111,7 +123,21 @@ export default function Fines() {
         </div>
       )}
 
-      {entries.length === 0 && <div className="list-empty">Записей пока нет</div>}
+      <div className="tabs">
+        <button className={`tab-btn ${filter === "active" ? "active" : ""}`} onClick={() => setFilter("active")}>
+          Актуальные
+        </button>
+        <button className={`tab-btn ${filter === "deleted" ? "active" : ""}`} onClick={() => setFilter("deleted")}>
+          Удалённые
+        </button>
+        <button className={`tab-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>
+          Все
+        </button>
+      </div>
+
+      {entries.length === 0 && (
+        <div className="list-empty">{filter === "deleted" ? "Удалённых записей нет" : "Записей пока нет"}</div>
+      )}
       {entries.map((a) => {
         const isDeleted = Boolean(a.deletedAt);
         return (

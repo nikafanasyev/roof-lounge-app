@@ -526,10 +526,17 @@ textarea {
   z-index: 60;
   display: flex;
   align-items: flex-end;
+  justify-content: center;
 }
 
+/* max-width как у .app (480px) — backdrop перекрывает весь экран (fixed),
+   и без ограничения панель растягивалась на всю ширину окна браузера, хотя
+   остальное приложение узкой колонкой (на десктопе выглядело "слишком
+   большим окном", см. фидбек Никиты 12.11.2026). На телефоне (<480px) ничего
+   не меняется. */
 .sheet-panel {
   width: 100%;
+  max-width: 480px;
   background: var(--surface);
   border-top: 1px solid var(--border);
   border-radius: var(--radius) var(--radius) 0 0;

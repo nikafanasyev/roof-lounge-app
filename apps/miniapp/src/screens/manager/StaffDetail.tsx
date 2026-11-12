@@ -7,6 +7,7 @@ import {
   computeEarnedThisCalendarMonthForStaff,
   computePayrollSummaryForStaff,
   createFixedAccrual,
+  fixedAccrualsStore,
   formatFixedAccrualCadence,
   formatSalaryModel,
   getStaffProfileById,
@@ -265,6 +266,13 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
 
 /** Фиксированные начисления вне сменной сетки — см. запрос Никиты: "Никита 10000 (раз в 2 недели)". */
 function FixedAccrualsCard({ staffId }: { staffId: string }) {
+  // Раньше компонент не подписывался на fixedAccrualsStore — после
+  // createFixedAccrual() стор обновлялся, но React об этом не узнавал и не
+  // перерисовывал карточку, из-за чего новое начисление визуально "никуда
+  // не сохранялось" (см. фидбек Никиты 12.11.2026), хотя на самом деле
+  // сохранялось и в сторе, и в Supabase — просто не отображалось без
+  // перехода на другой экран и обратно.
+  useStore(fixedAccrualsStore);
   const accruals = listFixedAccrualsForStaff(staffId);
   const [adding, setAdding] = useState(false);
   const [amount, setAmount] = useState("");
