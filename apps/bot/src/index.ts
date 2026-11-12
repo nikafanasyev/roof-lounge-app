@@ -7,6 +7,26 @@ import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrue
 
 const bot = new Bot(env.BOT_TOKEN);
 
+// Группа стала супергруппой — у чата новый ID, старый перестаёт работать и
+// Telegram отвечает 400 "group chat was upgraded to a supergroup chat" с
+// parameters.migrate_to_chat_id. Подхватываем новый ID на лету: повторяем
+// запрос и подменяем ID в настройках на время работы бота. Чтобы пережить
+// перезапуск, всё равно обновите STAFF_CHAT_ID (и др.) на Railway — новый ID
+// пишется в логи.
+bot.api.config.use(async (prev, method, payload, signal) => {
+  const res = await prev(method, payload, signal);
+  const newId = (res as { parameters?: { migrate_to_chat_id?: number } }).parameters?.migrate_to_chat_id;
+  const oldId = (payload as { chat_id?: string | number }).chat_id;
+  if (!res.ok && newId && oldId !== undefined) {
+    for (const key of ["STAFF_CHAT_ID", "SHIFT_PHOTOS_CHAT_ID", "QR_CHAT_ID"] as const) {
+      if (String(env[key]) === String(oldId)) env[key] = String(newId);
+    }
+    console.warn(`Чат ${oldId} стал супергруппой, новый ID: ${newId} — обновите переменную окружения на Railway.`);
+    return prev(method, { ...(payload as object), chat_id: newId } as typeof payload, signal);
+  }
+  return res;
+});
+
 bot.command("start", async (ctx) => {
   // Кнопка типа web_app (открытие мини-аппа прямо в Telegram) разрешена Telegram
   // только в личных сообщениях с ботом — в группах API отвечает BUTTON_TYPE_INVALID.
@@ -244,6 +264,18 @@ bot.catch((err) => {
   console.error("Необработанная ошибка бота:", err);
 });
 
+/** Личное сообщение каждому руководителю из REPORT_ADMIN_IDS (ссылки-приглашения и т.п.). */
+async function notifyManagers(text: string) {
+  const ids = Array.from(new Set(env.REPORT_ADMIN_IDS.split(",").map((x) => x.trim()).filter(Boolean)));
+  for (const id of ids) {
+    try {
+      await bot.api.sendMessage(id, text);
+    } catch (err) {
+      console.error(`Не удалось отправить личное сообщение ${id}:`, err);
+    }
+  }
+}
+
 async function main() {
   // Уведомления персоналу о QR-вызовах (см. README, раздел про Supabase Realtime).
   // Без настроенных SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY просто не запускается —
@@ -286,9 +318,11 @@ async function main() {
           member_limit: 1,
         });
         await invite.markSent(link.invite_link);
+        await notifyManagers(`Ссылка-приглашение для ${invite.fullName} (одноразовая):\n${link.invite_link}`);
       } catch (err) {
         console.error("Quick Resto: не удалось создать инвайт-ссылку:", err);
         await invite.markFailed(String(err));
+        await notifyManagers(`Не удалось создать ссылку-приглашение для ${invite.fullName}: ${String(err)}`);
       }
     });
     console.log("Слушаю staff_invites через Supabase Realtime — приглашения сотрудников включены.");
