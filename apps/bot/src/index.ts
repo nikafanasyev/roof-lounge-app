@@ -144,28 +144,44 @@ bot.command("accrue", async (ctx) => {
     await ctx.reply("Интеграция с Quick Resto/Supabase не настроена.");
     return;
   }
-  const arg = ctx.match?.toString().trim();
-  const parsed = arg?.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-  if (!parsed) {
-    await ctx.reply("Формат: /accrue ДД.ММ.ГГГГ, например /accrue 02.09.2026 — начислит ЗП за эту дату по уже внесённому графику.");
+  // /accrue ДД.ММ.ГГГГ — одна дата; /accrue ДД.ММ.ГГГГ ДД.ММ.ГГГГ — диапазон
+  // включительно (не больше 62 дней за раз), например весь месяц после
+  // того, как руководитель внёс график задним числом.
+  const dates = (ctx.match?.toString().match(/\d{1,2}\.\d{1,2}\.\d{4}/g) ?? []).map((d) => {
+    const [dd, mm, yyyy] = d.split(".");
+    return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+  });
+  if (dates.length < 1 || dates.length > 2) {
+    await ctx.reply("Формат: /accrue ДД.ММ.ГГГГ или /accrue ДД.ММ.ГГГГ ДД.ММ.ГГГГ (диапазон), например /accrue 01.11.2026 11.11.2026 — начислит ЗП по уже внесённому графику.");
     return;
   }
-  const [, dd, mm, yyyy] = parsed;
-  const dateIso = `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
-  await ctx.reply(`Начисляю ЗП за ${dd}.${mm}.${yyyy}...`);
-  const dateLabel = `${dd}.${mm}.${yyyy}`;
-  try {
-    const result = await manuallyAccrueDate(
-      dateIso,
-      async () => {}, // onIssue — актуально только при reconcile:true, здесь не используется
-      async () => {}, // onMissingSchedule — статус no_schedule ниже даёт то же самое сообщение
-    );
-    const { text } = describeAccrueResult(result, dateLabel);
-    await ctx.reply(text);
-  } catch (err) {
-    console.error("Quick Resto: /accrue ошибка:", err);
-    await ctx.reply(`Не удалось начислить за ${dateLabel} — см. логи бота. (${String(err)})`);
+  const startIso = dates[0];
+  const endIso = dates[1] ?? dates[0];
+  const days: string[] = [];
+  for (let t = Date.parse(startIso); t <= Date.parse(endIso); t += 86400_000) days.push(new Date(t).toISOString().slice(0, 10));
+  if (!days.length || days.length > 62) {
+    await ctx.reply("Диапазон пустой или длиннее 62 дней — укажите даты по возрастанию и не больше двух месяцев за раз.");
+    return;
   }
+  await ctx.reply(days.length === 1 ? `Начисляю ЗП за ${startIso.split("-").reverse().join(".")}...` : `Начисляю ЗП за ${days.length} дн. (${startIso} — ${endIso})...`);
+  const lines: string[] = [];
+  for (const dateIso of days) {
+    const dateLabel = dateIso.split("-").reverse().join(".");
+    try {
+      const result = await manuallyAccrueDate(
+        dateIso,
+        async () => {}, // onIssue — актуально только при reconcile:true, здесь не используется
+        async () => {}, // onMissingSchedule — статус no_schedule ниже даёт то же самое сообщение
+      );
+      const { ok, text } = describeAccrueResult(result, dateLabel);
+      // В диапазоне не шумим про уже начисленное и пустой график — только итог.
+      if (days.length === 1 || (ok && result.status === "accrued") || (!ok && result.status !== "no_schedule")) lines.push(text);
+    } catch (err) {
+      console.error("Quick Resto: /accrue ошибка:", err);
+      lines.push(`Не удалось начислить за ${dateLabel} — см. логи бота. (${String(err)})`);
+    }
+  }
+  await ctx.reply(lines.length ? lines.join("\n") : "Новых начислений нет: за эти дни всё уже начислено или график не внесён.");
 });
 
 // --- Excel-отчёты в личку (см. reports.ts, supabase/migrations/0021_report_requests.sql) ---
