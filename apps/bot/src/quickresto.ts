@@ -552,6 +552,74 @@ export async function fetchRevenueSplitForDate(date: Date): Promise<{ hookah: nu
   return { hookah, barKitchen: Math.max(0, total - hookah), total, isoDate };
 }
 
+// --- Нал/безнал (см. 0019_monthly_cash_split.sql и запрос Никиты 12.11.2026:
+// "как-то следить за налом и безналом") ---
+//
+// Источник — отдельный отчёт Quick Resto "Финансовый отчёт"
+// (finances.reports.financial, Финансы → Финансовый отчёт в бэк-офисе), НЕ
+// orders_by_storecategory, которым считается обычная выручка выше. Найден и
+// проверен на реальных данных 12.11.2026 (через DevTools, см. обсуждение с
+// Никитой) — отдаёт плоский список строк отчёта за произвольный диапазон
+// дат одним запросом (не постранично и не поддеревьям, несмотря на то что
+// в интерфейсе строки разворачиваются лениво). Нужные строки —
+// "Сумма продаж наличные"/"Сумма продаж безналичные" под "Общая выручка" —
+// это ОБЩИЕ суммы по заведению (оба фискальных регистратора, ФР2 и
+// Виртуальный ФР, вместе — Никита подтвердил, что разбивка по регистраторам
+// в приложении не нужна).
+interface FinancialReportRow {
+  object?: { account?: string; sum?: number };
+}
+interface FinancialReportResponse {
+  ds?: FinancialReportRow[];
+}
+
+const FINANCIAL_REPORT_PATH = "/platform/data/finances.reports.financial/select";
+
+export async function fetchCashCashlessSplit(sinceMs: number, tillMs: number): Promise<{ cash: number; cashless: number }> {
+  const params = new URLSearchParams({
+    start: "0",
+    count: "150",
+    mode: "mainFilter",
+    "extParams[className]": "mainFilter",
+    "extParams[dateRange][start]": String(sinceMs),
+    "extParams[dateRange][end]": String(tillMs),
+    "extParams[dateFrom]": String(sinceMs),
+    "extParams[dateTo]": String(tillMs),
+    businessDayOffsetInMs: "43200000",
+    timeZone: "-180",
+  });
+  const data = await qrFetchJson<FinancialReportResponse>(`${FINANCIAL_REPORT_PATH}?${params.toString()}`);
+  let cash = 0;
+  let cashless = 0;
+  for (const row of data.ds ?? []) {
+    if (row.object?.account === "Сумма продаж наличные") cash = Number(row.object.sum ?? 0);
+    if (row.object?.account === "Сумма продаж безналичные") cashless = Number(row.object.sum ?? 0);
+  }
+  return { cash, cashless };
+}
+
+// Границы календарного месяца (1-е число 00:00 МСК — 1-е число следующего
+// месяца 00:00 МСК) в UTC-миллисекундах, для fetchCashCashlessSplit — этот
+// отчёт, в отличие от orders_by_storecategory, считает сумму сразу за
+// произвольный диапазон, поэтому нет нужды дробить месяц на бизнес-дни.
+function monthRangeMs(monthKey: string): { sinceMs: number; tillMs: number } {
+  const [y, m] = monthKey.split("-").map(Number);
+  // 00:00 МСК = 21:00 UTC предыдущего дня (МСК = UTC+3).
+  const sinceMs = Date.UTC(y, m - 1, 1, -3, 0, 0);
+  const tillMs = Date.UTC(y, m, 1, -3, 0, 0);
+  return { sinceMs, tillMs };
+}
+
+export async function syncMonthlyCashSplit(supabase: SupabaseClient, monthKey: string): Promise<{ cash: number; cashless: number }> {
+  const { sinceMs, tillMs } = monthRangeMs(monthKey);
+  const { cash, cashless } = await fetchCashCashlessSplit(sinceMs, tillMs);
+  const { error } = await supabase
+    .from("monthly_cash_split")
+    .upsert({ month_key: monthKey, cash, cashless, synced_at: new Date().toISOString() });
+  if (error) console.error("Quick Resto: ошибка записи monthly_cash_split:", error);
+  return { cash, cashless };
+}
+
 // --- Начисление ЗП по закрытой смене (см. supabase/migrations/0004_staff_payroll.sql) ---
 
 type SalaryModel =
@@ -1435,6 +1503,36 @@ export async function syncCrmCustomers(
 }
 
 const CRM_SYNC_JOB_HOUR_MSK = 9;
+
+const CASH_SPLIT_SYNC_JOB_HOUR_MSK = 7;
+
+/**
+ * Планирует синхронизацию monthly_cash_split (текущий месяц) на 7:00 МСК
+ * каждый день, плюс сразу при старте бота. Текущий месяц достаточно —
+ * прошлые уже не меняются задним числом, кроме явного ручного пересчёта
+ * (см. syncMonthlyCashSplit, можно вызвать и для любого другого месяца
+ * вручную при необходимости, отдельной команды пока нет).
+ */
+export function scheduleDailyCashSplitSync() {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  function runOnce() {
+    const now = new Date();
+    const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    return syncMonthlyCashSplit(supabase, monthKey)
+      .then(({ cash, cashless }) => {
+        console.log(`Quick Resto: нал/безнал за ${monthKey} — нал ${Math.round(cash)} ₽, безнал ${Math.round(cashless)} ₽`);
+      })
+      .catch((err) => console.error("Quick Resto: ошибка синхронизации monthly_cash_split:", err));
+  }
+  function scheduleNext() {
+    const delay = msUntilNextMoscowHour(CASH_SPLIT_SYNC_JOB_HOUR_MSK);
+    setTimeout(() => {
+      runOnce().then(scheduleNext);
+    }, delay);
+    console.log(`Quick Resto: следующая синхронизация нал/безнал — через ${Math.round(delay / 60000)} мин (${CASH_SPLIT_SYNC_JOB_HOUR_MSK}:00 МСК)`);
+  }
+  runOnce().then(scheduleNext);
+}
 
 /**
  * Планирует syncCrmCustomers на 9:00 МСК каждый день (и один раз сразу при

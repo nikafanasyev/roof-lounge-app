@@ -3,9 +3,11 @@ import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import {
   averageReactionMinutes,
+  cashSplitStore,
   computeMonthFinancials,
   currentMonthKey,
   expensesStore,
+  getCashSplitForMonth,
   listAvailableMonths,
   problemsStore,
   serviceCallsStore,
@@ -39,6 +41,7 @@ export default function Summary() {
   const shift = useStore(shiftStore);
   useStore(shiftPayrollStore);
   useStore(expensesStore);
+  useStore(cashSplitStore);
 
   const openCalls = calls.filter((c) => c.status === "open");
   const openProblems = problems.filter((p) => p.status !== "done");
@@ -56,6 +59,7 @@ export default function Summary() {
   const data = computeMonthFinancials(monthKey);
   const canGoNext = monthKey < currentMonthKey();
   const canGoPrev = months.includes(shiftMonthKey(monthKey, -1));
+  const cashSplit = getCashSplitForMonth(monthKey);
 
   return (
     <div className="screen">
@@ -124,17 +128,40 @@ export default function Summary() {
 
       {/*
         Нал/безнал — Никита попросил "в идеале как-то следить за налом и
-        безналом" (12.11.2026). Пока НЕ сделано: текущая интеграция с Quick
-        Resto (fetchRevenueSplitForDate в apps/bot/src/quickresto.ts) тянет
-        только общую сумму выручки за бизнес-день через отчёт по категориям
-        товаров — там нет разбивки по способу оплаты. Раздельный нал/безнал
-        похоже есть только в текстовых отчётах смены (чек-лист "Закрытие
-        кассовой смены" — "выручка, безналичные, наличные..."), которые
-        никуда не пишутся структурированно. Нужно решить отдельно: either
-        бот тянет такую разбивку из другого отчёта Quick Resto (если он
-        вообще её отдаёт), либо это ручной ввод при закрытии смены — см.
-        обсуждение с Никитой.
+        безналом" (12.11.2026). Источник — отчёт Quick Resto
+        finances.reports.financial ("Сумма продаж наличные"/"безналичные"
+        внутри "Общая выручка"), который бот синхронизирует раз в сутки в
+        monthly_cash_split (см. apps/bot/src/quickresto.ts,
+        syncMonthlyCashSplit, и claude/quickresto-shift-integration.md).
+        Бот синхронизирует только ТЕКУЩИЙ месяц — для прошлых месяцев строки
+        в monthly_cash_split не будет, пока нет отдельной команды для
+        ручной синхронизации задним числом, поэтому показываем "—", а не 0 ₽.
       */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>
+          Нал / безнал
+        </div>
+        {cashSplit ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Наличные
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{money(cashSplit.cash)}</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Безналичные
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{money(cashSplit.cashless)}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: 13 }}>
+            Ещё не синхронизировано за этот месяц
+          </div>
+        )}
+      </div>
 
       <div className="eyebrow">Операционка</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
