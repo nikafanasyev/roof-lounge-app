@@ -600,6 +600,40 @@ export async function fetchCashCashlessSplit(sinceMs: number, tillMs: number): P
   return { cash, cashless };
 }
 
+/** Все строки финансового отчёта за диапазон (для диагностики /cashdebug). */
+export async function fetchFinancialReportRows(sinceMs: number, tillMs: number): Promise<{ account: string; sum: number }[]> {
+  const params = new URLSearchParams({
+    start: "0",
+    count: "150",
+    mode: "mainFilter",
+    "extParams[className]": "mainFilter",
+    "extParams[dateRange][start]": String(sinceMs),
+    "extParams[dateRange][end]": String(tillMs),
+    "extParams[dateFrom]": String(sinceMs),
+    "extParams[dateTo]": String(tillMs),
+    businessDayOffsetInMs: "43200000",
+    timeZone: "-180",
+  });
+  const data = await qrFetchJson<FinancialReportResponse>(`${FINANCIAL_REPORT_PATH}?${params.toString()}`);
+  return (data.ds ?? []).map((r) => ({ account: String(r.object?.account ?? ""), sum: Number(r.object?.sum ?? 0) }));
+}
+
+/** Диагностика нал/безнал: по бизнес-дням (11:00–11:00 МСК) + все строки отчёта за весь диапазон. */
+export async function debugCashSplit(fromIso: string, toIso: string) {
+  const days: { iso: string; cash: number; cashless: number }[] = [];
+  const start = new Date(`${fromIso}T12:00:00+03:00`);
+  const end = new Date(`${toIso}T12:00:00+03:00`);
+  for (let d = new Date(start); d <= end; d = new Date(d.getTime() + 86400000)) {
+    const { sinceMs, tillMs, isoDate } = businessDayRangeMs(d);
+    const r = await fetchCashCashlessSplit(sinceMs, tillMs);
+    days.push({ iso: isoDate, ...r });
+  }
+  const first = businessDayRangeMs(start);
+  const last = businessDayRangeMs(end);
+  const rows = await fetchFinancialReportRows(first.sinceMs, last.tillMs);
+  return { days, rows };
+}
+
 // Границы календарного месяца (1-е число 00:00 МСК — 1-е число следующего
 // месяца 00:00 МСК) в UTC-миллисекундах, для fetchCashCashlessSplit — этот
 // отчёт, в отличие от orders_by_storecategory, считает сумму сразу за
