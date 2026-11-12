@@ -431,8 +431,8 @@ async function main() {
           console.error(`Quick Resto: не удалось вывести ${archived.name} из чата:`, err);
         }
       }
-      await bot.api.sendMessage(
-        env.STAFF_CHAT_ID,
+      // Только в личку руководителям (REPORT_ADMIN_IDS), не в рабочий чат.
+      await notifyManagers(
         `🗂 Сотрудник ${archived.name} удалён из раздела «Сотрудники».
 ` +
           `${kicked ? "Из рабочего чата выведен автоматически." : "Из рабочего чата НЕ выведен (нет Telegram ID или не хватило прав у бота) — сделайте это вручную."}

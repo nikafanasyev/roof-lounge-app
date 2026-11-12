@@ -255,7 +255,7 @@ export function watchStaffArchived(onArchived: (event: StaffArchivedEvent) => vo
         const after = payload.new as { id: string; name: string; telegram_id: number | null; archived?: boolean };
         if (before.archived || !after.archived) return; // интересует только переход false -> true
         try {
-          await onArchived({ staffId: after.id, name: after.name, telegramId: after.telegram_id });
+          await onArchived({ staffId: after.id, name: after.name, telegramId: after.telegram_id != null ? Math.abs(after.telegram_id) : null });
         } catch (err) {
           console.error("Ошибка при обработке архивации сотрудника:", err);
         }
