@@ -9,6 +9,8 @@ import {
   payoutsStore,
   shiftPayrollStore,
 } from "@/data/repo";
+import { Link } from "react-router-dom";
+import { computeMyTipsForMonth, currentMonthKey, tipsStore } from "@/data/repo";
 import PayrollPeriods from "@/components/PayrollPeriods";
 
 function money(n: number): string {
@@ -59,10 +61,12 @@ export default function Dashboard() {
   useStore(shiftPayrollStore);
   useStore(adjustmentsStore);
   useStore(payoutsStore);
+  useStore(tipsStore);
   const summary = computePayrollSummary();
   const periods = listActivePayrollPeriodSummaries();
   const earnedThisMonth = computeEarnedThisCalendarMonth();
   const months = listShiftPayrollByMonth();
+  const tipsThisMonth = computeMyTipsForMonth(currentMonthKey());
 
   return (
     <div className="screen">
@@ -74,6 +78,24 @@ export default function Dashboard() {
         <div className="eyebrow">Заработано за месяц</div>
         <div className="value">{money(earnedThisMonth)}</div>
       </div>
+
+      <div className="stat-grid cols-3">
+        <div className="stat-tile">
+          <div className="value">{money(earnedThisMonth)}</div>
+          <div className="label">Зарплата</div>
+        </div>
+        <div className="stat-tile good">
+          <div className="value">{money(tipsThisMonth)}</div>
+          <div className="label">Чаевые</div>
+        </div>
+        <div className="stat-tile good">
+          <div className="value">{money(earnedThisMonth + tipsThisMonth)}</div>
+          <div className="label">Всего</div>
+        </div>
+      </div>
+      <Link to="/employee/tips" className="btn" style={{ display: "block", textAlign: "center", textDecoration: "none", margin: "8px 0 12px" }}>
+        🪙 Мои чаевые
+      </Link>
 
       {/*
         "Зарплата (всего)" убрали — это сумма за всё время с момента найма,

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 const ITEMS = [
   { to: "/employee/profile", icon: "👤", label: "Профиль" },
   { to: "/employee/schedule", icon: "🗓", label: "График смен" },
+  { to: "/employee/tips", icon: "🪙", label: "Чаевые" },
   { to: "/employee/adjustments", icon: "💸", label: "Штрафы и премии" },
   { to: "/employee/problems", icon: "🛠", label: "Проблемы" },
   { to: "/employee/tasks", icon: "📋", label: "Задачи" },
