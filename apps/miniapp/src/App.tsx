@@ -13,6 +13,7 @@ import More from "@/screens/employee/More";
 import Profile from "@/screens/employee/Profile";
 import Schedule from "@/screens/employee/Schedule";
 import Adjustments from "@/screens/employee/Adjustments";
+import Tips from "@/screens/employee/Tips";
 import Knowledge from "@/screens/employee/Knowledge";
 import KnowledgeArticleScreen from "@/screens/employee/KnowledgeArticle";
 import Summary from "@/screens/manager/Summary";
@@ -272,6 +273,7 @@ function RoleShell() {
         <Route path="/employee/profile" element={<Profile />} />
         <Route path="/employee/schedule" element={<Schedule />} />
         <Route path="/employee/adjustments" element={<Adjustments />} />
+        <Route path="/employee/tips" element={<Tips />} />
         <Route path="/employee/knowledge" element={<Knowledge />} />
         <Route path="/employee/knowledge/:articleId" element={<KnowledgeArticleScreen />} />
         <Route path="/employee/knowledge/:articleId/:sectionIndex" element={<KnowledgeArticleScreen />} />

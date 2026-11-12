@@ -25,6 +25,7 @@ import type {
   ChecklistItem,
   Expense,
   FixedAccrual,
+  Tip,
   FixedAccrualCadence,
   Flavor,
   Guest,
@@ -120,6 +121,7 @@ export const scheduleStore = new Store<ScheduleEntry[]>(seedSchedule);
 export const payrollIssuesStore = new Store<PayrollIssue[]>(seedPayrollIssues);
 export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
 export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
+export const tipsStore = new Store<Tip[]>([]);
 export const staffInvitesStore = new Store<StaffInvite[]>([]);
 export const payrollRecalcRequestsStore = new Store<PayrollRecalcRequest[]>([]);
 export const expensesStore = new Store<Expense[]>([]);
@@ -222,6 +224,7 @@ export async function initData(): Promise<void> {
           loadPayrollIssues(),
           loadTodayCleaningLog(),
           loadFixedAccruals(),
+          loadTips(),
           loadStaffInvites(),
           loadPayrollRecalcRequests(),
           loadExpenses(),
@@ -559,6 +562,20 @@ async function loadFixedAccruals() {
   );
 }
 
+async function loadTips() {
+  const { data, error } = await supabase!.from("tips").select("*").order("date", { ascending: false }).order("created_at", { ascending: false });
+  if (error) return logSyncError("loadTips", error);
+  tipsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      staffId: r.staff_id,
+      amount: Number(r.amount),
+      date: String(r.date).slice(0, 10),
+      note: r.note ?? undefined,
+    })),
+  );
+}
+
 async function loadStaffInvites() {
   const { data, error } = await supabase!.from("staff_invites").select("*").order("created_at", { ascending: false });
   if (error) return logSyncError("loadStaffInvites", error);
@@ -746,6 +763,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "schedule_entries" }, () => loadSchedule())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_issues" }, () => loadPayrollIssues())
     .on("postgres_changes", { event: "*", schema: "public", table: "fixed_accruals" }, () => loadFixedAccruals())
+    .on("postgres_changes", { event: "*", schema: "public", table: "tips" }, () => loadTips())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff_invites" }, () => loadStaffInvites())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_recalc_requests" }, () => loadPayrollRecalcRequests())
     .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => loadExpenses())
@@ -2852,4 +2870,45 @@ export async function getReportRequestStatus(id: string): Promise<{ status: "pen
   if (!isSupabaseConfigured || !supabase) return null;
   const { data } = await supabase.from("report_requests").select("status, result").eq("id", id).maybeSingle();
   return (data as { status: "pending" | "done" | "failed"; result: string | null } | null) ?? null;
+}
+
+
+// --- Личные чаевые (не входят в зарплату) ---
+
+/** Чаевые текущего сотрудника, свежие сверху. */
+export function listMyTips(): Tip[] {
+  const me = getStaffProfile().id;
+  return tipsStore
+    .get()
+    .filter((t) => t.staffId === me)
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+/** monthKey = YYYY-MM. */
+export function computeMyTipsForMonth(monthKey: string): number {
+  return listMyTips()
+    .filter((t) => t.date.startsWith(monthKey))
+    .reduce((sum, t) => sum + t.amount, 0);
+}
+
+export function addTip(amount: number, date: string, note?: string) {
+  const entry: Tip = { id: uid(), staffId: getStaffProfile().id, amount, date, note: note?.trim() || undefined };
+  tipsStore.update((list) => [entry, ...list]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("tips")
+      .insert({ id: entry.id, staff_id: entry.staffId, amount, date, note: entry.note ?? null })
+      .then(({ error }) => error && logSyncError("addTip", error));
+  }
+}
+
+export function deleteTip(id: string) {
+  tipsStore.update((list) => list.filter((t) => t.id !== id));
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("tips")
+      .delete()
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("deleteTip", error));
+  }
 }

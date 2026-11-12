@@ -377,3 +377,12 @@ export interface KnowledgeArticle {
   title: string;
   body: string; // краткий текст-заглушка, наполняется реальным контентом позже
 }
+
+export interface Tip {
+  id: string;
+  staffId: string;
+  amount: number;
+  /** YYYY-MM-DD */
+  date: string;
+  note?: string;
+}
