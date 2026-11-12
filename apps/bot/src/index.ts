@@ -2,6 +2,7 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
 import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
+import { startShiftNotifier } from "./shiftNotify";
 import { buildExpensesWorkbook, buildSalaryWorkbook, payrollPeriodForDate } from "./reports";
 import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
@@ -18,7 +19,7 @@ bot.api.config.use(async (prev, method, payload, signal) => {
   const newId = (res as { parameters?: { migrate_to_chat_id?: number } }).parameters?.migrate_to_chat_id;
   const oldId = (payload as { chat_id?: string | number }).chat_id;
   if (!res.ok && newId && oldId !== undefined) {
-    for (const key of ["STAFF_CHAT_ID", "SHIFT_PHOTOS_CHAT_ID", "QR_CHAT_ID"] as const) {
+    for (const key of ["STAFF_CHAT_ID", "SHIFT_PHOTOS_CHAT_ID", "QR_CHAT_ID", "SHIFT_CHAT_ID"] as const) {
       if (String(env[key]) === String(oldId)) env[key] = String(newId);
     }
     console.warn(`Чат ${oldId} стал супергруппой, новый ID: ${newId} — обновите переменную окружения на Railway.`);
@@ -293,6 +294,8 @@ async function notifyManagers(text: string) {
 }
 
 async function main() {
+  startShiftNotifier(bot);
+
   // Уведомления персоналу о QR-вызовах (см. README, раздел про Supabase Realtime).
   // Без настроенных SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY просто не запускается —
   // бот при этом продолжает отвечать на /start.
