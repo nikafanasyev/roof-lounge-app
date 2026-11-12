@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { flavorsStore, computeStrengthFromItems, createMix, getGuest } from "@/data/repo";
 import { flavorMatches } from "@/lib/flavorSearch";
+import ProposeFlavor from "@/components/ProposeFlavor";
 import type { Flavor, MixItem } from "@/types";
 
 const MAX_ITEMS = 5;
@@ -152,6 +153,7 @@ export default function MixBuilder() {
             </div>
           )}
           {isBrowsingAll && filteredFlavors.length === 0 && <div className="list-empty">Ничего не найдено</div>}
+          {isBrowsingAll && <ProposeFlavor initialQuery={query.trim()} />}
           {filteredFlavors.map((f) => {
             const isSelected = !!selected.find((s) => s.id === f.id);
             return (

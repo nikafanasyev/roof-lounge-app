@@ -25,6 +25,7 @@ import type {
   ChecklistItem,
   Expense,
   FixedAccrual,
+  FlavorProposal,
   Tip,
   FixedAccrualCadence,
   Flavor,
@@ -122,6 +123,7 @@ export const payrollIssuesStore = new Store<PayrollIssue[]>(seedPayrollIssues);
 export const knowledgeStore = new Store<KnowledgeArticle[]>(seedKnowledgeArticles);
 export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
 export const tipsStore = new Store<Tip[]>([]);
+export const flavorProposalsStore = new Store<FlavorProposal[]>([]);
 export const staffInvitesStore = new Store<StaffInvite[]>([]);
 export const payrollRecalcRequestsStore = new Store<PayrollRecalcRequest[]>([]);
 export const expensesStore = new Store<Expense[]>([]);
@@ -225,6 +227,7 @@ export async function initData(): Promise<void> {
           loadTodayCleaningLog(),
           loadFixedAccruals(),
           loadTips(),
+          loadFlavorProposals(),
           loadStaffInvites(),
           loadPayrollRecalcRequests(),
           loadExpenses(),
@@ -562,6 +565,22 @@ async function loadFixedAccruals() {
   );
 }
 
+async function loadFlavorProposals() {
+  const { data, error } = await supabase!.from("flavor_proposals").select("*").order("created_at", { ascending: false });
+  if (error) return logSyncError("loadFlavorProposals", error);
+  flavorProposalsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      brand: r.brand,
+      name: r.name,
+      note: r.note ?? undefined,
+      proposedByName: r.proposed_by_name ?? undefined,
+      status: r.status as FlavorProposal["status"],
+      createdAt: r.created_at,
+    })),
+  );
+}
+
 async function loadTips() {
   const { data, error } = await supabase!.from("tips").select("*").order("date", { ascending: false }).order("created_at", { ascending: false });
   if (error) return logSyncError("loadTips", error);
@@ -763,6 +782,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "schedule_entries" }, () => loadSchedule())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_issues" }, () => loadPayrollIssues())
     .on("postgres_changes", { event: "*", schema: "public", table: "fixed_accruals" }, () => loadFixedAccruals())
+    .on("postgres_changes", { event: "*", schema: "public", table: "flavor_proposals" }, () => loadFlavorProposals())
     .on("postgres_changes", { event: "*", schema: "public", table: "tips" }, () => loadTips())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff_invites" }, () => loadStaffInvites())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_recalc_requests" }, () => loadPayrollRecalcRequests())
@@ -2911,4 +2931,68 @@ export function deleteTip(id: string) {
       .eq("id", id)
       .then(({ error }) => error && logSyncError("deleteTip", error));
   }
+}
+
+// --- Предложения новых вкусов (согласует руководство) ---
+
+export function listPendingFlavorProposals(): FlavorProposal[] {
+  return flavorProposalsStore.get().filter((p) => p.status === "pending");
+}
+
+export async function proposeFlavor(brand: string, name: string, note?: string): Promise<string | null> {
+  const b = brand.trim();
+  const n = name.trim();
+  if (!b || !n) return "Укажите бренд и название";
+  const exists = flavorsStore.get().some((f) => f.brand.toLowerCase() === b.toLowerCase() && f.name.toLowerCase() === n.toLowerCase());
+  if (exists) return "Такой вкус уже есть в каталоге";
+  const dup = listPendingFlavorProposals().some((p) => p.brand.toLowerCase() === b.toLowerCase() && p.name.toLowerCase() === n.toLowerCase());
+  if (dup) return "Этот вкус уже отправлен на согласование";
+  const me = getStaffProfile();
+  const entry: FlavorProposal = {
+    id: uid(),
+    brand: b,
+    name: n,
+    note: note?.trim() || undefined,
+    proposedByName: me.name,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  };
+  flavorProposalsStore.update((list) => [entry, ...list]);
+  if (isSupabaseConfigured && supabase) {
+    const { error } = await supabase.from("flavor_proposals").insert({
+      id: entry.id,
+      brand: b,
+      name: n,
+      note: entry.note ?? null,
+      proposed_by: me.id,
+      proposed_by_name: me.name,
+    });
+    if (error) {
+      logSyncError("proposeFlavor", error);
+      flavorProposalsStore.update((list) => list.filter((p) => p.id !== entry.id));
+      return "Не получилось отправить, попробуйте ещё раз";
+    }
+  }
+  return null;
+}
+
+export async function decideFlavorProposal(id: string, approve: boolean, overrides?: { brand: string; name: string; strength?: string }) {
+  const p = flavorProposalsStore.get().find((x) => x.id === id);
+  if (!p) return;
+  const brand = (overrides?.brand ?? p.brand).trim();
+  const name = (overrides?.name ?? p.name).trim();
+  flavorProposalsStore.update((list) => list.map((x) => (x.id === id ? { ...x, status: approve ? "approved" : "rejected" } : x)));
+  if (!isSupabaseConfigured || !supabase) return;
+  if (approve) {
+    const { error } = await supabase
+      .from("flavors")
+      .upsert({ brand, name, strength: overrides?.strength || null, categories: [], active: true }, { onConflict: "brand,name" });
+    if (error) logSyncError("approveFlavor", error);
+    else loadFlavors();
+  }
+  const { error } = await supabase
+    .from("flavor_proposals")
+    .update({ status: approve ? "approved" : "rejected", decided_by_name: getStaffProfile().name, decided_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) logSyncError("decideFlavorProposal", error);
 }

@@ -25,9 +25,10 @@ import Salary from "@/screens/manager/Salary";
 import SalaryPeriodDetail from "@/screens/manager/SalaryPeriodDetail";
 import Fines from "@/screens/manager/Fines";
 import Expenses from "@/screens/manager/Expenses";
+import FlavorProposals from "@/screens/manager/FlavorProposals";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 import { isCurrentUserManager, isGuestTestAccount, isInsideTelegramClient } from "@/lib/telegram";
-import { dataSyncStatusStore } from "@/data/repo";
+import { dataSyncStatusStore, flavorProposalsStore, listPendingFlavorProposals } from "@/data/repo";
 import { useStore } from "@/data/useStore";
 
 // Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
@@ -126,6 +127,8 @@ function EmployeeNav({ onNavigate }: { onNavigate: () => void }) {
 }
 
 function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
+  useStore(flavorProposalsStore);
+  const pendingFlavors = listPendingFlavorProposals().length;
   return (
     <nav className="drawer-nav">
       <NavLink to="/manager/summary" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
@@ -148,6 +151,9 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
       </NavLink>
       <NavLink to="/manager/schedule" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">📅</span>График
+      </NavLink>
+      <NavLink to="/manager/flavors" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🍃</span>Новые вкусы{pendingFlavors > 0 ? ` (${pendingFlavors})` : ""}
       </NavLink>
       <NavLink to="/manager/problems" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🛠</span>Проблемы
@@ -287,6 +293,7 @@ function RoleShell() {
         <Route path="/manager/salary/:periodKey" element={<SalaryPeriodDetail />} />
         <Route path="/manager/fines" element={<Fines />} />
         <Route path="/manager/expenses" element={<Expenses />} />
+        <Route path="/manager/flavors" element={<FlavorProposals />} />
         <Route path="/manager/problems" element={<Problems />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

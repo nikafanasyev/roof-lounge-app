@@ -386,3 +386,13 @@ export interface Tip {
   date: string;
   note?: string;
 }
+
+export interface FlavorProposal {
+  id: string;
+  brand: string;
+  name: string;
+  note?: string;
+  proposedByName?: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+}

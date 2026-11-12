@@ -1230,3 +1230,19 @@ select {
   text-align: center;
   color: var(--muted);
 }
+
+/* iOS: input[type=date] не сжимается по ширине карточки — принудительно */
+input[type="date"] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+}
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  min-height: 1.2em;
+}

@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
 import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
 import { startShiftNotifier } from "./shiftNotify";
+import { startFlavorProposalNotifier } from "./flavorNotify";
 import { buildExpensesWorkbook, buildSalaryWorkbook, payrollPeriodForDate } from "./reports";
 import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
@@ -326,6 +327,7 @@ async function notifyManagers(text: string) {
 
 async function main() {
   startShiftNotifier(bot);
+  startFlavorProposalNotifier(notifyManagers);
 
   // Уведомления персоналу о QR-вызовах (см. README, раздел про Supabase Realtime).
   // Без настроенных SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY просто не запускается —
