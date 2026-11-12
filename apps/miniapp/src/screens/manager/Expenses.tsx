@@ -375,6 +375,7 @@ export default function Expenses() {
                 <div className="muted" style={{ fontSize: 13, textDecoration: isDeleted ? "line-through" : "none" }}>
                   {e.note ? `${e.note} · ` : ""}
                   {new Date(e.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}
+                  {e.createdByName ? ` · провёл: ${e.createdByName}` : ""}
                 </div>
                 {isDeleted && (
                   <div className="muted" style={{ fontSize: 12, marginTop: 4, color: "var(--danger)" }}>

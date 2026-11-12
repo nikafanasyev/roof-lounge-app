@@ -682,6 +682,7 @@ async function loadExpenses() {
       // Колонка появляется миграцией 0020_expense_department_and_incomes.sql —
       // та же логика фолбэка, что у supplier выше.
       department: r.department ?? undefined,
+      createdByName: r.created_by_name ?? undefined,
       note: r.note ?? undefined,
       date: r.date,
       deletedAt: r.deleted_at ?? undefined,
@@ -699,6 +700,7 @@ async function loadIncomes() {
       id: r.id,
       amount: Number(r.amount),
       category: r.category,
+      createdByName: r.created_by_name ?? undefined,
       note: r.note ?? undefined,
       date: r.date,
       deletedAt: r.deleted_at ?? undefined,
@@ -1945,6 +1947,17 @@ export function requestPayrollRecalc(dateIso: string) {
     });
 }
 
+/** Удаляет запись приглашения (например, неудавшуюся) — это журнал результата, не аудит. */
+export function deleteStaffInvite(id: string) {
+  staffInvitesStore.update((list) => list.filter((i) => i.id !== id));
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("staff_invites")
+    .delete()
+    .eq("id", id)
+    .then(({ error }) => error && logSyncError("deleteStaffInvite", error));
+}
+
 export function createStaffInvite(input: { fullName: string; phone?: string; telegramId?: string }) {
   if (!isSupabaseConfigured || !supabase) return;
   supabase
@@ -2196,7 +2209,7 @@ export function addExpense(
   dateIso?: string,
 ) {
   const date = dateIso || new Date().toISOString().slice(0, 10);
-  const entry: Expense = { id: uid(), amount, category, supplier: supplier || undefined, department: department || undefined, note: note || undefined, date };
+  const entry: Expense = { id: uid(), amount, category, supplier: supplier || undefined, department: department || undefined, note: note || undefined, date, createdByName: getStaffProfile().name };
   expensesStore.update((list) => [entry, ...list]);
   if (isSupabaseConfigured && supabase) {
     supabase
@@ -2243,7 +2256,7 @@ export function listActiveIncomes(): Income[] {
 
 export function addIncome(amount: number, category: string, note: string | undefined, dateIso?: string) {
   const date = dateIso || new Date().toISOString().slice(0, 10);
-  const entry: Income = { id: uid(), amount, category, note: note || undefined, date };
+  const entry: Income = { id: uid(), amount, category, note: note || undefined, date, createdByName: getStaffProfile().name };
   incomesStore.update((list) => [entry, ...list]);
   if (isSupabaseConfigured && supabase) {
     supabase
