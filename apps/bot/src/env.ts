@@ -14,9 +14,11 @@ export const env = {
   // Кому можно запрашивать Excel-отчёты (telegram_id через запятую). Если не
   // задано — берём MANAGER_TELEGRAM_IDS (как в мини-аппе); плюс staff.role='manager'.
   REPORT_ADMIN_IDS: process.env.REPORT_ADMIN_IDS ?? process.env.MANAGER_TELEGRAM_IDS ?? "",
-  // Отдельный чат под открытие/закрытие смены (кто и когда открыл зону). Если не
-  // задан — SHIFT_PHOTOS_CHAT_ID, затем STAFF_CHAT_ID.
-  SHIFT_CHAT_ID: process.env.SHIFT_CHAT_ID ?? "",
+  // Чаты смены: открытие и закрытие — в разные чаты. SHIFT_OPEN_CHAT_ID (старое
+  // имя SHIFT_CHAT_ID тоже читаем) — уведомления и фото открытия; SHIFT_CLOSE_CHAT_ID
+  // (если не задан — STAFF_CHAT_ID) — уведомления и фото закрытия.
+  SHIFT_OPEN_CHAT_ID: process.env.SHIFT_OPEN_CHAT_ID ?? process.env.SHIFT_CHAT_ID ?? "",
+  SHIFT_CLOSE_CHAT_ID: process.env.SHIFT_CLOSE_CHAT_ID ?? "",
   STAFF_CHAT_ID: process.env.STAFF_CHAT_ID ?? "", // куда падают уведомления о QR-вызовах
   // Куда пересылать фото открытия/закрытия смены. Если не задано — падают в STAFF_CHAT_ID.
   SHIFT_PHOTOS_CHAT_ID: process.env.SHIFT_PHOTOS_CHAT_ID ?? "",
