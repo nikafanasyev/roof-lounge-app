@@ -541,7 +541,7 @@ async function main() {
       const buffer = await event.downloadPhoto();
       if (!buffer) return;
       const kindLabel = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
-      const roleLabel = event.role === "bar" ? "Бар" : "Кальяны";
+      const roleLabel = ({ bar: "Бар", hookah: "Кальяны", kitchen: "Кухня", cleaning: "Клининг" } as const)[event.role];
       await bot.api.sendPhoto(photoChatFor(event.kind), new InputFile(buffer, "shift.jpg"), {
         caption: `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}`,
       });

@@ -1,26 +1,11 @@
-import {
-  CLEANING_ROLE_WEEKS,
-  cleaningRotationWeek,
-  cleaningLogStore,
-  getTodayCleaningTasksForRole,
-  isCleaningTaskDone,
-  setCleaningTaskDone,
-} from "@/data/repo";
-import { useStore } from "@/data/useStore";
-
-function formatDoneAt(iso: string): string {
-  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-}
+import { CLEANING_ROLE_WEEKS, cleaningRotationWeek, getTodayCleaningTasksForRole } from "@/data/repo";
 
 /**
- * Интерактивный чек-лист генеральной уборки для одной роли (Бар / Кухня /
- * Уборщица / Кальянный мастер) — заменяет статичный текст статьи "Генеральная
- * уборка" (k12). Пункты на сегодня — с чекбоксом, отметка сохраняется в
- * cleaning_log (кто и когда, см. data/repo.ts). Ниже — весь 4-недельный
- * график для справки (на какие дни что выпадает).
+ * Тех. задачи роли (Бар / Кухня / Уборщица / Кальянный мастер): что делать
+ * сегодня и весь 4-недельный график. Для сотрудника — только чтение, без
+ * чекбоксов и статуса: отметки о выполнении ставит руководство.
  */
 export default function CleaningChecklist({ role }: { role: string }) {
-  useStore(cleaningLogStore);
   const weeks = CLEANING_ROLE_WEEKS[role] ?? [];
   const { label: weekLabel } = cleaningRotationWeek();
   const today = getTodayCleaningTasksForRole(role);
@@ -28,29 +13,18 @@ export default function CleaningChecklist({ role }: { role: string }) {
   return (
     <div>
       <div className="eyebrow">
-        {weekLabel} ·{" "}
-        {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "2-digit", month: "long" })}
+        {weekLabel} · {new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "2-digit", month: "long" })}
       </div>
 
       {today.length === 0 && <div className="card muted">На сегодня по этой роли пунктов нет</div>}
-      {today.map((t, idx) => {
-        const doneAt = isCleaningTaskDone(role, t.task);
-        return (
-          <label key={idx} className="card card-row" style={{ cursor: "pointer" }}>
-            <div>
-              <div style={{ textDecoration: doneAt ? "line-through" : undefined }}>{t.task}</div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {doneAt ? `выполнено в ${formatDoneAt(doneAt)}` : t.note}
-              </div>
-            </div>
-            <input
-              type="checkbox"
-              checked={Boolean(doneAt)}
-              onChange={(e) => setCleaningTaskDone(role, t.task, e.target.checked)}
-            />
-          </label>
-        );
-      })}
+      {today.map((t, idx) => (
+        <div key={idx} className="card">
+          <div>{t.task}</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {t.note}
+          </div>
+        </div>
+      ))}
 
       <div className="eyebrow" style={{ marginTop: 20 }}>
         Весь график — {role}

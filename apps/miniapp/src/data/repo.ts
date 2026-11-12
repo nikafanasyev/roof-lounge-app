@@ -1776,6 +1776,121 @@ export function getTodayCleaningTasksForRole(role: string, now: Date = new Date(
   return result;
 }
 
+// --- Открытие смены без чек-листа (кухня, клининг) ---
+
+/** Бизнес-дата: до 11:00 ещё идёт вчерашняя смена. */
+export function businessDateIso(now: Date = new Date()): string {
+  const d = new Date(now.getTime() - 11 * 3600_000);
+  return localDateIso(d);
+}
+
+/** Когда сотрудник сегодня открыл смену (ISO) или undefined. */
+export async function fetchMyArrivalToday(): Promise<string | undefined> {
+  if (!isSupabaseConfigured || !supabase) return undefined;
+  const { data, error } = await supabase
+    .from("staff_arrivals")
+    .select("opened_at")
+    .eq("staff_id", getStaffProfile().id)
+    .eq("date", businessDateIso())
+    .maybeSingle();
+  if (error) {
+    logSyncError("fetchMyArrivalToday", error);
+    return undefined;
+  }
+  return (data?.opened_at as string | undefined) ?? undefined;
+}
+
+/** Кнопка "Открыть смену" у кухни/клининга: фиксируем приход и шлём фото в чат открытия. */
+export async function recordArrival(role: WorkRole, photoBlob: Blob): Promise<{ ok: boolean; openedAt: string }> {
+  const me = getStaffProfile();
+  const openedAt = new Date().toISOString();
+  if (!isSupabaseConfigured || !supabase) return { ok: true, openedAt };
+  const { error } = await supabase
+    .from("staff_arrivals")
+    .upsert({ staff_id: me.id, role, date: businessDateIso(), opened_at: openedAt }, { onConflict: "staff_id,date" });
+  if (error) {
+    logSyncError("recordArrival", error);
+    return { ok: false, openedAt };
+  }
+  const path = `arrivals/${me.id}-${Date.now()}.jpg`;
+  const up = await supabase.storage.from("shift-photos").upload(path, photoBlob, { contentType: "image/jpeg" });
+  if (up.error) {
+    logSyncError("recordArrival:upload", up.error);
+    return { ok: true, openedAt };
+  }
+  const ins = await supabase
+    .from("shift_photo_uploads")
+    .insert({ shift_id: shiftStore.get().id, kind: "open", role, storage_path: path, staff_name: me.name });
+  if (ins.error) logSyncError("recordArrival:photo", ins.error);
+  return { ok: true, openedAt };
+}
+
+// --- Технические задачи (ротация из CLEANING_*_WEEKS) ---
+//
+// В чек-листах открытия/закрытия тех. задач больше нет: после открытия зоны
+// сотрудник видит свою задачу на сегодня (только текст, без статуса), а
+// отметки о выполнении ставит руководство (экран "Тех. задачи", пишет в
+// cleaning_log — см. setTechTaskDone).
+
+export const TECH_ROLES: { key: string; workRole: WorkRole; label: string }[] = [
+  { key: "Бар", workRole: "bar", label: "Бар" },
+  { key: "Кальянный мастер", workRole: "hookah", label: "Кальян" },
+  { key: "Кухня", workRole: "kitchen", label: "Кухня" },
+  { key: "Уборщица", workRole: "cleaning", label: "Клининг" },
+];
+
+export function techRoleKeyForWorkRole(role: WorkRole): string | undefined {
+  return TECH_ROLES.find((r) => r.workRole === role)?.key;
+}
+
+/** Техзадачи роли на дату (YYYY-MM-DD, локальная). */
+export function getTechTasksForRoleOnDate(roleKey: string, dateIso: string): TodayCleaningTask[] {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  return getTodayCleaningTasksForRole(roleKey, new Date(y, m - 1, d, 12, 0, 0));
+}
+
+export function localDateIso(now: Date = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/** Отметки руководства за выбранную дату: ключ "роль::задача" -> момент отметки. */
+export const techLogStore = new Store<{ date: string; marks: Record<string, string> }>({ date: "", marks: {} });
+
+export async function loadTechLog(dateIso: string) {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { data, error } = await supabase.from("cleaning_log").select("role, task, done_at").eq("log_date", dateIso);
+  if (error) return logSyncError("loadTechLog", error);
+  const marks: Record<string, string> = {};
+  for (const r of data ?? []) marks[cleaningLogKey(r.role as string, r.task as string)] = r.done_at as string;
+  techLogStore.set({ date: dateIso, marks });
+}
+
+export function techTaskMark(dateIso: string, roleKey: string, task: string): string | undefined {
+  const cur = techLogStore.get();
+  return cur.date === dateIso ? cur.marks[cleaningLogKey(roleKey, task)] : undefined;
+}
+
+export async function setTechTaskDone(dateIso: string, roleKey: string, task: string, done: boolean) {
+  const key = cleaningLogKey(roleKey, task);
+  const now = new Date().toISOString();
+  techLogStore.update((cur) => {
+    const marks = { ...(cur.date === dateIso ? cur.marks : {}) };
+    if (done) marks[key] = now;
+    else delete marks[key];
+    return { date: dateIso, marks };
+  });
+  if (!isSupabaseConfigured || !supabase) return;
+  if (done) {
+    const { error } = await supabase
+      .from("cleaning_log")
+      .upsert({ role: roleKey, task, log_date: dateIso, done_by: getStaffProfile().id, done_at: now }, { onConflict: "role,task,log_date" });
+    if (error) logSyncError("setTechTaskDone", error);
+  } else {
+    const { error } = await supabase.from("cleaning_log").delete().eq("role", roleKey).eq("task", task).eq("log_date", dateIso);
+    if (error) logSyncError("setTechTaskDone", error);
+  }
+}
+
 // --- Лог выполнения генеральной уборки (supabase/migrations/0011_cleaning_log.sql) ---
 
 function cleaningLogKey(role: string, task: string): string {

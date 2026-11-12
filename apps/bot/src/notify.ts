@@ -8,7 +8,7 @@ interface ServiceCallEvent {
 
 interface ShiftPhotoEvent {
   kind: "open" | "close";
-  role: "bar" | "hookah";
+  role: "bar" | "hookah" | "kitchen" | "cleaning";
   staffName: string | null;
   /** Скачивает байты фото из Storage. Вызывающий сам решает, что с ними делать. */
   downloadPhoto: () => Promise<Buffer | null>;
@@ -111,7 +111,7 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
 export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Promise<void>) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-  type PhotoRow = { id: string; kind: "open" | "close"; role: "bar" | "hookah"; storage_path: string; staff_name: string | null };
+  type PhotoRow = { id: string; kind: "open" | "close"; role: "bar" | "hookah" | "kitchen" | "cleaning"; storage_path: string; staff_name: string | null };
   // inFlight защищает от двойной отправки, когда одну строку ловят и Realtime,
   // и запасной опрос.
   const inFlight = new Set<string>();
