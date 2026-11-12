@@ -323,6 +323,14 @@ export function watchLoyaltyCardRequests(onRequest: (event: LoyaltyCardRequestEv
     }
   }
   async function pollPending() {
+    // Устаревшие запросы (бот был выключен/событие потерялось) не обрабатываем
+    // задним числом — иначе в Quick Resto можно создать дубль клиента спустя
+    // дни. Помечаем failed, повторить можно кнопкой в карточке гостя.
+    await supabase
+      .from("loyalty_card_requests")
+      .update({ status: "failed", result: "Запрос устарел — повторите кнопкой в карточке гостя", handled_at: new Date().toISOString() })
+      .eq("status", "pending")
+      .lt("created_at", new Date(Date.now() - 30 * 60_000).toISOString());
     const { data, error } = await supabase
       .from("loyalty_card_requests")
       .select("id, guest_id, status")
