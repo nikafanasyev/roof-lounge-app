@@ -1412,11 +1412,14 @@ function roleStaffColumn(role: StaffRole, kind: "open" | "close"): string {
   return kind === "open" ? `${role}_opened_by` : `${role}_closed_by`;
 }
 
-function syncRoleClaim(role: StaffRole, kind: "open" | "close") {
+function syncRoleClaim(role: StaffRole, kind: "open" | "close", at: string) {
   if (!isSupabaseConfigured || !supabase) return;
   supabase
     .from("shifts")
-    .update({ [roleStaffColumn(role, kind)]: getStaffProfile().id })
+    .update({
+      [roleStaffColumn(role, kind)]: getStaffProfile().id,
+      [`${role}_${kind === "open" ? "opened_at" : "closed_at"}`]: at,
+    })
     .eq("id", shiftStore.get().id)
     .then(({ error }) => error && logSyncError("syncRoleClaim", error));
 }
@@ -1438,9 +1441,22 @@ async function openVenueShiftIfNeeded(): Promise<string> {
 
   const openedAt = new Date().toISOString();
   const openedByName = getStaffProfile().name;
+  // Новая смена — все чек-листы с чистого листа (раньше галочки предыдущей
+  // смены переезжали в новую, и открытие второй зоны казалось уже сделанным —
+  // см. фидбек Никиты 12.11.2026: открыть смену могли не оба сотрудника).
+  const clear = (items: ChecklistItem[]) => items.map((i) => ({ ...i, done: false }));
   // Помечаем открытой сразу, не дожидаясь ответа Supabase, — чтобы интерфейс
   // не "подвисал" на плохой связи.
-  shiftStore.update((s) => ({ ...s, status: "open", openedBy: openedByName, openedAt }));
+  shiftStore.update((s) => ({
+    ...s,
+    status: "open",
+    openedBy: openedByName,
+    openedAt,
+    closedBy: undefined,
+    closedAt: undefined,
+    bar: { openChecklist: clear(s.bar.openChecklist), closeChecklist: clear(s.bar.closeChecklist) },
+    hookah: { openChecklist: clear(s.hookah.openChecklist), closeChecklist: clear(s.hookah.closeChecklist) },
+  }));
 
   if (!isSupabaseConfigured || !supabase) return current.id;
 
@@ -1450,10 +1466,10 @@ async function openVenueShiftIfNeeded(): Promise<string> {
     .insert({
       opened_by: staffId || null,
       opened_at: openedAt,
-      bar_open_checklist: current.bar.openChecklist,
-      bar_close_checklist: current.bar.closeChecklist,
-      hookah_open_checklist: current.hookah.openChecklist,
-      hookah_close_checklist: current.hookah.closeChecklist,
+      bar_open_checklist: shiftStore.get().bar.openChecklist,
+      bar_close_checklist: shiftStore.get().bar.closeChecklist,
+      hookah_open_checklist: shiftStore.get().hookah.openChecklist,
+      hookah_close_checklist: shiftStore.get().hookah.closeChecklist,
     })
     .select("id")
     .single();
@@ -1544,22 +1560,35 @@ export function toggleCloseChecklistItem(role: StaffRole, itemId: string) {
  */
 export async function openShift(role: StaffRole, openedBy: string, photoBlob?: Blob) {
   await openVenueShiftIfNeeded();
-  syncRoleClaim(role, "open");
+  const at = new Date().toISOString();
+  // Каждая зона (бар/кальяны) открывается отдельно и своим сотрудником.
+  shiftStore.update((s) => ({ ...s, [role]: { ...s[role], openedBy, openedAt: at, closedBy: undefined, closedAt: undefined } }));
+  syncRoleClaim(role, "open", at);
   if (photoBlob) uploadAndNotifyShiftPhoto(role, "open", photoBlob, openedBy);
 }
 
-/** Закрывает смену заведения на кнопку — см. closeVenueShift. */
+/**
+ * Закрывает свою зону. Смена заведения в целом закрывается только когда
+ * закрыты все открытые зоны — иначе первый закрывшийся "выключал" смену
+ * второму сотруднику посреди работы.
+ */
 export function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlob?: Blob) {
-  syncRoleClaim(role, "close");
   const closedAt = new Date().toISOString();
+  const otherRole: StaffRole = role === "bar" ? "hookah" : "bar";
+  const before = shiftStore.get();
+  const otherStillOpen = !!before[otherRole].openedAt && !before[otherRole].closedAt;
+
   shiftStore.update((shift) => ({
     ...shift,
-    status: "closed",
-    closedBy,
-    closedAt,
+    ...(otherStillOpen ? {} : { status: "closed" as const, closedBy, closedAt }),
+    [role]: { ...shift[role], closedBy, closedAt },
     handoverNote: handoverNote ?? shift.handoverNote,
   }));
-  closeVenueShift(closedBy, closedAt, handoverNote);
+  syncRoleClaim(role, "close", closedAt);
+  if (!otherStillOpen) closeVenueShift(closedBy, closedAt, handoverNote);
+  else if (handoverNote && isSupabaseConfigured && supabase) {
+    supabase.from("shifts").update({ handover_note: handoverNote }).eq("id", before.id).then(({ error }) => error && logSyncError("closeShift:note", error));
+  }
   if (photoBlob) uploadAndNotifyShiftPhoto(role, "close", photoBlob, closedBy);
 }
 
