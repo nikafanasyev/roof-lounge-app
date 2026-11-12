@@ -72,7 +72,7 @@ export default function MixView() {
             <div>
               <div style={{ fontWeight: 700 }}>{flavor.name.toUpperCase()}</div>
               <div className="muted" style={{ fontSize: 13 }}>
-                {flavor.brand} · №{flavor.code}
+                {flavor.brand}
               </div>
             </div>
             <strong>{item.sharePercent}%</strong>
