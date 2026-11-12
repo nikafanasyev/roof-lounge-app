@@ -155,7 +155,8 @@ async function isReportAdmin(telegramId: number): Promise<boolean> {
   if (ids.includes(String(telegramId))) return true;
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return false;
   const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-  const { data } = await supabaseAdmin.from("staff").select("role").eq("telegram_id", telegramId).maybeSingle();
+  const { data, error } = await supabaseAdmin.from("staff").select("role").eq("telegram_id", telegramId).maybeSingle();
+  if (error) console.error("isReportAdmin: ошибка чтения staff:", error.message);
   return data?.role === "manager";
 }
 
@@ -176,7 +177,7 @@ async function sendReport(kind: "salary" | "expenses", param: string, chatId: nu
 
 bot.command("salary", async (ctx) => {
   if (!ctx.from || !(await isReportAdmin(ctx.from.id))) {
-    await ctx.reply("Нет доступа: отчёты доступны только руководителям.");
+    await ctx.reply(`Нет доступа: отчёты доступны только руководителям. Ваш Telegram ID: ${ctx.from?.id ?? "?"}. Он должен быть в REPORT_ADMIN_IDS или у строки в staff должна быть role = manager.`);
     return;
   }
   const arg = ctx.match?.toString().trim();
@@ -199,7 +200,7 @@ bot.command("salary", async (ctx) => {
 
 bot.command("expenses", async (ctx) => {
   if (!ctx.from || !(await isReportAdmin(ctx.from.id))) {
-    await ctx.reply("Нет доступа: отчёты доступны только руководителям.");
+    await ctx.reply(`Нет доступа: отчёты доступны только руководителям. Ваш Telegram ID: ${ctx.from?.id ?? "?"}. Он должен быть в REPORT_ADMIN_IDS или у строки в staff должна быть role = manager.`);
     return;
   }
   const arg = ctx.match?.toString().trim() || todayMsk().slice(0, 7);
