@@ -111,39 +111,61 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
 export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Promise<void>) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
+  type PhotoRow = { id: string; kind: "open" | "close"; role: "bar" | "hookah"; storage_path: string; staff_name: string | null };
+  // inFlight защищает от двойной отправки, когда одну строку ловят и Realtime,
+  // и запасной опрос.
+  const inFlight = new Set<string>();
+
+  async function handleRow(row: PhotoRow) {
+    if (inFlight.has(row.id)) return;
+    inFlight.add(row.id);
+    try {
+      await onEvent({
+        kind: row.kind,
+        role: row.role,
+        staffName: row.staff_name,
+        downloadPhoto: async () => {
+          const { data, error } = await supabase.storage.from("shift-photos").download(row.storage_path);
+          if (error || !data) {
+            console.error("Не удалось скачать фото смены:", error?.message);
+            return null;
+          }
+          return Buffer.from(await data.arrayBuffer());
+        },
+      });
+    } catch (err) {
+      console.error("Ошибка при обработке фото смены:", err);
+    } finally {
+      // Удаляем в любом случае — фото не должно оставаться ни в Storage, ни в таблице.
+      await supabase.storage.from("shift-photos").remove([row.storage_path]);
+      await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
+      inFlight.delete(row.id);
+    }
+  }
+
+  // Запасной путь: событие Realtime может потеряться (перезапуск бота,
+  // переподключение) — раз в 15 сек добираем необработанные строки из таблицы.
+  async function pollPending() {
+    const { data, error } = await supabase
+      .from("shift_photo_uploads")
+      .select("id, kind, role, storage_path, staff_name")
+      .order("created_at", { ascending: true })
+      .limit(10);
+    if (error) {
+      console.error("shift_photo_uploads: ошибка опроса:", error.message);
+      return;
+    }
+    for (const row of (data ?? []) as PhotoRow[]) await handleRow(row);
+  }
+  pollPending();
+  setInterval(pollPending, 15000);
+
   resubscribable("shift_photo_uploads", () =>
     supabase.channel(`shift_photo_uploads_inserts_${Date.now()}`).on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "shift_photo_uploads" },
       async (payload) => {
-        const row = payload.new as {
-          id: string;
-          kind: "open" | "close";
-          role: "bar" | "hookah";
-          storage_path: string;
-          staff_name: string | null;
-        };
-        try {
-          await onEvent({
-            kind: row.kind,
-            role: row.role,
-            staffName: row.staff_name,
-            downloadPhoto: async () => {
-              const { data, error } = await supabase.storage.from("shift-photos").download(row.storage_path);
-              if (error || !data) {
-                console.error("Не удалось скачать фото смены:", error?.message);
-                return null;
-              }
-              return Buffer.from(await data.arrayBuffer());
-            },
-          });
-        } catch (err) {
-          console.error("Ошибка при обработке фото смены:", err);
-        } finally {
-          // Удаляем в любом случае — фото не должно оставаться ни в Storage, ни в таблице.
-          await supabase.storage.from("shift-photos").remove([row.storage_path]);
-          await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
-        }
+        await handleRow(payload.new as PhotoRow);
       },
     ),
   );
