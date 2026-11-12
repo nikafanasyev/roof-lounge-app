@@ -5,7 +5,7 @@ import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls
 import { startShiftNotifier } from "./shiftNotify";
 import { startFlavorProposalNotifier } from "./flavorNotify";
 import { buildExpensesWorkbook, buildSalaryWorkbook, payrollPeriodForDate } from "./reports";
-import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
+import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, debugCashSplit, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -137,6 +137,39 @@ bot.command("cashsplit", async (ctx) => {
     );
   } catch (err) {
     console.error("Quick Resto: /cashsplit ошибка:", err);
+    await ctx.reply("Не удалось получить данные из Quick Resto — см. логи бота.");
+  }
+});
+
+// Диагностика расхождения нал/безнал с таблицей: /cashdebug [ДД.ММ.ГГГГ] [ДД.ММ.ГГГГ]
+// — по бизнес-дням (11:00–11:00 МСК) + все строки финансового отчёта за период.
+bot.command("cashdebug", async (ctx) => {
+  if (!ctx.from || !(await isReportAdmin(ctx.from.id))) return;
+  const toIso = (s: string) => {
+    const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+  };
+  const args = (ctx.match?.toString().trim() ?? "").split(/\s+/).filter(Boolean);
+  const now = new Date(Date.now() + 3 * 3600_000);
+  const defFrom = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const defTo = new Date(Date.now() + 3 * 3600_000 - 86400000).toISOString().slice(0, 10);
+  const from = args[0] ? toIso(args[0]) : defFrom;
+  const to = args[1] ? toIso(args[1]) : args[0] ? from : defTo;
+  if (!from || !to) {
+    await ctx.reply("Формат: /cashdebug 01.11.2026 11.11.2026");
+    return;
+  }
+  try {
+    const { days, rows } = await debugCashSplit(from, to);
+    const fmt = (n: number) => Math.round(n * 100) / 100;
+    const sum = days.reduce((a, d) => ({ c: a.c + d.cash, l: a.l + d.cashless }), { c: 0, l: 0 });
+    let text = `Нал/безнал по бизнес-дням ${from} — ${to}:\n` + days.map((d) => `${d.iso.slice(8)}.${d.iso.slice(5, 7)}  нал ${fmt(d.cash)}  безнал ${fmt(d.cashless)}`).join("\n");
+    text += `\n\nИтого: нал ${fmt(sum.c)}, безнал ${fmt(sum.l)}`;
+    await ctx.reply(text);
+    const lines = rows.filter((r) => r.account && r.sum !== 0).map((r) => `${r.account}: ${fmt(r.sum)}`);
+    await ctx.reply(`Строки финансового отчёта за период:\n${lines.slice(0, 70).join("\n")}`.slice(0, 4000));
+  } catch (err) {
+    console.error("/cashdebug ошибка:", err);
     await ctx.reply("Не удалось получить данные из Quick Resto — см. логи бота.");
   }
 });
