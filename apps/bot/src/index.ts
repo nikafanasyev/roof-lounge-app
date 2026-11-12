@@ -46,6 +46,34 @@ bot.command("start", async (ctx) => {
 // Технический пинг, чтобы быстро проверить, что бот жив после деплоя.
 bot.command("ping", (ctx) => ctx.reply("pong"));
 
+// Проверка доступа бота к рабочим чатам: шлёт тестовое сообщение в чаты смены и
+// фото и сообщает, куда дошло (только руководителям).
+bot.command("testchat", async (ctx) => {
+  if (!ctx.from || !(await isReportAdmin(ctx.from.id))) {
+    await ctx.reply("Нет доступа: команда только для руководителей.");
+    return;
+  }
+  const targets: [string, string][] = [
+    ["SHIFT_CHAT_ID (уведомления смены)", env.SHIFT_CHAT_ID],
+    ["SHIFT_PHOTOS_CHAT_ID (фото смены)", env.SHIFT_PHOTOS_CHAT_ID],
+    ["STAFF_CHAT_ID (общий чат)", env.STAFF_CHAT_ID],
+  ];
+  const lines: string[] = [];
+  for (const [name, id] of targets) {
+    if (!id) {
+      lines.push(`${name}: не задан`);
+      continue;
+    }
+    try {
+      await bot.api.sendMessage(id, `Проверка связи: этот чат подключён как ${name.split(" ")[0]}.`);
+      lines.push(`✅ ${name}: доставлено`);
+    } catch (err) {
+      lines.push(`❌ ${name}: ${String(err).replace(/^.*?: /, "")}`);
+    }
+  }
+  await ctx.reply(lines.join("\n"));
+});
+
 // ID текущего чата — чтобы прописать его в переменных окружения (SHIFT_CHAT_ID и т.п.).
 bot.command("chatid", (ctx) => ctx.reply(`ID этого чата: ${ctx.chat.id}${ctx.chat.type === "private" ? "\n(это личная переписка, не группа)" : ""}`));
 
