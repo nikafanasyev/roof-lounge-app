@@ -1,19 +1,11 @@
--- Разовый импорт расходов за 01–12.11.2026 из таблицы (нал + безнал).
--- Авансы (ЗП аванс) не переносим — они проведены как штрафы/выплаты.
--- В note стоит метка [нал]/[безнал]. Повторный запуск ничего не дублирует.
--- Колонки из миграций 0018/0020 на случай, если они ещё не применены.
+-- Разовый импорт расходов за 01–12.11.2026 (нал + безнал). Авансы не переносим.
+-- Без DO-блока ($$), чтобы работало в любом SQL-редакторе. Повторный запуск дублей не создаёт.
 alter table expenses add column if not exists supplier text;
 alter table expenses add column if not exists department text;
 
-do $$
-begin
-  if exists (select 1 from expenses where created_by_name = 'Импорт из таблицы (12.11)') then
-    raise notice 'Импорт уже выполнен — пропускаю';
-    return;
-  end if;
-  insert into expenses (date, amount, category, department, supplier, note, created_by_name)
-  select d::date, a, c, dep, sup, n, 'Импорт из таблицы (12.11)'
-  from (values
+insert into expenses (date, amount, category, department, supplier, note, created_by_name)
+select d::date, a, c, dep, sup, n, 'Импорт из таблицы (12.11)'
+from (values
   ('2026-11-01', 5270, 'Прочее', null, null, '[нал] Недостача по кассе'),
   ('2026-11-01', 1000, 'Такси', null, null, '[нал]'),
   ('2026-11-02', 1000, 'Такси', null, null, '[нал]'),
@@ -55,5 +47,5 @@ begin
   ('2026-11-10', 5000, 'Такси', null, 'Каршеринг', '[безнал]'),
   ('2026-11-11', 2579, 'Закупка продуктов/сырья', null, 'Сбермаркет', '[безнал]'),
   ('2026-11-12', 3558, 'Закупка продуктов/сырья', null, 'Сбермаркет', '[безнал]')
-  ) as t(d, a, c, dep, sup, n);
-end $$;
+) as t(d, a, c, dep, sup, n)
+where not exists (select 1 from expenses where created_by_name = 'Импорт из таблицы (12.11)');
