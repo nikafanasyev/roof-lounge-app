@@ -26,6 +26,7 @@ import SalaryPeriodDetail from "@/screens/manager/SalaryPeriodDetail";
 import Fines from "@/screens/manager/Fines";
 import Expenses from "@/screens/manager/Expenses";
 import FlavorProposals from "@/screens/manager/FlavorProposals";
+import TechTasks from "@/screens/manager/TechTasks";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 import { isCurrentUserManager, isGuestTestAccount, isInsideTelegramClient } from "@/lib/telegram";
 import { dataSyncStatusStore, flavorProposalsStore, listPendingFlavorProposals } from "@/data/repo";
@@ -151,6 +152,9 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
       </NavLink>
       <NavLink to="/manager/schedule" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">📅</span>График
+      </NavLink>
+      <NavLink to="/manager/tech" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🧽</span>Тех. задачи
       </NavLink>
       <NavLink to="/manager/flavors" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🍃</span>Новые вкусы{pendingFlavors > 0 ? ` (${pendingFlavors})` : ""}
@@ -294,6 +298,7 @@ function RoleShell() {
         <Route path="/manager/fines" element={<Fines />} />
         <Route path="/manager/expenses" element={<Expenses />} />
         <Route path="/manager/flavors" element={<FlavorProposals />} />
+        <Route path="/manager/tech" element={<TechTasks />} />
         <Route path="/manager/problems" element={<Problems />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

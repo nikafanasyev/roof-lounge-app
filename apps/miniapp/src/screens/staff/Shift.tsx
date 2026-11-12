@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "@/data/useStore";
 import {
   closeShift,
@@ -12,6 +12,7 @@ import {
   toggleOpenChecklistItem,
 } from "@/data/repo";
 import CameraCapture from "@/components/CameraCapture";
+import { fetchMyArrivalToday, getTodayCleaningTasksForRole, recordArrival, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
 import type { ChecklistItem, StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
@@ -59,7 +60,7 @@ function ChecklistGroups({
   );
 }
 
-export default function Shift() {
+function ZoneShift() {
   const shift = useStore(shiftStore);
   const [role, setRole] = useState<StaffRole>(getCurrentStaffRole);
   const [handoverNote, setHandoverNote] = useState("");
@@ -83,6 +84,8 @@ export default function Shift() {
   const roleClosed = !!roleShift.closedAt;
   const showOpenChecklist = !roleOpened;
   const showCloseChecklist = roleOpened && !roleClosed;
+  const techKey = techRoleKeyForWorkRole(role);
+  const techTasks = techKey ? getTodayCleaningTasksForRole(techKey) : [];
 
   return (
     <div className="screen">
@@ -163,6 +166,23 @@ export default function Shift() {
         </>
       )}
 
+      {roleOpened && !roleClosed && (
+        <>
+          <div className="eyebrow" style={{ marginTop: 20 }}>
+            Тех. задача на сегодня
+          </div>
+          {techTasks.length === 0 && <div className="card muted">На сегодня тех. задач нет</div>}
+          {techTasks.map((t, i) => (
+            <div key={i} className="card">
+              <div>{t.task}</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {t.note}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
       {showCloseChecklist && (
         <>
           <h2>Чек-лист закрытия — {ROLE_LABELS[role]}</h2>
@@ -217,4 +237,69 @@ export default function Shift() {
       )}
     </div>
   );
+}
+
+/** Кухня и клининг: без чек-листа — кнопка "Открыть смену" + фото на месте. */
+function SimpleShift({ role }: { role: "kitchen" | "cleaning" }) {
+  const [openedAt, setOpenedAt] = useState<string | undefined>();
+  const [photo, setPhoto] = useState<CapturedPhoto | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    fetchMyArrivalToday().then(setOpenedAt);
+  }, []);
+  const techKey = techRoleKeyForWorkRole(role);
+  const techTasks = techKey ? getTodayCleaningTasksForRole(techKey) : [];
+
+  async function open() {
+    if (!photo) return;
+    setBusy(true);
+    setError("");
+    const res = await recordArrival(role, photo.blob);
+    setBusy(false);
+    if (!res.ok) return setError("Не получилось открыть смену, попробуйте ещё раз");
+    setOpenedAt(res.openedAt);
+    setPhoto(undefined);
+  }
+
+  return (
+    <div className="screen">
+      <h1>Смена</h1>
+      {!openedAt ? (
+        <>
+          <div className="eyebrow">Фото на месте (со штампом даты и времени, уходит руководителю в Telegram)</div>
+          <CameraCapture previewUrl={photo?.url} onCapture={(url, blob) => setPhoto({ url, blob })} label="Сфотографироваться в заведении" />
+          {error && <div style={{ color: "var(--danger, #e5484d)", fontSize: 13, marginTop: 8 }}>{error}</div>}
+          <button className="btn primary" style={{ marginTop: 12, width: "100%" }} disabled={!photo || busy} onClick={open}>
+            {busy ? "Открываем…" : photo ? "Открыть смену" : "Сделайте фото"}
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="card">
+            <span className="badge-dot done" />
+            Смена открыта в {new Date(openedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+          </div>
+          <div className="eyebrow" style={{ marginTop: 20 }}>
+            Тех. задача на сегодня
+          </div>
+          {techTasks.length === 0 && <div className="card muted">На сегодня тех. задач нет</div>}
+          {techTasks.map((t, i) => (
+            <div key={i} className="card">
+              <div>{t.task}</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {t.note}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function Shift() {
+  const me = useStore(staffProfileStore);
+  if (me.role === "kitchen" || me.role === "cleaning") return <SimpleShift role={me.role} />;
+  return <ZoneShift />;
 }
