@@ -148,14 +148,22 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
   async function pollPending() {
     const { data, error } = await supabase
       .from("shift_photo_uploads")
-      .select("id, kind, role, storage_path, staff_name")
+      .select("id, kind, role, storage_path, staff_name, created_at")
       .order("created_at", { ascending: true })
       .limit(10);
     if (error) {
       console.error("shift_photo_uploads: ошибка опроса:", error.message);
       return;
     }
-    for (const row of (data ?? []) as PhotoRow[]) await handleRow(row);
+    for (const row of (data ?? []) as (PhotoRow & { created_at: string })[]) {
+      // Фото старше 6 часов не пересылаем задним числом (устарело) — просто чистим.
+      if (Date.now() - Date.parse(row.created_at) > 6 * 3600_000) {
+        await supabase.storage.from("shift-photos").remove([row.storage_path]);
+        await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
+        continue;
+      }
+      await handleRow(row);
+    }
   }
   pollPending();
   setInterval(pollPending, 15000);
