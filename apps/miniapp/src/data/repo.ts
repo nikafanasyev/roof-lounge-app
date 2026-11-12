@@ -27,6 +27,7 @@ import type {
   FixedAccrualCadence,
   Flavor,
   Guest,
+  Income,
   KnowledgeArticle,
   Mix,
   MixItem,
@@ -120,6 +121,7 @@ export const fixedAccrualsStore = new Store<FixedAccrual[]>([]);
 export const staffInvitesStore = new Store<StaffInvite[]>([]);
 export const payrollRecalcRequestsStore = new Store<PayrollRecalcRequest[]>([]);
 export const expensesStore = new Store<Expense[]>([]);
+export const incomesStore = new Store<Income[]>([]);
 // Нал/безнал по месяцам — заполняется ботом (apps/bot/src/quickresto.ts,
 // syncMonthlyCashSplit) раз в сутки из отчёта Quick Resto
 // finances.reports.financial. Пока синхронизации не было для месяца —
@@ -221,6 +223,7 @@ export async function initData(): Promise<void> {
           loadStaffInvites(),
           loadPayrollRecalcRequests(),
           loadExpenses(),
+          loadIncomes(),
           loadCashSplit(),
         ];
     const results = await Promise.allSettled([...guestLoads, ...staffLoads]);
@@ -676,6 +679,26 @@ async function loadExpenses() {
       // не применена, select("*") просто не вернёт её, и здесь будет
       // undefined (тот же принцип, что у deletedAt выше).
       supplier: r.supplier ?? undefined,
+      // Колонка появляется миграцией 0020_expense_department_and_incomes.sql —
+      // та же логика фолбэка, что у supplier выше.
+      department: r.department ?? undefined,
+      note: r.note ?? undefined,
+      date: r.date,
+      deletedAt: r.deleted_at ?? undefined,
+      deletedByName: r.deleted_by_name ?? undefined,
+      deleteReason: r.delete_reason ?? undefined,
+    })),
+  );
+}
+
+async function loadIncomes() {
+  const { data, error } = await supabase!.from("incomes").select("*").order("date", { ascending: false });
+  if (error) return logSyncError("loadIncomes", error);
+  incomesStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      amount: Number(r.amount),
+      category: r.category,
       note: r.note ?? undefined,
       date: r.date,
       deletedAt: r.deleted_at ?? undefined,
@@ -720,6 +743,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "staff_invites" }, () => loadStaffInvites())
     .on("postgres_changes", { event: "*", schema: "public", table: "payroll_recalc_requests" }, () => loadPayrollRecalcRequests())
     .on("postgres_changes", { event: "*", schema: "public", table: "expenses" }, () => loadExpenses())
+    .on("postgres_changes", { event: "*", schema: "public", table: "incomes" }, () => loadIncomes())
     .on("postgres_changes", { event: "*", schema: "public", table: "monthly_cash_split" }, () => loadCashSplit())
     .subscribe();
 }
@@ -1211,12 +1235,15 @@ export function resolveServiceCall(id: string) {
  */
 export interface MonthFinancials {
   monthKey: string; // "YYYY-MM"
-  revenue: number;
+  revenue: number; // автоматическая выручка (shift_payroll, из Quick Resto)
   prevMonthRevenue: number;
   changePercent: number | null; // null — нет данных за предыдущий месяц для сравнения
+  manualIncome: number; // ручные "Доходы" (incomes) — см. запрос Никиты 12.11.2026
   expenses: number;
-  net: number; // revenue - expenses
+  net: number; // revenue + manualIncome - expenses
   expensesByCategory: { category: string; amount: number }[]; // по убыванию суммы
+  expensesByDepartment: { department: string; amount: number }[]; // Бар/Кухня/Кальян/Общее, по убыванию суммы; без department — "Без раздела"
+  incomeByCategory: { category: string; amount: number }[]; // по убыванию суммы
 }
 
 export function currentMonthKey(): string {
@@ -1239,6 +1266,7 @@ export function listAvailableMonths(): string[] {
   const keys = new Set<string>([currentMonthKey()]);
   for (const e of shiftPayrollStore.get()) keys.add(e.date.slice(0, 7));
   for (const e of expensesStore.get()) keys.add(e.date.slice(0, 7));
+  for (const i of incomesStore.get()) keys.add(i.date.slice(0, 7));
   return [...keys].sort((a, b) => b.localeCompare(a));
 }
 
@@ -1258,16 +1286,43 @@ export function computeMonthFinancials(monthKey: string): MonthFinancials {
   const changePercent = prevMonthRevenue > 0 ? Math.round(((revenue - prevMonthRevenue) / prevMonthRevenue) * 100) : null;
 
   const byCategory = new Map<string, number>();
+  const byDepartment = new Map<string, number>();
   for (const e of listActiveExpenses()) {
     if (!e.date.startsWith(monthKey)) continue;
     byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amount);
+    const dept = e.department?.trim() || "Без раздела";
+    byDepartment.set(dept, (byDepartment.get(dept) ?? 0) + e.amount);
   }
   const expensesByCategory = [...byCategory.entries()]
     .map(([category, amount]) => ({ category, amount }))
     .sort((a, b) => b.amount - a.amount);
+  const expensesByDepartment = [...byDepartment.entries()]
+    .map(([department, amount]) => ({ department, amount }))
+    .sort((a, b) => b.amount - a.amount);
   const expenses = expensesByCategory.reduce((sum, c) => sum + c.amount, 0);
 
-  return { monthKey, revenue, prevMonthRevenue, changePercent, expenses, net: revenue - expenses, expensesByCategory };
+  const incomeByCategoryMap = new Map<string, number>();
+  for (const i of listActiveIncomes()) {
+    if (!i.date.startsWith(monthKey)) continue;
+    incomeByCategoryMap.set(i.category, (incomeByCategoryMap.get(i.category) ?? 0) + i.amount);
+  }
+  const incomeByCategory = [...incomeByCategoryMap.entries()]
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount);
+  const manualIncome = incomeByCategory.reduce((sum, c) => sum + c.amount, 0);
+
+  return {
+    monthKey,
+    revenue,
+    prevMonthRevenue,
+    changePercent,
+    manualIncome,
+    expenses,
+    net: revenue + manualIncome - expenses,
+    expensesByCategory,
+    expensesByDepartment,
+    incomeByCategory,
+  };
 }
 
 /**
@@ -2132,9 +2187,16 @@ export function listKnownSuppliers(): string[] {
  * timestamptz), по умолчанию сегодня, но можно указать прошлую дату (та же
  * логика, что addAdjustment).
  */
-export function addExpense(amount: number, category: string, supplier: string | undefined, note: string | undefined, dateIso?: string) {
+export function addExpense(
+  amount: number,
+  category: string,
+  supplier: string | undefined,
+  department: string | undefined,
+  note: string | undefined,
+  dateIso?: string,
+) {
   const date = dateIso || new Date().toISOString().slice(0, 10);
-  const entry: Expense = { id: uid(), amount, category, supplier: supplier || undefined, note: note || undefined, date };
+  const entry: Expense = { id: uid(), amount, category, supplier: supplier || undefined, department: department || undefined, note: note || undefined, date };
   expensesStore.update((list) => [entry, ...list]);
   if (isSupabaseConfigured && supabase) {
     supabase
@@ -2144,6 +2206,7 @@ export function addExpense(amount: number, category: string, supplier: string | 
         amount,
         category,
         supplier: supplier || null,
+        department: department || null,
         note: note || null,
         date,
         created_by_staff_id: getStaffProfile().id,
@@ -2163,6 +2226,51 @@ export function deleteExpense(id: string, reason: string) {
     .update({ deleted_at: deletedAt, deleted_by_name: deletedByName, delete_reason: reason })
     .eq("id", id)
     .then(({ error }) => error && logSyncError("deleteExpense", error));
+}
+
+// --- Доходы (см. 0020_expense_department_and_incomes.sql) ---
+//
+// Та же логика, что у расходов выше — ручной журнал записей с мягким
+// удалением, отдельно от автоматической выручки Quick Resto.
+
+export function listAllIncomes(): Income[] {
+  return incomesStore.get().sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export function listActiveIncomes(): Income[] {
+  return incomesStore.get().filter((i) => !i.deletedAt);
+}
+
+export function addIncome(amount: number, category: string, note: string | undefined, dateIso?: string) {
+  const date = dateIso || new Date().toISOString().slice(0, 10);
+  const entry: Income = { id: uid(), amount, category, note: note || undefined, date };
+  incomesStore.update((list) => [entry, ...list]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("incomes")
+      .insert({
+        id: entry.id,
+        amount,
+        category,
+        note: note || null,
+        date,
+        created_by_staff_id: getStaffProfile().id,
+        created_by_name: getStaffProfile().name,
+      })
+      .then(({ error }) => error && logSyncError("addIncome", error));
+  }
+}
+
+export function deleteIncome(id: string, reason: string) {
+  const deletedAt = new Date().toISOString();
+  const deletedByName = getStaffProfile().name;
+  incomesStore.update((list) => list.map((i) => (i.id === id ? { ...i, deletedAt, deletedByName, deleteReason: reason } : i)));
+  if (!isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("incomes")
+    .update({ deleted_at: deletedAt, deleted_by_name: deletedByName, delete_reason: reason })
+    .eq("id", id)
+    .then(({ error }) => error && logSyncError("deleteIncome", error));
 }
 
 

@@ -8,6 +8,7 @@ import {
   currentMonthKey,
   expensesStore,
   getCashSplitForMonth,
+  incomesStore,
   listAvailableMonths,
   problemsStore,
   serviceCallsStore,
@@ -41,6 +42,7 @@ export default function Summary() {
   const shift = useStore(shiftStore);
   useStore(shiftPayrollStore);
   useStore(expensesStore);
+  useStore(incomesStore);
   useStore(cashSplitStore);
 
   const openCalls = calls.filter((c) => c.status === "open");
@@ -109,21 +111,25 @@ export default function Summary() {
         <div className="card" style={{ gridColumn: "1 / -1" }}>
           <div className="eyebrow">Чистыми</div>
           <div style={{ fontSize: 24, fontWeight: 700, color: data.net >= 0 ? "var(--good)" : "var(--danger)" }}>{money(data.net)}</div>
+          {data.manualIncome > 0 && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              включая доп. доходы {money(data.manualIncome)}
+            </div>
+          )}
         </div>
       </div>
 
-      {data.expensesByCategory.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>
-            Расходы по статьям
-          </div>
-          {data.expensesByCategory.map((c) => (
-            <div key={c.category} className="card-row" style={{ padding: "6px 0" }}>
-              <div style={{ fontSize: 14 }}>{c.category}</div>
-              <div style={{ fontSize: 14, fontWeight: 600 }}>{money(c.amount)}</div>
-            </div>
-          ))}
-        </div>
+      {/*
+        Разбивка расходов по статьям/разделам — раньше была тут плашками,
+        теперь полная версия (с плашками по Бар/Кухня/Кальян) переехала на
+        "Расходы" (см. Expenses.tsx), а здесь — коротко текстом, чтобы не
+        дублировать и не раздувать "Сводку" (см. ответ Никиты 12.11.2026:
+        "в сводке будто текстом").
+      */}
+      {data.expensesByDepartment.length > 0 && (
+        <p className="muted" style={{ fontSize: 13, marginTop: -6, marginBottom: 16 }}>
+          По разделам: {data.expensesByDepartment.map((d) => `${d.department} — ${money(d.amount)}`).join(" · ")}
+        </p>
       )}
 
       {/*

@@ -1,6 +1,18 @@
 import { useState } from "react";
 import { useStore } from "@/data/useStore";
-import { addExpense, deleteExpense, expensesStore, listAllExpenses, listKnownSuppliers } from "@/data/repo";
+import {
+  addExpense,
+  addIncome,
+  computeMonthFinancials,
+  currentMonthKey,
+  deleteExpense,
+  deleteIncome,
+  expensesStore,
+  incomesStore,
+  listAllExpenses,
+  listAllIncomes,
+  listKnownSuppliers,
+} from "@/data/repo";
 
 function money(n: number): string {
   return n.toLocaleString("ru-RU") + " ₽";
@@ -28,6 +40,14 @@ const CATEGORY_SUGGESTIONS = [
   "Инкассация",
   "Прочее",
 ];
+
+// Раздел расхода — Бар/Кухня/Кальян/Общее. Доп. поле вдобавок к статье (не
+// замена) — см. 0020_expense_department_and_incomes.sql и запрос Никиты
+// 12.11.2026: "надо будет все отсортировать по Бар, Кухня, Кальян".
+// Свободный текст, необязательное поле — старые записи (и расходы, не
+// привязанные к конкретному отделу вроде "Налоги"/"Аренда") просто без
+// department, в сводках попадают в "Без раздела".
+const DEPARTMENT_SUGGESTIONS = ["Бар", "Кухня", "Кальян", "Общее"];
 
 // Поставщики/контрагенты — тоже из ОДДС, самые частые/заметные. Свободный
 // текст (0018_expenses_supplier.sql) — список только подсказка, под полем
@@ -60,19 +80,39 @@ const SUPPLIER_SUGGESTIONS = [
   "Каршеринг",
 ];
 
+// Категории доходов — Никита вёл похожую разбивку в своей P&L-таблице
+// (доходы: нал/безнал/яндекс), здесь то же самое плюс "Прочее". Не путать с
+// автоматической выручкой из Quick Resto (shift_payroll/monthly_cash_split)
+// — это ручные, отдельные поступления (см. запрос Никиты 12.11.2026:
+// "доходы нужно туда же где расходы").
+const INCOME_CATEGORY_SUGGESTIONS = ["Нал", "Безнал", "Яндекс", "Прочее"];
+
 /**
- * Расходы заведения — руководитель заносит траты вручную (Quick Resto их
- * не экспортирует, это не продажи). Сумма за месяц (с разбивкой по статьям)
- * отсюда идёт в блок "Финансы" на "Сводка" (см. computeMonthFinancials в
- * data/repo.ts). См. запрос Никиты 11.11.2026: "Расходы кстати нужно
- * сделать еще отдельно, чтобы они проводились тут".
+ * Расходы и доходы заведения — руководитель заносит вручную (Quick Resto
+ * экспортирует только продажи, не расходы и не прочие поступления). Сумма
+ * за месяц (с разбивкой по статьям/разделам) отсюда идёт в блок "Финансы"
+ * на "Сводка" (см. computeMonthFinancials в data/repo.ts). См. запросы
+ * Никиты: 11.11.2026 "Расходы кстати нужно сделать еще отдельно, чтобы они
+ * проводились тут" и 12.11.2026 "доходы нужно туда же где расходы" +
+ * "надо будет все отсортировать по Бар, Кухня, Кальян".
  */
 export default function Expenses() {
   useStore(expensesStore);
-  const entries = listAllExpenses();
+  useStore(incomesStore);
+
+  const [mode, setMode] = useState<"expense" | "income">("expense");
+
+  const expenseEntries = listAllExpenses();
+  const incomeEntries = listAllIncomes();
   // Стартовый список из ОДДС + все поставщики, которые уже встречались в
   // расходах (включая введённые вручную новые — см. listKnownSuppliers).
   const supplierOptions = Array.from(new Set([...SUPPLIER_SUGGESTIONS, ...listKnownSuppliers()]));
+
+  // Сводные плашки — по текущему месяцу (тот же расчёт, что на "Сводке",
+  // см. запрос Никиты 12.11.2026: "отдельно плашки сводные по категориям,
+  // которые были"). Переключателя по месяцам здесь нет намеренно — для
+  // этого есть "Сводка", здесь просто ориентир при вводе.
+  const month = computeMonthFinancials(currentMonthKey());
 
   const today = new Date().toISOString().slice(0, 10);
   const [showForm, setShowForm] = useState(false);
@@ -82,49 +122,121 @@ export default function Expenses() {
   // статья вводилась текстом с подсказкой клавиатуры (datalist) — список
   // всплывал отдельной панелью НАД клавиатурой и перекрывал форму, неудобно
   // нажимать, см. фидбек Никиты 12.11.2026: "лучше сделать отдельными
-  // кнопками либо списком"). Итоговый список статей уточним после ОДДС.
+  // кнопками либо списком").
   const [customCategory, setCustomCategory] = useState(false);
+  const [department, setDepartment] = useState("");
   const [supplier, setSupplier] = useState("");
   const [note, setNote] = useState("");
   const [date, setDate] = useState(today);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
 
+  const categoryOptions = mode === "expense" ? CATEGORY_SUGGESTIONS : INCOME_CATEGORY_SUGGESTIONS;
+
   function pickCategory(c: string) {
     setCategory(c);
     setCustomCategory(false);
   }
 
-  function submit() {
-    const value = Number(amount);
-    if (!value || !category.trim()) return;
-    addExpense(value, category.trim(), supplier.trim() || undefined, note.trim() || undefined, date || today);
+  function resetForm() {
     setAmount("");
     setCategory("");
     setCustomCategory(false);
+    setDepartment("");
     setSupplier("");
     setNote("");
     setDate(today);
     setShowForm(false);
   }
 
+  function switchMode(next: "expense" | "income") {
+    setMode(next);
+    resetForm();
+  }
+
+  function submit() {
+    const value = Number(amount);
+    if (!value || !category.trim()) return;
+    if (mode === "expense") {
+      addExpense(value, category.trim(), supplier.trim() || undefined, department || undefined, note.trim() || undefined, date || today);
+    } else {
+      addIncome(value, category.trim(), note.trim() || undefined, date || today);
+    }
+    resetForm();
+  }
+
   function confirmDelete(id: string) {
     if (!deleteReason.trim()) return;
-    deleteExpense(id, deleteReason.trim());
+    if (mode === "expense") deleteExpense(id, deleteReason.trim());
+    else deleteIncome(id, deleteReason.trim());
     setDeletingId(null);
     setDeleteReason("");
   }
 
+  const entries = mode === "expense" ? expenseEntries : incomeEntries;
+
   return (
     <div className="screen">
-      <h1>Расходы</h1>
+      <h1>Расходы и доходы</h1>
       <p className="muted" style={{ fontSize: 13, marginTop: -8, marginBottom: 16 }}>
         Учитываются в «Сводка» автоматически.
       </p>
 
+      <div className="tabs">
+        <button className={`tab-btn ${mode === "expense" ? "active" : ""}`} onClick={() => switchMode("expense")}>
+          Расходы
+        </button>
+        <button className={`tab-btn ${mode === "income" ? "active" : ""}`} onClick={() => switchMode("income")}>
+          Доходы
+        </button>
+      </div>
+
+      {/*
+        Сводные плашки за текущий месяц — для расходов группируем по разделу
+        (Бар/Кухня/Кальян/Без раздела), внутри каждого раздела показываем
+        статьи; для доходов — просто по категориям (Нал/Безнал/Яндекс/
+        Прочее). См. запрос Никиты 12.11.2026.
+      */}
+      {mode === "expense" && month.expensesByDepartment.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          {month.expensesByDepartment.map((d) => (
+            <div key={d.department} className="card" style={{ flex: "1 1 140px", minWidth: 140 }}>
+              <div className="eyebrow">{d.department}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--danger)" }}>{money(d.amount)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {mode === "expense" && month.expensesByCategory.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>
+            По статьям — текущий месяц
+          </div>
+          {month.expensesByCategory.map((c) => (
+            <div key={c.category} className="card-row" style={{ padding: "6px 0" }}>
+              <div style={{ fontSize: 14 }}>{c.category}</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{money(c.amount)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {mode === "income" && month.incomeByCategory.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>
+            По категориям — текущий месяц
+          </div>
+          {month.incomeByCategory.map((c) => (
+            <div key={c.category} className="card-row" style={{ padding: "6px 0" }}>
+              <div style={{ fontSize: 14 }}>{c.category}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "var(--good)" }}>{money(c.amount)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {!showForm && (
         <button className="btn secondary" style={{ width: "100%", marginBottom: 14 }} onClick={() => setShowForm(true)}>
-          + Записать расход
+          {mode === "expense" ? "+ Записать расход" : "+ Записать доход"}
         </button>
       )}
 
@@ -132,9 +244,9 @@ export default function Expenses() {
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="eyebrow">Сумма, ₽</div>
           <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ marginBottom: 12 }} />
-          <div className="eyebrow">Статья</div>
+          <div className="eyebrow">{mode === "expense" ? "Статья" : "Категория"}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            {CATEGORY_SUGGESTIONS.map((c) => {
+            {categoryOptions.map((c) => {
               const active = !customCategory && category === c;
               return (
                 <button
@@ -165,49 +277,73 @@ export default function Expenses() {
               type="text"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
-              placeholder="Своя статья"
+              placeholder={mode === "expense" ? "Своя статья" : "Своя категория"}
               style={{ marginBottom: 12 }}
               autoFocus
             />
           )}
-          <div className="eyebrow">Поставщик (необязательно)</div>
-          <input
-            type="text"
-            value={supplier}
-            onChange={(e) => setSupplier(e.target.value)}
-            placeholder="Начните вводить — или выберите ниже"
-            style={{ marginBottom: 8 }}
-          />
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            {supplierOptions
-              .filter((s) => s.toLowerCase().includes(supplier.trim().toLowerCase()))
-              .map((s) => {
-                const active = supplier === s;
-                return (
-                  <button
-                    key={s}
-                    type="button"
-                    className={`chip chip-pick${active ? " accent" : ""}`}
-                    style={{ cursor: "pointer", border: active ? "1px solid var(--accent)" : "1px solid var(--border)" }}
-                    onClick={() => setSupplier(s)}
-                  >
-                    {s}
+
+          {mode === "expense" && (
+            <>
+              <div className="eyebrow">Раздел (необязательно)</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {DEPARTMENT_SUGGESTIONS.map((d) => {
+                  const active = department === d;
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      className={`chip chip-pick${active ? " accent" : ""}`}
+                      style={{ cursor: "pointer", border: active ? "1px solid var(--accent)" : "1px solid var(--border)" }}
+                      onClick={() => setDepartment(active ? "" : d)}
+                    >
+                      {d}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="eyebrow">Поставщик (необязательно)</div>
+              <input
+                type="text"
+                value={supplier}
+                onChange={(e) => setSupplier(e.target.value)}
+                placeholder="Начните вводить — или выберите ниже"
+                style={{ marginBottom: 8 }}
+              />
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+                {supplierOptions
+                  .filter((s) => s.toLowerCase().includes(supplier.trim().toLowerCase()))
+                  .map((s) => {
+                    const active = supplier === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        className={`chip chip-pick${active ? " accent" : ""}`}
+                        style={{ cursor: "pointer", border: active ? "1px solid var(--accent)" : "1px solid var(--border)" }}
+                        onClick={() => setSupplier(s)}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                {/* Введённого текста нет среди известных поставщиков — явная
+                    кнопка "создать", а не молчаливое "ничего не найдено" (см.
+                    запрос Никиты 12.11.2026: "в случае нового поставщика должна
+                    быть опция создать"). Нажатие ничего доп. не делает — поле
+                    уже равно этому тексту, — просто подтверждает, что это
+                    осознанный новый поставщик, а не опечатка; появится в
+                    подсказках сам после сохранения (listKnownSuppliers). */}
+                {supplier.trim() && !supplierOptions.some((s) => s.toLowerCase() === supplier.trim().toLowerCase()) && (
+                  <button type="button" className="chip chip-pick accent" style={{ cursor: "default", border: "1px dashed var(--accent)" }}>
+                    + Добавить «{supplier.trim()}»
                   </button>
-                );
-              })}
-            {/* Введённого текста нет среди известных поставщиков — явная
-                кнопка "создать", а не молчаливое "ничего не найдено" (см.
-                запрос Никиты 12.11.2026: "в случае нового поставщика должна
-                быть опция создать"). Нажатие ничего доп. не делает — поле
-                уже равно этому тексту, — просто подтверждает, что это
-                осознанный новый поставщик, а не опечатка; появится в
-                подсказках сам после сохранения (listKnownSuppliers). */}
-            {supplier.trim() && !supplierOptions.some((s) => s.toLowerCase() === supplier.trim().toLowerCase()) && (
-              <button type="button" className="chip chip-pick accent" style={{ cursor: "default", border: "1px dashed var(--accent)" }}>
-                + Добавить «{supplier.trim()}»
-              </button>
-            )}
-          </div>
+                )}
+              </div>
+            </>
+          )}
+
           <div className="eyebrow">Комментарий (необязательно)</div>
           <input type="text" value={note} onChange={(e) => setNote(e.target.value)} style={{ marginBottom: 12 }} />
           <div className="eyebrow">Дата</div>
@@ -223,16 +359,18 @@ export default function Expenses() {
         </div>
       )}
 
-      {entries.length === 0 && <div className="list-empty">Расходов пока нет</div>}
+      {entries.length === 0 && <div className="list-empty">{mode === "expense" ? "Расходов пока нет" : "Доходов пока нет"}</div>}
       {entries.map((e) => {
         const isDeleted = Boolean(e.deletedAt);
+        const isExpense = mode === "expense";
+        const supplierOrDept = isExpense ? [(e as { supplier?: string }).supplier, (e as { department?: string }).department].filter(Boolean).join(" · ") : "";
         return (
           <div key={e.id} className="card" style={{ opacity: isDeleted ? 0.55 : 1 }}>
             <div className="card-row">
               <div>
                 <div style={{ fontWeight: 700, textDecoration: isDeleted ? "line-through" : "none" }}>
                   {e.category}
-                  {e.supplier ? ` · ${e.supplier}` : ""}
+                  {supplierOrDept ? ` · ${supplierOrDept}` : ""}
                 </div>
                 <div className="muted" style={{ fontSize: 13, textDecoration: isDeleted ? "line-through" : "none" }}>
                   {e.note ? `${e.note} · ` : ""}
@@ -244,7 +382,12 @@ export default function Expenses() {
                   </div>
                 )}
               </div>
-              <span style={{ fontWeight: 700, color: "var(--danger)", textDecoration: isDeleted ? "line-through" : "none" }}>−{money(e.amount)}</span>
+              <span
+                style={{ fontWeight: 700, color: isExpense ? "var(--danger)" : "var(--good)", textDecoration: isDeleted ? "line-through" : "none" }}
+              >
+                {isExpense ? "−" : "+"}
+                {money(e.amount)}
+              </span>
             </div>
 
             {!isDeleted && deletingId !== e.id && (
