@@ -305,6 +305,7 @@ export interface Expense {
   supplier?: string; // см. 0018_expenses_supplier.sql
   department?: string; // Бар/Кухня/Кальян/Общее — см. 0020_expense_department_and_incomes.sql
   note?: string;
+  createdByName?: string; // кто провёл запись
   date: string; // ISO-дата
   deletedAt?: string;
   deletedByName?: string;
@@ -320,6 +321,7 @@ export interface Income {
   amount: number; // ₽
   category: string; // свободный текст, подсказки в Expenses.tsx
   note?: string;
+  createdByName?: string; // кто провёл запись
   date: string; // ISO-дата
   deletedAt?: string;
   deletedByName?: string;

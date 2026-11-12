@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { createStaffInvite, formatSalaryModel, listActiveStaffDirectory, listStaffDirectory, listStaffInvites, staffDirectoryStore, staffInvitesStore } from "@/data/repo";
+import { createStaffInvite, deleteStaffInvite, formatSalaryModel, listActiveStaffDirectory, listStaffDirectory, listStaffInvites, staffDirectoryStore, staffInvitesStore } from "@/data/repo";
 import type { StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
@@ -94,6 +94,15 @@ function InviteRow({ inv }: { inv: ReturnType<typeof listStaffInvites>[number] }
         <div className="muted" style={{ fontSize: 12, color: "var(--danger, #c0392b)" }}>
           {inv.error}
         </div>
+      )}
+      {inv.status !== "pending" && (
+        <button
+          className="muted"
+          style={{ background: "none", border: "none", fontSize: 12, textDecoration: "underline", cursor: "pointer", alignSelf: "flex-start", padding: 0 }}
+          onClick={() => deleteStaffInvite(inv.id)}
+        >
+          удалить
+        </button>
       )}
     </div>
   );
