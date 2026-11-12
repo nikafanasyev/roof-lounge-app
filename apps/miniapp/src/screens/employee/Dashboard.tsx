@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useStore } from "@/data/useStore";
 import {
   adjustmentsStore,
@@ -12,6 +13,46 @@ import PayrollPeriods from "@/components/PayrollPeriods";
 
 function money(n: number): string {
   return n.toLocaleString("ru-RU") + " ₽";
+}
+
+function pluralShifts(n: number): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return `${n} смена`;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return `${n} смены`;
+  return `${n} смен`;
+}
+
+/** Месяц со сменами — сворачиваемый, по умолчанию раскрыт только свежий (как в карточке сотрудника у руководителя). */
+function MonthShifts({ group, defaultOpen }: { group: ReturnType<typeof listShiftPayrollByMonth>[number]; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="card-row"
+        style={{ width: "100%", background: "none", border: "none", padding: "8px 0", cursor: "pointer", color: "inherit", font: "inherit", marginBottom: 6 }}
+      >
+        <span className="muted" style={{ fontSize: 13, textTransform: "capitalize" }}>
+          {open ? "▾" : "▸"} {group.monthLabel} · {pluralShifts(group.shifts.length)}
+        </span>
+        <span style={{ fontWeight: 700 }}>{money(group.total)}</span>
+      </button>
+      {open &&
+        group.shifts.map((s) => (
+          <div key={s.id} className="card card-row">
+            <div>
+              <div style={{ fontWeight: 700 }}>{new Date(s.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                выручка {money(s.revenue)}
+              </div>
+            </div>
+            <div style={{ fontWeight: 700, color: "var(--accent)" }}>{money(s.salary)}</div>
+          </div>
+        ))}
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -60,28 +101,8 @@ export default function Dashboard() {
 
       <h2>Разбивка по сменам</h2>
       {months.length === 0 && <div className="list-empty">Смен пока не было</div>}
-      {months.map((group) => (
-        <div key={group.monthLabel} style={{ marginBottom: 16 }}>
-          <div className="card-row" style={{ marginBottom: 6 }}>
-            <span className="muted" style={{ fontSize: 13, textTransform: "capitalize" }}>
-              {group.monthLabel}
-            </span>
-            <span style={{ fontWeight: 700 }}>{money(group.total)}</span>
-          </div>
-          {group.shifts.map((s) => (
-            <div key={s.id} className="card card-row">
-              <div>
-                <div style={{ fontWeight: 700 }}>
-                  {new Date(s.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
-                </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  выручка {money(s.revenue)}
-                </div>
-              </div>
-              <div style={{ fontWeight: 700, color: "var(--accent)" }}>{money(s.salary)}</div>
-            </div>
-          ))}
-        </div>
+      {months.map((group, i) => (
+        <MonthShifts key={group.monthLabel} group={group} defaultOpen={i === 0} />
       ))}
     </div>
   );
