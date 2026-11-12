@@ -126,8 +126,10 @@ function StaffSalaryCard({ overview, order }: { overview: ReturnType<typeof comp
  * запрос Никиты 14.10.2026) — exportSalaryWorkbook сам пересчитывает ЗП
  * каждой смены формулой от выручки по salary_model сотрудника.
  */
-function ExportButton() {
+function ExportButton({ periods }: { periods: { key: string; label: string }[] }) {
   const [busy, setBusy] = useState(false);
+  const [periodKey, setPeriodKey] = useState(periods[0]?.key ?? "");
+  const selected = periods.find((p) => p.key === periodKey) ?? periods[0];
 
   async function handleExport() {
     setBusy(true);
@@ -138,7 +140,7 @@ function ExportButton() {
         adjustments: listAdjustmentsForStaff(profile.id),
         fixedAccruals: listFixedAccrualsForStaff(profile.id),
       }));
-      await exportSalaryWorkbook(staffInputs);
+      await exportSalaryWorkbook(staffInputs, { periodKey: selected?.key, periodLabel: selected?.label });
     } catch (err) {
       console.error("Не удалось выгрузить ведомость:", err);
       alert("Не удалось сформировать файл — попробуйте ещё раз.");
@@ -148,9 +150,19 @@ function ExportButton() {
   }
 
   return (
-    <button className="btn secondary" style={{ width: "100%", marginBottom: 14 }} disabled={busy} onClick={handleExport}>
-      {busy ? "Формирую файл…" : "⬇️ Выгрузить ведомость в Excel"}
-    </button>
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div className="eyebrow">Выгрузка в Excel — за период</div>
+      <select value={selected?.key ?? ""} onChange={(e) => setPeriodKey(e.target.value)} style={{ marginBottom: 8 }}>
+        {periods.map((p) => (
+          <option key={p.key} value={p.key}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+      <button className="btn secondary" style={{ width: "100%" }} disabled={busy || !selected} onClick={handleExport}>
+        {busy ? "Формирую файл…" : "⬇️ Выгрузить ведомость"}
+      </button>
+    </div>
   );
 }
 
@@ -221,7 +233,7 @@ export default function Salary() {
         </>
       )}
 
-      <ExportButton />
+      <ExportButton periods={periodTotals} />
 
       {staffWithData.map((s) => (
         <StaffSalaryCard key={s.staffId} overview={s} order={order} />

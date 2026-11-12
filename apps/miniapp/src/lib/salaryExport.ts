@@ -33,7 +33,12 @@ function rateLabel(model: SalaryModel): string {
  * exceljs загружается динамически (~1MB), чтобы не раздувать основной бандл
  * мини-аппа ради одной редко нажимаемой кнопки.
  */
-export async function exportSalaryWorkbook(staffInputs: SalaryExportStaffInput[], generatedAt: Date = new Date()) {
+export async function exportSalaryWorkbook(
+  staffInputs: SalaryExportStaffInput[],
+  options: { periodKey?: string; periodLabel?: string; generatedAt?: Date } = {},
+) {
+  const generatedAt = options.generatedAt ?? new Date();
+  const { periodKey, periodLabel } = options;
   const ExcelJS = (await import("exceljs")).default;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Roof Lounge miniapp";
@@ -47,7 +52,7 @@ export async function exportSalaryWorkbook(staffInputs: SalaryExportStaffInput[]
     { key: "e", width: 16 },
   ];
 
-  sheet.addRow([`Зарплатная ведомость — Roof Lounge`]).font = { bold: true, size: 14 };
+  sheet.addRow([periodLabel ? `Зарплатная ведомость — Roof Lounge · ${periodLabel}` : `Зарплатная ведомость — Roof Lounge`]).font = { bold: true, size: 14 };
   sheet.addRow([`Выгружено ${generatedAt.toLocaleDateString("ru-RU")} ${generatedAt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`]).font = {
     italic: true,
     color: { argb: "FF888888" },
@@ -56,7 +61,16 @@ export async function exportSalaryWorkbook(staffInputs: SalaryExportStaffInput[]
 
   const payoutCellRefs: string[] = []; // "ИТОГО к выплате" каждого сотрудника — для общего итога внизу
 
-  for (const input of staffInputs) {
+  for (const rawInput of staffInputs) {
+    // Выгрузка за один зарплатный период (см. фидбек Никиты 12.11.2026: за весь
+    // период файл нечитаем) — смены и штрафы/премии только этого периода.
+    const input = periodKey
+      ? {
+          ...rawInput,
+          shifts: rawInput.shifts.filter((s) => getPayrollPeriodForDate(s.date).start === periodKey),
+          adjustments: rawInput.adjustments.filter((a) => getPayrollPeriodForDate(a.date).start === periodKey),
+        }
+      : rawInput;
     if (!input.shifts.length && !input.fixedAccruals.length && !input.adjustments.length) continue;
 
     const nameRow = sheet.addRow([input.profile.name]);
@@ -145,12 +159,22 @@ export async function exportSalaryWorkbook(staffInputs: SalaryExportStaffInput[]
   grossCell.value = { formula: `E${grandRow.number}+E${ndflRow.number}`, result: 0 };
   grossCell.numFmt = "#,##0";
 
+  // Явно чёрный текст на белом фоне — иначе в тёмной теме встроенного просмотрщика
+  // (Telegram/iOS) шрифт "авто" становится тёмным на тёмном и файл нечитаем.
+  sheet.eachRow((row) => {
+    for (let c = 1; c <= 5; c++) {
+      const cell = row.getCell(c);
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };
+      cell.font = { ...(cell.font ?? {}), color: cell.font?.color ?? { argb: "FF000000" } };
+    }
+  });
+
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `зарплата-${generatedAt.toISOString().slice(0, 10)}.xlsx`;
+  a.download = periodKey ? `зарплата-${periodKey}.xlsx` : `зарплата-${generatedAt.toISOString().slice(0, 10)}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();
