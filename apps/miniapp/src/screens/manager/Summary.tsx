@@ -1,13 +1,28 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { averageReactionMinutes, computeExpensesLast30, computeRevenueTrend, expensesStore, problemsStore, serviceCallsStore, shiftPayrollStore, shiftStore, tasksStore } from "@/data/repo";
+import {
+  averageReactionMinutes,
+  computeMonthFinancials,
+  currentMonthKey,
+  expensesStore,
+  listAvailableMonths,
+  problemsStore,
+  serviceCallsStore,
+  shiftMonthKey,
+  shiftPayrollStore,
+  shiftStore,
+  tasksStore,
+} from "@/data/repo";
 
 function money(n: number): string {
   return n.toLocaleString("ru-RU") + " ₽";
 }
 
-function formatDay(iso: string): string {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+function formatMonthLabel(monthKey: string): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const label = new Date(y, m - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 // Блок "Автоматические предупреждения" раньше дублировал то, что уже видно
@@ -29,16 +44,18 @@ export default function Summary() {
   const openProblems = problems.filter((p) => p.status !== "done");
   const openTasks = tasks.filter((t) => !t.done);
   const avgReaction = averageReactionMinutes();
-  // Финансовая часть сводки — выручка за 30 дней с динамикой к предыдущим
-  // 30 дням, плюс последний день, за который есть данные (см. запрос
-  // Никиты 11.11.2026: "может быть финансовые показатели сюда добавить и
-  // динамику?"), и расходы за те же 30 дней (ручной ввод в "Расходы", см.
-  // 0017_expenses.sql) — итог "Чистыми" прямо тут, чтобы не считать в
-  // уме. ABC-анализ по позициям — отдельная доработка позже (нужна новая
-  // интеграция с Quick Resto по продажам).
-  const revenue = computeRevenueTrend();
-  const expenses30 = computeExpensesLast30();
-  const net30 = revenue.last30 - expenses30;
+
+  // Раньше выручка/расходы считались скользящим окном "30 дней" — Никита
+  // попросил вместо этого календарный месяц с переключателем между месяцами
+  // (см. запрос 12.11.2026: "выручку надо сделать не за 30 дней, а за
+  // текущий месяц" + "в идеале сделать переключатель по месяцам"), плюс
+  // разбивку расходов по статьям на этом же экране — по образцу ОДДС,
+  // который он ведёт сам (см. скриншот 12.11.2026).
+  const months = listAvailableMonths();
+  const [monthKey, setMonthKey] = useState(currentMonthKey());
+  const data = computeMonthFinancials(monthKey);
+  const canGoNext = monthKey < currentMonthKey();
+  const canGoPrev = months.includes(shiftMonthKey(monthKey, -1));
 
   return (
     <div className="screen">
@@ -47,44 +64,77 @@ export default function Summary() {
       <div className="eyebrow" style={{ marginTop: 4 }}>
         Финансы
       </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button
+          className="btn secondary"
+          style={{ padding: "6px 12px", fontSize: 14 }}
+          disabled={!canGoPrev}
+          onClick={() => setMonthKey((k) => shiftMonthKey(k, -1))}
+        >
+          ←
+        </button>
+        <div style={{ fontWeight: 700 }}>{formatMonthLabel(monthKey)}</div>
+        <button
+          className="btn secondary"
+          style={{ padding: "6px 12px", fontSize: 14 }}
+          disabled={!canGoNext}
+          onClick={() => setMonthKey((k) => shiftMonthKey(k, 1))}
+        >
+          →
+        </button>
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
         <div className="card">
-          <div className="eyebrow">Выручка за 30 дней</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{money(revenue.last30)}</div>
-          {revenue.changePercent === null ? (
+          <div className="eyebrow">Выручка</div>
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{money(data.revenue)}</div>
+          {data.changePercent === null ? (
             <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-              нет данных за пред. 30 дней
+              нет данных за пред. месяц
             </div>
           ) : (
-            <div
-              style={{
-                fontSize: 12,
-                marginTop: 4,
-                color: revenue.changePercent >= 0 ? "var(--good)" : "var(--danger)",
-              }}
-            >
-              {revenue.changePercent >= 0 ? "▲" : "▼"} {revenue.changePercent >= 0 ? "+" : ""}
-              {revenue.changePercent}% к пред. 30 дням
+            <div style={{ fontSize: 12, marginTop: 4, color: data.changePercent >= 0 ? "var(--good)" : "var(--danger)" }}>
+              {data.changePercent >= 0 ? "▲" : "▼"} {data.changePercent >= 0 ? "+" : ""}
+              {data.changePercent}% к пред. месяцу
             </div>
           )}
         </div>
-        <div className="card">
-          <div className="eyebrow">
-            {revenue.lastRecordedDay ? `Выручка · ${formatDay(revenue.lastRecordedDay.date)}` : "Выручка"}
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>
-            {revenue.lastRecordedDay ? money(revenue.lastRecordedDay.revenue) : "—"}
-          </div>
-        </div>
         <Link to="/manager/expenses" className="card" style={{ display: "block" }}>
-          <div className="eyebrow">Расходы за 30 дней</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--danger)" }}>{money(expenses30)}</div>
+          <div className="eyebrow">Расходы</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: "var(--danger)" }}>{money(data.expenses)}</div>
         </Link>
-        <div className="card">
-          <div className="eyebrow">Чистыми за 30 дней</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: net30 >= 0 ? "var(--good)" : "var(--danger)" }}>{money(net30)}</div>
+        <div className="card" style={{ gridColumn: "1 / -1" }}>
+          <div className="eyebrow">Чистыми</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: data.net >= 0 ? "var(--good)" : "var(--danger)" }}>{money(data.net)}</div>
         </div>
       </div>
+
+      {data.expensesByCategory.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>
+            Расходы по статьям
+          </div>
+          {data.expensesByCategory.map((c) => (
+            <div key={c.category} className="card-row" style={{ padding: "6px 0" }}>
+              <div style={{ fontSize: 14 }}>{c.category}</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{money(c.amount)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/*
+        Нал/безнал — Никита попросил "в идеале как-то следить за налом и
+        безналом" (12.11.2026). Пока НЕ сделано: текущая интеграция с Quick
+        Resto (fetchRevenueSplitForDate в apps/bot/src/quickresto.ts) тянет
+        только общую сумму выручки за бизнес-день через отчёт по категориям
+        товаров — там нет разбивки по способу оплаты. Раздельный нал/безнал
+        похоже есть только в текстовых отчётах смены (чек-лист "Закрытие
+        кассовой смены" — "выручка, безналичные, наличные..."), которые
+        никуда не пишутся структурированно. Нужно решить отдельно: either
+        бот тянет такую разбивку из другого отчёта Quick Resto (если он
+        вообще её отдаёт), либо это ручной ввод при закрытии смены — см.
+        обсуждение с Никитой.
+      */}
 
       <div className="eyebrow">Операционка</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>

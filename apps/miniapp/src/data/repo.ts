@@ -1178,45 +1178,76 @@ export function resolveServiceCall(id: string) {
 }
 
 /**
- * Финансовая сводка для "Сводка" у руководителя — раньше там были только
- * операционные плашки (вызовы/проблемы/задачи), выручка нигде не
- * показывалась (см. запрос Никиты 11.11.2026: "может быть финансовые
- * показатели сюда добавить и динамику?"). Берём то, что уже синхронизирует
- * бот: shift_payroll.revenue — общая выручка заведения за бизнес-день,
- * одна и та же у всех ролей в этот день, поэтому дедуплицируем по дате.
- * "За 30 дней" и "за предыдущие 30 дней" — скользящее окно от сегодня, а
- * не календарный месяц: так сравнение честное даже в начале месяца, когда
- * текущий календарный месяц ещё неполный.
+ * Финансовая сводка для "Сводка" у руководителя, за ОДИН календарный месяц
+ * с разбивкой расходов по статьям — раньше было скользящее окно "30 дней"
+ * без деления на месяцы и без разбивки (см. запрос Никиты 11.11.2026:
+ * "может быть финансовые показатели сюда добавить и динамику?"), но после
+ * того, как Никита прислал свой ОДДС (который ведётся помесячно) и попросил
+ * переключатель по месяцам + статьи расходов на этом же экране (см. запрос
+ * 12.11.2026), скользящее окно уже не подходит — переключили на календарный
+ * месяц. Выручка — то, что уже синхронизирует бот: shift_payroll.revenue,
+ * общая выручка заведения за бизнес-день, одна и та же у всех ролей в этот
+ * день, поэтому дедуплицируем по дате.
  */
-export interface RevenueTrend {
-  last30: number;
-  prev30: number;
-  changePercent: number | null; // null — нет данных за предыдущие 30 дней для сравнения
-  lastRecordedDay: { date: string; revenue: number } | null;
+export interface MonthFinancials {
+  monthKey: string; // "YYYY-MM"
+  revenue: number;
+  prevMonthRevenue: number;
+  changePercent: number | null; // null — нет данных за предыдущий месяц для сравнения
+  expenses: number;
+  net: number; // revenue - expenses
+  expensesByCategory: { category: string; amount: number }[]; // по убыванию суммы
 }
 
-export function computeRevenueTrend(referenceDate: Date = new Date()): RevenueTrend {
+export function currentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function shiftMonthKey(monthKey: string, delta: number): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * Месяцы, за которые есть хоть какие-то данные (выручка или расходы) — для
+ * переключателя на "Сводке", плюс всегда текущий месяц (даже без данных,
+ * чтобы было куда вернуться стрелкой "вперёд"). По убыванию (новые сверху).
+ */
+export function listAvailableMonths(): string[] {
+  const keys = new Set<string>([currentMonthKey()]);
+  for (const e of shiftPayrollStore.get()) keys.add(e.date.slice(0, 7));
+  for (const e of expensesStore.get()) keys.add(e.date.slice(0, 7));
+  return [...keys].sort((a, b) => b.localeCompare(a));
+}
+
+export function computeMonthFinancials(monthKey: string): MonthFinancials {
   const byDate = new Map<string, number>();
   for (const e of shiftPayrollStore.get()) {
     if (!byDate.has(e.date)) byDate.set(e.date, e.revenue);
   }
-  const dayMs = 86400000;
-  const refMs = new Date(`${referenceDate.toISOString().slice(0, 10)}T12:00:00`).getTime();
 
-  let last30 = 0;
-  let prev30 = 0;
-  for (const [date, revenue] of byDate) {
-    const diffDays = Math.floor((refMs - new Date(`${date}T12:00:00`).getTime()) / dayMs);
-    if (diffDays >= 0 && diffDays < 30) last30 += revenue;
-    else if (diffDays >= 30 && diffDays < 60) prev30 += revenue;
+  let revenue = 0;
+  for (const [date, rev] of byDate) if (date.startsWith(monthKey)) revenue += rev;
+
+  const prevMonthKey = shiftMonthKey(monthKey, -1);
+  let prevMonthRevenue = 0;
+  for (const [date, rev] of byDate) if (date.startsWith(prevMonthKey)) prevMonthRevenue += rev;
+
+  const changePercent = prevMonthRevenue > 0 ? Math.round(((revenue - prevMonthRevenue) / prevMonthRevenue) * 100) : null;
+
+  const byCategory = new Map<string, number>();
+  for (const e of listActiveExpenses()) {
+    if (!e.date.startsWith(monthKey)) continue;
+    byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amount);
   }
+  const expensesByCategory = [...byCategory.entries()]
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount);
+  const expenses = expensesByCategory.reduce((sum, c) => sum + c.amount, 0);
 
-  const changePercent = prev30 > 0 ? Math.round(((last30 - prev30) / prev30) * 100) : null;
-  const dates = [...byDate.keys()].sort();
-  const lastDate = dates[dates.length - 1];
-  const lastRecordedDay = lastDate ? { date: lastDate, revenue: byDate.get(lastDate)! } : null;
-
-  return { last30, prev30, changePercent, lastRecordedDay };
+  return { monthKey, revenue, prevMonthRevenue, changePercent, expenses, net: revenue - expenses, expensesByCategory };
 }
 
 export function averageReactionMinutes(): number | null {
@@ -2094,18 +2125,6 @@ export function deleteExpense(id: string, reason: string) {
     .then(({ error }) => error && logSyncError("deleteExpense", error));
 }
 
-/**
- * Сумма расходов за последние 30 дней от referenceDate (включительно) —
- * та же логика окна, что computeRevenueTrend ниже, чтобы цифры на "Сводка"
- * сравнивались за одинаковый период.
- */
-export function computeExpensesLast30(referenceDate: Date = new Date()): number {
-  const end = referenceDate.toISOString().slice(0, 10);
-  const start = new Date(referenceDate.getTime() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  return listActiveExpenses()
-    .filter((e) => e.date >= start && e.date <= end)
-    .reduce((sum, e) => sum + e.amount, 0);
-}
 
 export interface PayrollSummary {
   earned: number; // сумма ЗП по сменам + премии − штрафы
