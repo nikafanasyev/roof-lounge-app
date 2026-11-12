@@ -310,15 +310,16 @@ async function main() {
   // приложении сам подхватывает это через Realtime и показывает ссылку (с
   // кнопкой "Скопировать") прямо под формой приглашения — см. обсуждение с
   // Никитой 09.11.2026.
-  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && env.STAFF_CHAT_ID) {
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
     watchStaffInvites(async (invite) => {
       try {
-        const link = await bot.api.createChatInviteLink(env.STAFF_CHAT_ID, {
-          name: invite.fullName.slice(0, 32),
-          member_limit: 1,
-        });
+        // Без группового чата (решение Никиты 12.11.2026): приглашение — это
+        // ссылка на самого бота, сотрудник открывает её, жмёт /start и
+        // попадает в приложение. Добавлять в рабочую группу — вручную.
+        const me = await bot.api.getMe();
+        const link = { invite_link: `https://t.me/${me.username}?start=staff` };
         await invite.markSent(link.invite_link);
-        await notifyManagers(`Ссылка-приглашение для ${invite.fullName} (одноразовая):\n${link.invite_link}`);
+        await notifyManagers(`Ссылка для ${invite.fullName} — перешлите сотруднику, он откроет бота и нажмёт Start:\n${link.invite_link}`);
       } catch (err) {
         console.error("Quick Resto: не удалось создать инвайт-ссылку:", err);
         await invite.markFailed(String(err));
