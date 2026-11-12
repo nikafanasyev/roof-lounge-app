@@ -2796,3 +2796,27 @@ export function splitKnowledgeSections(body: string): KnowledgeSection[] {
   if (current) sections.push({ title: current.title, body: current.lines.join("\n") });
   return sections;
 }
+
+
+/** Запрос Excel-отчёта в личку Telegram (обрабатывает бот, см. apps/bot/src/reports.ts). */
+export async function requestReportToTelegram(kind: "salary" | "expenses", param: string): Promise<string | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const tgId = getTelegramUser()?.id;
+  if (!tgId) return null;
+  const { data, error } = await supabase
+    .from("report_requests")
+    .insert({ kind, param, requested_by_telegram_id: tgId })
+    .select("id")
+    .single();
+  if (error) {
+    logSyncError("requestReportToTelegram", error);
+    return null;
+  }
+  return data.id as string;
+}
+
+export async function getReportRequestStatus(id: string): Promise<{ status: "pending" | "done" | "failed"; result: string | null } | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data } = await supabase.from("report_requests").select("status, result").eq("id", id).maybeSingle();
+  return (data as { status: "pending" | "done" | "failed"; result: string | null } | null) ?? null;
+}
