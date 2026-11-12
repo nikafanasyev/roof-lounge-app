@@ -2077,18 +2077,56 @@ export function updateStaffProfileById(
   );
 }
 
-/** Фото сотрудника — постоянное, публичный бакет staff-photos (см. 0012_salary_screen.sql), не путать с эфемерными фото смен. */
-export function uploadStaffPhoto(staffId: string, blob: Blob): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) return Promise.resolve();
-  const path = `${staffId}/${Date.now()}.jpg`;
-  return supabase.storage
-    .from("staff-photos")
-    .upload(path, blob, { contentType: "image/jpeg", upsert: true })
-    .then(({ error }) => {
-      if (error) return logSyncError("uploadStaffPhoto", error);
-      const { data } = supabase!.storage.from("staff-photos").getPublicUrl(path);
-      updateStaffProfileById(staffId, { photoUrl: data.publicUrl });
+/** Уменьшает фото до 800px по длинной стороне и сжимает в JPEG — сырые снимки с телефона по 5–10 МБ не загружались. */
+async function resizeImageToJpeg(file: Blob, maxSide = 800): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Не удалось прочитать изображение"));
+      el.src = url;
     });
+    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Не удалось сжать фото"))), "image/jpeg", 0.85));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/**
+ * Фото сотрудника — постоянное, публичный бакет staff-photos (см.
+ * 0012_salary_screen.sql), не путать с эфемерными фото смен. Возвращает
+ * текст ошибки (или null при успехе), чтобы экран мог его показать.
+ */
+export async function uploadStaffPhoto(staffId: string, file: Blob): Promise<string | null> {
+  try {
+    const blob = await resizeImageToJpeg(file);
+    if (!isSupabaseConfigured || !supabase) {
+      const local = URL.createObjectURL(blob);
+      await updateStaffProfileById(staffId, { photoUrl: local });
+      if (staffId === getStaffProfile().id) staffProfileStore.update((p) => ({ ...p, photoUrl: local }));
+      return null;
+    }
+    const path = `${staffId}/${Date.now()}.jpg`;
+    const { error } = await supabase.storage.from("staff-photos").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+    if (error) {
+      logSyncError("uploadStaffPhoto", error);
+      return `Не удалось загрузить фото: ${error.message}`;
+    }
+    const { data } = supabase.storage.from("staff-photos").getPublicUrl(path);
+    const res = await updateStaffProfileById(staffId, { photoUrl: data.publicUrl });
+    if (res && res.error) return "Фото загружено, но не сохранилось в карточке — попробуйте ещё раз";
+    if (staffId === getStaffProfile().id) staffProfileStore.update((p) => ({ ...p, photoUrl: data.publicUrl }));
+    return null;
+  } catch (err) {
+    logSyncError("uploadStaffPhoto", err);
+    return "Не удалось обработать фото — попробуйте другое";
+  }
 }
 
 /**

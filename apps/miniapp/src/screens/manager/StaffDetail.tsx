@@ -438,6 +438,7 @@ export default function StaffDetail() {
   const { staffId = "" } = useParams();
   const profile = getStaffProfileById(staffId);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [photoMsg, setPhotoMsg] = useState("");
 
   if (!profile) {
     return (
@@ -450,10 +451,13 @@ export default function StaffDetail() {
     );
   }
 
-  function handlePhotoPick(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handlePhotoPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
-    uploadStaffPhoto(staffId, file);
+    setPhotoMsg("Загружаем фото…");
+    const err = await uploadStaffPhoto(staffId, file);
+    setPhotoMsg(err ?? "");
   }
 
   const summary = computePayrollSummaryForStaff(staffId);
@@ -470,6 +474,11 @@ export default function StaffDetail() {
         ← Сотрудники
       </Link>
 
+      {photoMsg && (
+        <div className="muted" style={{ fontSize: 13, marginTop: 8, color: photoMsg.startsWith("Загружаем") ? undefined : "var(--danger, #e5484d)" }}>
+          {photoMsg}
+        </div>
+      )}
       <div className="card" style={{ display: "flex", gap: 14, alignItems: "center", marginTop: 12 }}>
         <div className="avatar-upload" onClick={() => fileInputRef.current?.click()}>
           {profile.photoUrl ? <img src={profile.photoUrl} alt="" /> : "📷"}

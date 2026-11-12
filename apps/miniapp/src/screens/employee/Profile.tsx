@@ -1,7 +1,7 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, updateStaffProfileById, yearsOfService } from "@/data/repo";
+import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, updateStaffProfileById, uploadStaffPhoto, yearsOfService } from "@/data/repo";
 import { getTelegramUser } from "@/lib/telegram";
 import { ROLE_LABELS } from "@/lib/roles";
 import { NameEditor } from "@/components/NameEditor";
@@ -25,12 +25,17 @@ export default function Profile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const telegramUser = getTelegramUser();
 
-  function handlePhotoPick(e: React.ChangeEvent<HTMLInputElement>) {
+  const [photoError, setPhotoError] = useState("");
+  const [photoBusy, setPhotoBusy] = useState(false);
+  async function handlePhotoPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => updateStaffProfile({ photoUrl: String(reader.result) });
-    reader.readAsDataURL(file);
+    setPhotoBusy(true);
+    setPhotoError("");
+    const err = await uploadStaffPhoto(profile.id, file);
+    setPhotoBusy(false);
+    if (err) setPhotoError(err);
   }
 
   const expirySoon =
@@ -43,6 +48,11 @@ export default function Profile() {
       </Link>
       <h1>Профиль</h1>
 
+      {(photoBusy || photoError) && (
+        <div className="muted" style={{ fontSize: 13, marginBottom: 8, color: photoError ? "var(--danger, #e5484d)" : undefined }}>
+          {photoBusy ? "Загружаем фото…" : photoError}
+        </div>
+      )}
       <div className="card" style={{ display: "flex", gap: 14, alignItems: "center" }}>
         <div className="avatar-upload" onClick={() => fileInputRef.current?.click()}>
           {profile.photoUrl ? <img src={profile.photoUrl} alt="" /> : "📷"}
