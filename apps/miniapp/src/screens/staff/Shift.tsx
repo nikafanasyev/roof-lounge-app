@@ -76,13 +76,13 @@ export default function Shift() {
   const openReady = isChecklistComplete(roleShift.openChecklist) && !!openPhoto;
   const closeReady = isChecklistComplete(roleShift.closeChecklist) && !!closePhoto;
 
-  // Статус смены приходит из Quick Resto (ПИН на терминале) и становится
-  // "открыта" сразу, как только кто-то из сотрудников вошёл — то есть до
-  // того, как каждый успевает отметить свой чек-лист открытия в приложении.
-  // Поэтому какой чек-лист показывать решаем не по одному статусу, а ещё и
-  // по тому, отмечен ли уже чек-лист открытия выбранной роли.
-  const openChecklistDone = isChecklistComplete(roleShift.openChecklist);
-  const showOpenChecklist = shift.status === "closed" || !openChecklistDone;
+  // У каждой зоны (бар/кальяны) своё открытие и закрытие, по отметке самой
+  // зоны, а не по общему статусу смены: смену могут открыть двое сотрудников,
+  // каждый — свою зону (фидбек Никиты 12.11.2026).
+  const roleOpened = !!roleShift.openedAt;
+  const roleClosed = !!roleShift.closedAt;
+  const showOpenChecklist = !roleOpened;
+  const showCloseChecklist = roleOpened && !roleClosed;
 
   return (
     <div className="screen">
@@ -101,6 +101,22 @@ export default function Shift() {
             {shift.openedBy ? ` · ${shift.openedBy}` : ""}
           </div>
         )}
+      </div>
+
+      <div className="card">
+        {(Object.keys(ROLE_LABELS) as StaffRole[]).map((r) => {
+          const rs = r === "bar" ? shift.bar : shift.hookah;
+          const state = rs.closedAt ? "закрыта" : rs.openedAt ? "открыта" : "не открыта";
+          return (
+            <div key={r} className="card-row" style={{ marginTop: r === "bar" ? 0 : 8 }}>
+              <span>{ROLE_LABELS[r]}</span>
+              <span className="muted" style={{ fontSize: 13 }}>
+                {state}
+                {rs.openedBy && !rs.closedAt ? ` · ${rs.openedBy}` : ""}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       <div className="eyebrow" style={{ marginTop: 4 }}>
@@ -147,7 +163,7 @@ export default function Shift() {
         </>
       )}
 
-      {shift.status === "open" && !showOpenChecklist && (
+      {showCloseChecklist && (
         <>
           <h2>Чек-лист закрытия — {ROLE_LABELS[role]}</h2>
           <ChecklistGroups items={roleShift.closeChecklist} onToggle={(id) => toggleCloseChecklistItem(role, id)} />
@@ -183,6 +199,12 @@ export default function Shift() {
             {closeReady ? "Отправить" : !isChecklistComplete(roleShift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
           </button>
         </>
+      )}
+
+      {roleOpened && roleClosed && (
+        <div className="card muted" style={{ marginTop: 12 }}>
+          Зона «{ROLE_LABELS[role]}» закрыта{roleShift.closedBy ? ` · ${roleShift.closedBy}` : ""}.
+        </div>
       )}
 
       {shift.handoverNote && shift.status === "closed" && (
