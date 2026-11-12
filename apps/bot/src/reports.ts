@@ -16,7 +16,7 @@ export function payrollPeriodForDate(dateIso: string) {
 }
 
 const fmtDate = (iso: string) => iso.split("-").reverse().join(".");
-const ROLE_LABELS: Record<string, string> = { bar: "Бар", hookah: "Кальяны" };
+const ROLE_LABELS: Record<string, string> = { bar: "Бар", hookah: "Кальяны", kitchen: "Кухня", cleaning: "Клининг" };
 
 type SalaryModel =
   | { type: "fixed"; value: number }

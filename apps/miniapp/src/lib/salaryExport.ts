@@ -8,7 +8,8 @@ export interface SalaryExportStaffInput {
   fixedAccruals: FixedAccrual[];
 }
 
-const ROLE_LABELS: Record<string, string> = { bar: "Бар", hookah: "Кальяны" };
+import { ROLE_LABELS as WORK_ROLE_LABELS } from "@/lib/roles";
+const ROLE_LABELS: Record<string, string> = WORK_ROLE_LABELS;
 
 function salaryFormula(model: SalaryModel, revenueCellRef: string): string {
   if (model.type === "fixed") return "";

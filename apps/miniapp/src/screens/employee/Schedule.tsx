@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { listMySchedule, scheduleStore } from "@/data/repo";
-import type { ScheduleEntry, StaffRole } from "@/types";
+import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/lib/roles";
+import type { ScheduleEntry, WorkRole } from "@/types";
 
-const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
 function dateKey(d: Date): string {
   return d.toISOString().slice(0, 10);

@@ -141,6 +141,11 @@ export type ShiftStatus = "closed" | "open";
 // claude/quickresto-shift-integration.md и роли ниже.
 export type StaffRole = "bar" | "hookah";
 
+// Рабочая роль в графике и начислениях — шире StaffRole (чек-листы смены есть
+// пока только у бара и кальянов): кухня и клининг добавлены 12.11.2026,
+// чек-листы им заполним позже.
+export type WorkRole = "bar" | "hookah" | "kitchen" | "cleaning";
+
 export interface RoleChecklists {
   openChecklist: ChecklistItem[];
   closeChecklist: ChecklistItem[];
@@ -226,7 +231,8 @@ export interface StaffProfile {
   medicalBookExpiry?: string; // ISO-дата, до какого числа действует медкнижка
   hiredAt: string; // ISO-дата трудоустройства, отсюда считается выслуга лет
   salaryModel: SalaryModel;
-  role?: StaffRole; // основная зона ответственности на смене (бар/кальяны), для карточки в разделе "Сотрудники" у руководителя
+  role?: WorkRole; // основная зона ответственности на смене (бар/кальяны/кухня/клининг), для карточки в разделе "Сотрудники" у руководителя
+  position?: string; // должность (администратор, управляющий и т.п.) — свободный текст с подсказками, отдельно от роли на смене
   telegramId?: number; // для вывода из рабочего чата при увольнении (см. apps/bot/src/notify.ts watchStaffArchived)
   archived?: boolean; // "уволен" — сотрудник скрыт из списков и выбора в графике, но вся история ЗП сохраняется (см. 0012_salary_screen.sql)
 }
@@ -264,7 +270,7 @@ export interface ShiftPayrollEntry {
   date: string; // ISO-дата смены
   revenue: number; // выручка за смену, ₽
   salary: number; // начислено сотруднику за смену, ₽
-  role?: StaffRole; // за какую зону отвечал в эту смену (для отображения в разделе "Сотрудники")
+  role?: WorkRole; // за какую зону отвечал в эту смену (для отображения в разделе "Сотрудники")
 }
 
 // Выплаты происходят не по сменам, а за период (например раз в две недели) —
@@ -336,7 +342,7 @@ export interface Income {
 export interface ScheduleEntry {
   id: string;
   staffId: string;
-  role: StaffRole;
+  role: WorkRole;
   date: string; // ISO-дата (день, на который выставлена смена)
   startTime: string; // "18:00"
   endTime: string; // "02:00"
@@ -348,7 +354,7 @@ export interface ScheduleEntry {
 export interface PayrollIssue {
   id: string;
   date: string; // ISO-дата
-  role: StaffRole;
+  role: WorkRole;
   expectedStaffId: string; // кто был по графику
   actualStaffIds: string[]; // кто реально работал по Quick Resto в этот день (может быть пусто)
   revenue: number; // выручка по этой роли за день, уже посчитана и ждёт начисления

@@ -489,7 +489,7 @@ async function main() {
     scheduleDailyPayrollJob(
       async (issue) => {
         // onIssue срабатывает только при reconcile: true — сейчас не используется.
-        const roleLabel = issue.role === "hookah" ? "Кальяны" : "Бар";
+        const roleLabel = ({ hookah: "Кальяны", bar: "Бар", kitchen: "Кухня", cleaning: "Клининг" } as Record<string, string>)[issue.role] ?? issue.role;
         const dateLabel = new Date(`${issue.date}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
         const actual = issue.actualStaffNames.length ? issue.actualStaffNames.join(", ") : "никто (по данным Quick Resto)";
         const text =

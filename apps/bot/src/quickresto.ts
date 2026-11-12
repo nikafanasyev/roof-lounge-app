@@ -637,6 +637,13 @@ type SalaryModel =
 // формула "1000₽+15% от кальянной выручки" (только для роли "кальяны", для
 // бара формулы не было вообще) — заменена этой единой формулой. Используется,
 // только если у сотрудника ещё не проставлена своя salary_model в Supabase.
+// Рабочие роли в графике (кухня и клининг добавлены 12.11.2026).
+type WorkRole = "bar" | "hookah" | "kitchen" | "cleaning";
+// Кухня и клининг не заходят на терминал Quick Resto по ПИН — сверку графика с
+// терминалом для них пропускаем (начисляем по графику).
+const TERMINAL_ROLES: WorkRole[] = ["bar", "hookah"];
+const ROLE_NAMES: Record<WorkRole, string> = { bar: "бар", hookah: "кальяны", kitchen: "кухня", cleaning: "клининг" };
+
 const DEFAULT_SALARY_MODEL: SalaryModel = { type: "percent", value: 8.5 };
 
 function computeSalary(model: SalaryModel, revenue: number): number {
@@ -658,7 +665,7 @@ async function writeShiftPayrollForRole(
   supabase: SupabaseClient,
   shiftRowId: string | null,
   staffId: string,
-  role: "bar" | "hookah",
+  role: WorkRole,
   revenue: number,
   isoDate: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -679,7 +686,7 @@ async function writeShiftPayrollForRole(
     return { ok: false, error: error.message };
   }
   console.log(
-    `Quick Resto: начислено ${role === "hookah" ? "кальяны" : "бар/кухня"} — ${salary} ₽ (выручка ${Math.round(revenue)} ₽) за ${isoDate}, staff=${staffId}`,
+    `Quick Resto: начислено ${ROLE_NAMES[role]} — ${salary} ₽ (выручка ${Math.round(revenue)} ₽) за ${isoDate}, staff=${staffId}`,
   );
   return { ok: true };
 }
@@ -694,7 +701,7 @@ async function writeShiftPayrollForRole(
 
 export interface PayrollIssueEvent {
   date: string; // ISO-дата (YYYY-MM-DD)
-  role: "bar" | "hookah";
+  role: WorkRole;
   expectedStaffName: string;
   actualStaffNames: string[];
 }
@@ -708,7 +715,7 @@ async function writePayrollIssue(
   supabase: SupabaseClient,
   onIssue: (event: PayrollIssueEvent) => void | Promise<void>,
   dateIso: string,
-  role: "bar" | "hookah",
+  role: WorkRole,
   expectedStaffId: string,
   actualStaffIds: string[],
   revenue: number,
@@ -720,7 +727,7 @@ async function writePayrollIssue(
     console.error(`Quick Resto: не удалось записать расхождение графика (${dateIso}, ${role}):`, error.message);
     return;
   }
-  console.log(`Quick Resto: график не совпал с Quick Resto — ${dateIso}, роль ${role === "hookah" ? "кальяны" : "бар"}. Начисление отложено.`);
+  console.log(`Quick Resto: график не совпал с Quick Resto — ${dateIso}, роль ${ROLE_NAMES[role]}. Начисление отложено.`);
 
   const expectedStaffName = await fetchStaffName(supabase, expectedStaffId);
   const actualStaffNames = await Promise.all(actualStaffIds.map((id) => fetchStaffName(supabase, id)));
@@ -741,7 +748,7 @@ async function writePayrollIssue(
  * у отложенного расхождения относится к конкретному человеку, а не ко
  * всем, кто когда-либо стоял на этой роли в этот день.
  */
-async function alreadyHandled(supabase: SupabaseClient, dateIso: string, role: "bar" | "hookah", staffId: string): Promise<boolean> {
+async function alreadyHandled(supabase: SupabaseClient, dateIso: string, role: WorkRole, staffId: string): Promise<boolean> {
   const [payroll, issue] = await Promise.all([
     supabase.from("shift_payroll").select("id").eq("date", dateIso).eq("role", role).eq("staff_id", staffId).limit(1),
     supabase.from("payroll_issues").select("id").eq("date", dateIso).eq("role", role).eq("expected_staff_id", staffId).limit(1),
@@ -848,8 +855,8 @@ async function processScheduledDate(
     return { status: "no_schedule" };
   }
 
-  const pendingRoles: { staff_id: string; role: "bar" | "hookah" }[] = [];
-  for (const row of scheduleRows as { staff_id: string; role: "bar" | "hookah" }[]) {
+  const pendingRoles: { staff_id: string; role: WorkRole }[] = [];
+  for (const row of scheduleRows as { staff_id: string; role: WorkRole }[]) {
     if (!(await alreadyHandled(supabase, dateIso, row.role, row.staff_id))) pendingRoles.push(row);
   }
   if (!pendingRoles.length) return { status: "already_handled" };
@@ -896,7 +903,7 @@ async function processScheduledDate(
   const writeErrors: string[] = [];
   for (const { staff_id, role } of pendingRoles) {
     const revenue = split.total;
-    if (workedStaffIds.has(staff_id)) {
+    if (workedStaffIds.has(staff_id) || !TERMINAL_ROLES.includes(role)) {
       const result = await writeShiftPayrollForRole(supabase, null, staff_id, role, revenue, dateIso);
       if (result.ok) accruedRoles.push(role);
       else writeErrors.push(`${role}: ${result.error}`);

@@ -47,6 +47,7 @@ import type {
   StaffInvite,
   StaffProfile,
   StaffRole,
+  WorkRole,
   Task,
 } from "@/types";
 import {
@@ -269,7 +270,7 @@ async function ensureCurrentStaff() {
 
   const { data: row, error: selectError } = await supabase!
     .from("staff")
-    .select("id, name, work_role, salary_model, photo_url, phone, email, medical_book_number, medical_book_expiry, hired_at")
+    .select("id, name, work_role, position, salary_model, photo_url, phone, email, medical_book_number, medical_book_expiry, hired_at")
     .eq("telegram_id", telegramId)
     .single();
   if (selectError || !row) return logSyncError("ensureCurrentStaff:select", selectError);
@@ -289,7 +290,8 @@ async function ensureCurrentStaff() {
     // (руководитель через Supabase Studio), иначе дефолт 8,5% от общей
     // выручки (см. DEFAULT_SALARY_MODEL).
     salaryModel: (row.salary_model as SalaryModel | null) ?? DEFAULT_SALARY_MODEL,
-    role: (row.work_role as StaffRole | null) ?? prev.role,
+    role: (row.work_role as WorkRole | null) ?? prev.role,
+    position: (row.position as string | null) ?? prev.position,
   }));
 }
 
@@ -534,7 +536,8 @@ async function loadStaffDirectory() {
       // общей выручки, см. DEFAULT_SALARY_MODEL) — фильтр убран, все, кто
       // когда-то вошёл по ПИН/Telegram, считаются сотрудниками.
       salaryModel: (r.salary_model as SalaryModel | null) ?? DEFAULT_SALARY_MODEL,
-      role: (r.work_role as StaffRole | null) ?? undefined,
+      role: (r.work_role as WorkRole | null) ?? undefined,
+      position: (r.position as string | null) ?? undefined,
       telegramId: typeof r.telegram_id === "number" ? r.telegram_id : undefined,
       archived: Boolean(r.archived),
     })),
@@ -597,7 +600,7 @@ async function loadShiftPayroll() {
       date: r.date,
       revenue: Number(r.revenue),
       salary: Number(r.salary),
-      role: (r.role as StaffRole | null) ?? undefined,
+      role: (r.role as WorkRole | null) ?? undefined,
     })),
   );
 }
@@ -644,7 +647,7 @@ async function loadSchedule() {
     (data ?? []).map((r) => ({
       id: r.id,
       staffId: r.staff_id,
-      role: r.role as StaffRole,
+      role: r.role as WorkRole,
       date: r.date,
       startTime: r.start_time,
       endTime: r.end_time,
@@ -659,7 +662,7 @@ async function loadPayrollIssues() {
     (data ?? []).map((r) => ({
       id: r.id,
       date: r.date,
-      role: r.role as StaffRole,
+      role: r.role as WorkRole,
       expectedStaffId: r.expected_staff_id,
       actualStaffIds: r.actual_staff_ids ?? [],
       revenue: Number(r.revenue),
@@ -1858,7 +1861,7 @@ export function getStaffProfileById(staffId: string): StaffProfile | undefined {
  */
 export function updateStaffProfileById(
   staffId: string,
-  patch: Partial<Pick<StaffProfile, "name" | "phone" | "email" | "role" | "salaryModel" | "photoUrl" | "telegramId">>,
+  patch: Partial<Pick<StaffProfile, "name" | "phone" | "email" | "role" | "position" | "salaryModel" | "photoUrl" | "telegramId">>,
 ): Promise<{ error?: "duplicate_telegram_id" | "unknown" } | void> {
   const { telegramId, ...rest } = patch;
   if (Object.keys(rest).length > 0) {
@@ -1870,6 +1873,7 @@ export function updateStaffProfileById(
   if (rest.phone !== undefined) row.phone = rest.phone;
   if (rest.email !== undefined) row.email = rest.email;
   if (rest.role !== undefined) row.work_role = rest.role;
+  if (rest.position !== undefined) row.position = rest.position || null;
   if (rest.salaryModel !== undefined) row.salary_model = rest.salaryModel;
   if (rest.photoUrl !== undefined) row.photo_url = rest.photoUrl;
   if (telegramId !== undefined) row.telegram_id = telegramId;
@@ -2667,7 +2671,7 @@ export function listMySchedule(): ScheduleEntry[] {
 }
 
 /** Назначить сотрудника на роль в конкретный день (руководитель). Одна роль в день — один сотрудник, повторная запись переставляет назначение. */
-export function setScheduleEntry(staffId: string, role: StaffRole, date: string, startTime = "18:00", endTime = "02:00") {
+export function setScheduleEntry(staffId: string, role: WorkRole, date: string, startTime = "18:00", endTime = "02:00") {
   const dateKey = date.slice(0, 10);
   const entry: ScheduleEntry = { id: uid(), staffId, role, date, startTime, endTime };
   scheduleStore.update((list) => [...list.filter((e) => !(e.date.slice(0, 10) === dateKey && e.role === role)), entry]);

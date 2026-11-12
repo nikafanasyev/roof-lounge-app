@@ -25,9 +25,9 @@ import {
   yearsOfService,
 } from "@/data/repo";
 import PayrollPeriods from "@/components/PayrollPeriods";
-import type { FixedAccrualCadence, SalaryModel, SalaryModelType, StaffRole } from "@/types";
+import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/lib/roles";
+import type { FixedAccrualCadence, SalaryModel, SalaryModelType, WorkRole } from "@/types";
 
-const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 const SALARY_TYPE_LABELS: Record<SalaryModelType, string> = {
   fixed: "Фиксированная ставка за смену",
   percent: "Процент от выручки",
@@ -57,7 +57,7 @@ function formatExpiry(iso?: string): string {
  * reassignShiftPayroll в data/repo.ts). Выручка переносится как есть,
  * сумма пересчитывается по salary_model выбранного сотрудника.
  */
-function ShiftRow({ id, staffId, date, role, revenue, salary }: { id: string; staffId: string; date: string; role?: StaffRole; revenue: number; salary: number }) {
+function ShiftRow({ id, staffId, date, role, revenue, salary }: { id: string; staffId: string; date: string; role?: WorkRole; revenue: number; salary: number }) {
   const [open, setOpen] = useState(false);
   const staff = listStaffDirectory();
   const others = staff.filter((s) => s.id !== staffId);
@@ -117,7 +117,8 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
   if (!profile) return null;
   const currentTelegramId = profile.telegramId;
   const [editing, setEditing] = useState(false);
-  const [role, setRole] = useState<StaffRole | "">(profile.role ?? "");
+  const [role, setRole] = useState<WorkRole | "">(profile.role ?? "");
+  const [position, setPosition] = useState(profile.position ?? "");
   const [phone, setPhone] = useState(profile.phone ?? "");
   const [email, setEmail] = useState(profile.email ?? "");
   const [telegramId, setTelegramId] = useState(currentTelegramId != null ? String(currentTelegramId) : "");
@@ -141,6 +142,7 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
 
     const result = await updateStaffProfileById(staffId, {
       role: role || undefined,
+      position: position.trim(),
       phone: phone.trim() || undefined,
       email: email.trim() || undefined,
       salaryModel,
@@ -170,6 +172,10 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
           <span>{profile.role ? ROLE_LABELS[profile.role] : "не задана"}</span>
         </div>
         <div className="card-row" style={{ marginTop: 8 }}>
+          <span className="muted">Должность</span>
+          <span>{profile.position || "не указана"}</span>
+        </div>
+        <div className="card-row" style={{ marginTop: 8 }}>
           <span className="muted">Телефон</span>
           <span>{profile.phone || "не указан"}</span>
         </div>
@@ -195,11 +201,24 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
   return (
     <div className="card">
       <div className="eyebrow">Роль на смене</div>
-      <select value={role} onChange={(e) => setRole(e.target.value as StaffRole | "")} style={{ marginBottom: 10 }}>
+      <select value={role} onChange={(e) => setRole(e.target.value as WorkRole | "")} style={{ marginBottom: 10 }}>
         <option value="">не задана</option>
-        <option value="hookah">Кальяны</option>
-        <option value="bar">Бар</option>
+        {WORK_ROLES.map((r) => (
+          <option key={r} value={r}>
+            {ROLE_LABELS[r]}
+          </option>
+        ))}
       </select>
+
+      <div className="eyebrow">Должность</div>
+      <input type="text" value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Например: администратор" style={{ marginBottom: 8 }} />
+      <div className="chip-row" style={{ marginTop: 0, marginBottom: 10 }}>
+        {POSITION_SUGGESTIONS.map((p) => (
+          <button key={p} type="button" className={`chip${position === p ? " accent" : ""}`} style={{ cursor: "pointer" }} onClick={() => setPosition(p)}>
+            {p}
+          </button>
+        ))}
+      </div>
 
       <div className="eyebrow">Телефон</div>
       <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} style={{ marginBottom: 10 }} />

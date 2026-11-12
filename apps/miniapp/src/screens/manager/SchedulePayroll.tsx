@@ -15,11 +15,11 @@ import {
   setScheduleEntry,
   staffDirectoryStore,
 } from "@/data/repo";
-import type { ScheduleEntry, StaffProfile, StaffRole } from "@/types";
+import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/lib/roles";
+import type { ScheduleEntry, StaffProfile, WorkRole } from "@/types";
 
-const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 // Порядок показа роли в дне — кальяны первой, это основная зона заведения.
-const ROLES: StaffRole[] = ["hookah", "bar"];
+const ROLES: WorkRole[] = WORK_ROLES;
 
 function money(n: number): string {
   return Math.round(n).toLocaleString("ru-RU") + " ₽";
@@ -55,7 +55,7 @@ function buildMonthGrid(year: number, month: number): (Date | null)[] {
   return cells;
 }
 
-type DayEntries = Partial<Record<StaffRole, ScheduleEntry>>;
+type DayEntries = Partial<Record<WorkRole, ScheduleEntry>>;
 
 /**
  * Назначение на один день: по роли — либо уже назначенный сотрудник (с
@@ -95,10 +95,9 @@ function RecalcButton({ dateIso }: { dateIso: string }) {
 }
 
 function DayPanel({ dateIso, staff, staffById, dayEntries }: { dateIso: string; staff: StaffProfile[]; staffById: Map<string, string>; dayEntries: DayEntries }) {
-  const [picks, setPicks] = useState<Record<StaffRole, string>>({
-    bar: dayEntries.bar?.staffId ?? staff[0]?.id ?? "",
-    hookah: dayEntries.hookah?.staffId ?? staff[0]?.id ?? "",
-  });
+  const [picks, setPicks] = useState<Record<WorkRole, string>>(
+    () => Object.fromEntries(WORK_ROLES.map((r) => [r, dayEntries[r]?.staffId ?? staff[0]?.id ?? ""])) as Record<WorkRole, string>,
+  );
 
   if (!staff.length) {
     return <div className="list-empty">Сначала кто-то из сотрудников должен хотя бы раз войти в мини-апп или на терминал Quick Resto.</div>;
@@ -222,11 +221,11 @@ function ScheduleCalendar() {
                 {date.getDate()}
               </div>
               <div style={{ display: "flex", gap: 2, justifyContent: "center", marginTop: 4, height: 6 }}>
-                {dayEntries?.hookah && (
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: isSelected ? "var(--accent-ink)" : "var(--accent)" }} />
-                )}
-                {dayEntries?.bar && (
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: isSelected ? "var(--accent-ink)" : "var(--good)" }} />
+                {WORK_ROLES.map(
+                  (r) =>
+                    dayEntries?.[r] && (
+                      <span key={r} style={{ width: 5, height: 5, borderRadius: "50%", background: isSelected ? "var(--accent-ink)" : ROLE_COLORS[r] }} />
+                    ),
                 )}
               </div>
             </button>
@@ -235,14 +234,12 @@ function ScheduleCalendar() {
       </div>
 
       <div className="chip-row" style={{ marginBottom: 12 }}>
-        <span className="chip">
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", display: "inline-block", marginRight: 4 }} />
-          Кальяны
-        </span>
-        <span className="chip">
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--good)", display: "inline-block", marginRight: 4 }} />
-          Бар
-        </span>
+        {WORK_ROLES.map((r) => (
+          <span key={r} className="chip">
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: ROLE_COLORS[r], display: "inline-block", marginRight: 4 }} />
+            {ROLE_LABELS[r]}
+          </span>
+        ))}
       </div>
 
       <DayPanel key={selected} dateIso={selected} staff={activeStaff} staffById={staffById} dayEntries={byDate.get(selected) ?? {}} />

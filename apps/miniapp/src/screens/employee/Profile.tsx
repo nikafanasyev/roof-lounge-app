@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, updateStaffProfileById, yearsOfService } from "@/data/repo";
 import { getTelegramUser } from "@/lib/telegram";
+import { ROLE_LABELS } from "@/lib/roles";
 import { NameEditor } from "@/components/NameEditor";
 
 function formatTenure(hiredAt: string): string {
@@ -69,6 +70,11 @@ export default function Profile() {
       {/* Телефон приходит из Telegram (шаринг контакта — TODO: подключить
           WebApp.requestContact и сохранение в staff.phone), почту и данные
           медкнижки заполняет руководитель. Сотрудник эти поля не редактирует. */}
+      <div className="eyebrow">Должность и роль на смене</div>
+      <div className="card muted">
+        {[profile.position, profile.role ? ROLE_LABELS[profile.role] : null].filter(Boolean).join(" · ") || "назначает руководитель"}
+      </div>
+
       <div className="eyebrow">Телефон</div>
       <div className="card muted">{profile.phone || telegramUser?.username || "определится из Telegram"}</div>
 
