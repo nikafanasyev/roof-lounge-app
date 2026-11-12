@@ -1504,6 +1504,12 @@ export async function syncCrmCustomers(
 
 const CRM_SYNC_JOB_HOUR_MSK = 9;
 
+/** Ручная синхронизация нал/безнал за любой месяц (команда /cashsplit в index.ts). */
+export function manuallySyncCashSplit(monthKey: string) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  return syncMonthlyCashSplit(supabase, monthKey);
+}
+
 const CASH_SPLIT_SYNC_JOB_HOUR_MSK = 7;
 
 /**

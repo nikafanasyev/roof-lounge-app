@@ -2,7 +2,7 @@ import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
 import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
-import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
+import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -56,6 +56,34 @@ bot.command("revenue", async (ctx) => {
   } catch (err) {
     console.error("Quick Resto: /revenue ошибка:", err);
     await ctx.reply("Не удалось получить выручку из Quick Resto — см. логи бота.");
+  }
+});
+
+// Ручная синхронизация нал/безнал за месяц (ежедневная авто-синхронизация
+// трогает только текущий). Формат: /cashsplit 2026-10 (без аргумента —
+// текущий месяц). Данные попадают в monthly_cash_split и на "Сводку".
+bot.command("cashsplit", async (ctx) => {
+  if (!env.QR_LOGIN || !env.QR_PASSWORD || !env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    await ctx.reply("Интеграция с Quick Resto/Supabase не настроена.");
+    return;
+  }
+  const arg = ctx.match?.toString().trim();
+  const now = new Date();
+  const monthKey = arg || `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthKey)) {
+    await ctx.reply("Формат: /cashsplit ГГГГ-ММ, например /cashsplit 2026-10");
+    return;
+  }
+  try {
+    const { cash, cashless } = await manuallySyncCashSplit(monthKey);
+    await ctx.reply(
+      `Нал/безнал за ${monthKey}:\n` +
+        `Наличные: ${Math.round(cash).toLocaleString("ru-RU")} ₽\n` +
+        `Безналичные: ${Math.round(cashless).toLocaleString("ru-RU")} ₽`,
+    );
+  } catch (err) {
+    console.error("Quick Resto: /cashsplit ошибка:", err);
+    await ctx.reply("Не удалось получить данные из Quick Resto — см. логи бота.");
   }
 });
 
