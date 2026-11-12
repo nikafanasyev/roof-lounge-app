@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import { createStaffInvite, deleteStaffInvite, formatSalaryModel, listActiveStaffDirectory, listStaffDirectory, listStaffInvites, staffDirectoryStore, staffInvitesStore } from "@/data/repo";
-import type { StaffRole } from "@/types";
+import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/lib/roles";
+import type { WorkRole } from "@/types";
 
-const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
 /**
  * Форма приглашения (кнопка "+ Пригласить") — ФИО/телефон/Telegram ID, см.
@@ -184,7 +184,7 @@ export default function StaffList() {
               <div>
                 <div style={{ fontWeight: 600 }}>{s.name}</div>
                 <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                  {s.role ? ROLE_LABELS[s.role] : "Роль не задана"} · {formatSalaryModel(s)}
+                  {s.position ? `${s.position} · ` : ""}{s.role ? ROLE_LABELS[s.role] : "Роль не задана"} · {formatSalaryModel(s)}
                 </div>
               </div>
             </div>

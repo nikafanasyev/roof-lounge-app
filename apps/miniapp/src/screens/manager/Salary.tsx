@@ -17,9 +17,9 @@ import {
 } from "@/data/repo";
 import { exportSalaryWorkbook } from "@/lib/salaryExport";
 import { SendReportButton } from "@/components/SendReportButton";
-import type { StaffRole } from "@/types";
+import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/lib/roles";
+import type { WorkRole } from "@/types";
 
-const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
 function money(n: number): string {
   return Math.round(n).toLocaleString("ru-RU") + " ₽";
