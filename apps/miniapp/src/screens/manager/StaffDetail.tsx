@@ -1,3 +1,4 @@
+import { NameEditor } from "@/components/NameEditor";
 import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
@@ -455,9 +456,9 @@ export default function StaffDetail() {
           {profile.photoUrl ? <img src={profile.photoUrl} alt="" /> : "📷"}
         </div>
         <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoPick} style={{ display: "none" }} />
-        <div>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <div className="eyebrow">{profile.role ? ROLE_LABELS[profile.role] : "Роль не задана"}</div>
-          <div style={{ fontWeight: 700, fontSize: 18 }}>{profile.name}</div>
+          <NameEditor name={profile.name} onSave={(next) => updateStaffProfileById(staffId, { name: next })} />
           <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12, marginTop: 6 }} onClick={() => fileInputRef.current?.click()}>
             Сменить фото
           </button>
