@@ -6,8 +6,15 @@ import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/li
 import type { ScheduleEntry, WorkRole } from "@/types";
 
 
+// Локальная дата без сдвига часового пояса: раньше toISOString() давал UTC,
+// и у клиентов в UTC+3 ячейки календаря съезжали на день — смены не находились.
 function dateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function parseLocal(iso: string): Date {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
 function buildMonthGrid(year: number, month: number): (Date | null)[] {
@@ -29,7 +36,7 @@ function ListView({ entries }: { entries: ScheduleEntry[] }) {
   return (
     <>
       {entries.map((e) => {
-        const date = new Date(e.date);
+        const date = parseLocal(e.date);
         const isPast = date.getTime() < Date.now() && date.toDateString() !== today;
         return (
           <div key={e.id} className="card card-row" style={{ opacity: isPast ? 0.5 : 1 }}>
@@ -55,8 +62,11 @@ function CalendarView({ entries }: { entries: ScheduleEntry[] }) {
   const month = cursor.getMonth();
 
   const byDate = useMemo(() => {
-    const map = new Map<string, ScheduleEntry>();
-    for (const e of entries) map.set(dateKey(new Date(e.date)), e);
+    const map = new Map<string, ScheduleEntry[]>();
+    for (const e of entries) {
+      const k = e.date.slice(0, 10);
+      map.set(k, [...(map.get(k) ?? []), e]);
+    }
     return map;
   }, [entries]);
 
@@ -89,7 +99,8 @@ function CalendarView({ entries }: { entries: ScheduleEntry[] }) {
         {cells.map((date, i) => {
           if (!date) return <div key={i} />;
           const key = dateKey(date);
-          const entry = byDate.get(key);
+          const dayEntries = byDate.get(key) ?? [];
+          const entry = dayEntries[0];
           const isToday = key === todayKey;
           return (
             <div
@@ -104,8 +115,12 @@ function CalendarView({ entries }: { entries: ScheduleEntry[] }) {
               }}
             >
               <div style={{ fontSize: 12, fontWeight: isToday ? 700 : 400 }}>{date.getDate()}</div>
-              {entry && (
-                <div className="badge-dot done" style={{ margin: "4px auto 0" }} />
+              {dayEntries.length > 0 && (
+                <div style={{ display: "flex", justifyContent: "center", gap: 3, marginTop: 4 }}>
+                  {dayEntries.map((e) => (
+                    <span key={e.id} style={{ width: 8, height: 8, borderRadius: 4, background: ROLE_COLORS[e.role] ?? "var(--accent)" }} />
+                  ))}
+                </div>
               )}
             </div>
           );
@@ -119,6 +134,8 @@ export default function Schedule() {
   useStore(scheduleStore);
   const entries = listMySchedule();
   const [view, setView] = useState<"list" | "calendar">("calendar");
+  const todayKey = dateKey(new Date());
+  const upcoming = entries.filter((e) => e.date.slice(0, 10) >= todayKey).slice(0, 10);
 
   return (
     <div className="screen">
@@ -136,7 +153,15 @@ export default function Schedule() {
         </button>
       </div>
 
-      {view === "calendar" ? <CalendarView entries={entries} /> : <ListView entries={entries} />}
+      {view === "calendar" ? (
+        <>
+          <CalendarView entries={entries} />
+          <h2>Ближайшие смены</h2>
+          <ListView entries={upcoming} />
+        </>
+      ) : (
+        <ListView entries={entries} />
+      )}
     </div>
   );
 }
