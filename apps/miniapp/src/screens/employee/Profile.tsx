@@ -1,8 +1,9 @@
 import { useRef } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, yearsOfService } from "@/data/repo";
+import { formatSalaryModel, getStaffProfile, staffProfileStore, updateStaffProfile, updateStaffProfileById, yearsOfService } from "@/data/repo";
 import { getTelegramUser } from "@/lib/telegram";
+import { NameEditor } from "@/components/NameEditor";
 
 function formatTenure(hiredAt: string): string {
   const { years, months } = yearsOfService(hiredAt);
@@ -46,9 +47,17 @@ export default function Profile() {
           {profile.photoUrl ? <img src={profile.photoUrl} alt="" /> : "📷"}
         </div>
         <input ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoPick} style={{ display: "none" }} />
-        <div>
-          <div style={{ fontWeight: 700 }}>{profile.name}</div>
-          <div className="muted" style={{ fontSize: 13 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <NameEditor
+            name={profile.name}
+            fontSize={16}
+            onSave={async (next) => {
+              const result = await updateStaffProfileById(profile.id, { name: next });
+              if (!result || !result.error) updateStaffProfile({ name: next });
+              return result;
+            }}
+          />
+          <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>
             Стаж: {formatTenure(profile.hiredAt)}
           </div>
           <button className="btn ghost" style={{ padding: "6px 10px", fontSize: 12, marginTop: 6 }} onClick={() => fileInputRef.current?.click()}>
