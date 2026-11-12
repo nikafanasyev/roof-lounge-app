@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "@/data/useStore";
-import { addExpense, deleteExpense, expensesStore, listAllExpenses } from "@/data/repo";
+import { addExpense, deleteExpense, expensesStore, listAllExpenses, listKnownSuppliers } from "@/data/repo";
 
 function money(n: number): string {
   return n.toLocaleString("ru-RU") + " ₽";
@@ -63,6 +63,9 @@ const SUPPLIER_SUGGESTIONS = [
 export default function Expenses() {
   useStore(expensesStore);
   const entries = listAllExpenses();
+  // Стартовый список из ОДДС + все поставщики, которые уже встречались в
+  // расходах (включая введённые вручную новые — см. listKnownSuppliers).
+  const supplierOptions = Array.from(new Set([...SUPPLIER_SUGGESTIONS, ...listKnownSuppliers()]));
 
   const today = new Date().toISOString().slice(0, 10);
   const [showForm, setShowForm] = useState(false);
@@ -169,20 +172,34 @@ export default function Expenses() {
             style={{ marginBottom: 8 }}
           />
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            {SUPPLIER_SUGGESTIONS.filter((s) => s.toLowerCase().includes(supplier.trim().toLowerCase())).map((s) => {
-              const active = supplier === s;
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  className={`chip chip-pick${active ? " accent" : ""}`}
-                  style={{ cursor: "pointer", border: active ? "1px solid var(--accent)" : "1px solid var(--border)" }}
-                  onClick={() => setSupplier(s)}
-                >
-                  {s}
-                </button>
-              );
-            })}
+            {supplierOptions
+              .filter((s) => s.toLowerCase().includes(supplier.trim().toLowerCase()))
+              .map((s) => {
+                const active = supplier === s;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    className={`chip chip-pick${active ? " accent" : ""}`}
+                    style={{ cursor: "pointer", border: active ? "1px solid var(--accent)" : "1px solid var(--border)" }}
+                    onClick={() => setSupplier(s)}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            {/* Введённого текста нет среди известных поставщиков — явная
+                кнопка "создать", а не молчаливое "ничего не найдено" (см.
+                запрос Никиты 12.11.2026: "в случае нового поставщика должна
+                быть опция создать"). Нажатие ничего доп. не делает — поле
+                уже равно этому тексту, — просто подтверждает, что это
+                осознанный новый поставщик, а не опечатка; появится в
+                подсказках сам после сохранения (listKnownSuppliers). */}
+            {supplier.trim() && !supplierOptions.some((s) => s.toLowerCase() === supplier.trim().toLowerCase()) && (
+              <button type="button" className="chip chip-pick accent" style={{ cursor: "default", border: "1px dashed var(--accent)" }}>
+                + Добавить «{supplier.trim()}»
+              </button>
+            )}
           </div>
           <div className="eyebrow">Комментарий (необязательно)</div>
           <input type="text" value={note} onChange={(e) => setNote(e.target.value)} style={{ marginBottom: 12 }} />

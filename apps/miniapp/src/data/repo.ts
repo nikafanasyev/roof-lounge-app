@@ -2036,6 +2036,27 @@ export function listActiveExpenses(): Expense[] {
 }
 
 /**
+ * Поставщики, которые уже встречались в расходах — чтобы однажды введённый
+ * вручную новый поставщик (которого нет в стартовом списке-подсказке в
+ * Expenses.tsx) сам стал подсказкой в следующий раз, без отдельной таблицы
+ * "поставщики" (см. запрос Никиты 12.11.2026: "в случае нового поставщика
+ * должна быть опция создать" — создание здесь просто означает "записал
+ * расход с новым именем", оно само появится в списке дальше).
+ */
+export function listKnownSuppliers(): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const e of expensesStore.get()) {
+    const s = e.supplier?.trim();
+    if (s && !seen.has(s.toLowerCase())) {
+      seen.add(s.toLowerCase());
+      result.push(s);
+    }
+  }
+  return result;
+}
+
+/**
  * dateIso — "YYYY-MM-DD" (как в adjustments/payouts — колонка date, не
  * timestamptz), по умолчанию сегодня, но можно указать прошлую дату (та же
  * логика, что addAdjustment).
