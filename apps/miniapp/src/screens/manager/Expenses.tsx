@@ -174,7 +174,20 @@ export default function Expenses() {
     setDeleteReason("");
   }
 
-  const entries = mode === "expense" ? expenseEntries : incomeEntries;
+  const [search, setSearch] = useState("");
+  const rawEntries = mode === "expense" ? expenseEntries : incomeEntries;
+  const needle = search.trim().toLowerCase();
+  const entries = needle
+    ? rawEntries.filter((e) => {
+        const x = e as { category?: string; supplier?: string; department?: string; note?: string; createdByName?: string; date: string; amount: number };
+        const [y, m, d] = x.date.slice(0, 10).split("-");
+        const hay = [x.category, x.supplier, x.department, x.note, x.createdByName, x.date.slice(0, 10), `${d}.${m}.${y}`, `${d}.${m}`, String(x.amount)]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return needle.split(/\s+/).every((w) => hay.includes(w));
+      })
+    : rawEntries;
 
   return (
     <div className="screen">
@@ -363,7 +376,16 @@ export default function Expenses() {
         </div>
       )}
 
-      {entries.length === 0 && <div className="list-empty">{mode === "expense" ? "Расходов пока нет" : "Доходов пока нет"}</div>}
+      <input
+        type="search"
+        placeholder="Поиск: статья, поставщик, заметка, сумма, дата"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ marginBottom: 12 }}
+      />
+      {entries.length === 0 && (
+        <div className="list-empty">{needle ? "Ничего не найдено" : mode === "expense" ? "Расходов пока нет" : "Доходов пока нет"}</div>
+      )}
       {entries.map((e) => {
         const isDeleted = Boolean(e.deletedAt);
         const isExpense = mode === "expense";

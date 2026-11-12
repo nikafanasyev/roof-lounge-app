@@ -33,10 +33,19 @@ export default function Fines() {
   // только актуальные, удалённые остаются доступны отдельной вкладкой (не
   // теряем аудит, просто не показываем по умолчанию).
   const [filter, setFilter] = useState<"active" | "deleted" | "all">("active");
+  const [search, setSearch] = useState("");
+  const needle = search.trim().toLowerCase();
+  const staffNames = new Map(listStaffDirectory().map((s) => [s.id, s.name]));
   const entries = allEntries.filter((a) => {
-    if (filter === "all") return true;
-    if (filter === "deleted") return Boolean(a.deletedAt);
-    return !a.deletedAt;
+    if (filter === "deleted" && !a.deletedAt) return false;
+    if (filter === "active" && a.deletedAt) return false;
+    if (!needle) return true;
+    const [y, m, d] = a.date.slice(0, 10).split("-");
+    const hay = [staffNames.get(a.staffId), a.reason, a.type === "fine" ? "штраф" : "премия", a.deletedByName, a.deleteReason, a.date.slice(0, 10), `${d}.${m}.${y}`, `${d}.${m}`, String(a.amount)]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return needle.split(/\s+/).every((w) => hay.includes(w));
   });
   // Для выбора "Кому" в форме — только действующие сотрудники (уволенному
   // новый штраф не начислить), но для подписи уже существующих записей
@@ -135,8 +144,15 @@ export default function Fines() {
         </button>
       </div>
 
+      <input
+        type="search"
+        placeholder="Поиск: сотрудник, причина, сумма, дата"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ marginBottom: 12 }}
+      />
       {entries.length === 0 && (
-        <div className="list-empty">{filter === "deleted" ? "Удалённых записей нет" : "Записей пока нет"}</div>
+        <div className="list-empty">{needle ? "Ничего не найдено" : filter === "deleted" ? "Удалённых записей нет" : "Записей пока нет"}</div>
       )}
       {entries.map((a) => {
         const isDeleted = Boolean(a.deletedAt);
