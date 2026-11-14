@@ -79,6 +79,9 @@ export default function GuestTasteProfile({ guest, onDone }: { guest: Guest; onD
         >
           Далее {liked.length < MIN_LIKED ? `(${liked.length}/${MIN_LIKED})` : ""}
         </button>
+        <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} onClick={() => setStep("directions")}>
+          ← Назад
+        </button>
       </div>
     );
   }
@@ -93,6 +96,9 @@ export default function GuestTasteProfile({ guest, onDone }: { guest: Guest; onD
       <AromaPicker key="disliked" selectedIds={disliked} onToggle={toggleDisliked} excludeIds={liked} defaultDirection={directions[0]} />
       <button className="btn primary" style={{ marginTop: 24, width: "100%" }} disabled={saving} onClick={finish}>
         {saving ? "Сохраняем…" : "Готово"}
+      </button>
+      <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} onClick={() => setStep("liked")}>
+        ← Назад
       </button>
     </div>
   );
