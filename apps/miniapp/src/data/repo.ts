@@ -75,7 +75,7 @@ import {
   type WeekBlock,
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { getTelegramUser, isGuestTestAccount } from "@/lib/telegram";
+import { getTelegramUser, isCurrentUserManager, isGuestTestAccount } from "@/lib/telegram";
 import { computeShiftSalary, DEFAULT_SALARY_MODEL } from "@/lib/payroll";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
@@ -149,6 +149,30 @@ export const dataSyncStatusStore = new Store<DataSyncStatus>(isSupabaseConfigure
 
 const uid = () => crypto.randomUUID();
 
+/**
+ * Кто открыл приложение: "unknown" — ещё проверяем, "guest" — гость (его нет
+ * среди сотрудников), "staff" — сотрудник/руководитель. Определяется один раз в
+ * initData по Telegram id (staff-запись) — см. isStaffTelegramUser.
+ */
+export type AppMode = "unknown" | "guest" | "staff";
+export const appModeStore = new Store<AppMode>(
+  typeof window !== "undefined" && window.location.pathname.startsWith("/table/") ? "guest" : "unknown",
+);
+
+/** Есть ли у этого Telegram-аккаунта активная запись в staff (архивные хранят отрицательный id). */
+async function isStaffTelegramUser(): Promise<boolean> {
+  const tgUser = getTelegramUser();
+  if (!tgUser) return true; // вне Telegram (разработка) — как раньше, рабочий режим
+  if (isCurrentUserManager()) return true;
+  if (!supabase) return true;
+  const { data, error } = await supabase.from("staff").select("id").eq("telegram_id", tgUser.id).maybeSingle();
+  if (error) {
+    logSyncError("isStaffTelegramUser", error);
+    return true; // при сбое сети не выкидываем сотрудника в гостевой режим
+  }
+  return !!data;
+}
+
 // --- Синхронизация с Supabase (см. заголовок файла) ---
 
 // Фолбэк вне Telegram (обычный браузер при разработке, без initDataUnsafe.user) —
@@ -184,7 +208,11 @@ export async function initData(): Promise<void> {
   if (!isSupabaseConfigured || !supabase || syncInitialized) return;
   syncInitialized = true;
   dataSyncStatusStore.set("loading");
-  const guestOnly = window.location.pathname.startsWith("/table/") || isGuestTestAccount();
+  let guestOnly = window.location.pathname.startsWith("/table/") || isGuestTestAccount();
+  if (!guestOnly) {
+    guestOnly = !(await isStaffTelegramUser());
+  }
+  appModeStore.set(guestOnly ? "guest" : "staff");
   // Раньше ensureCurrentStaff()/loadTables() ждали друг друга СНАРУЖИ
   // общего Promise.all — если любой из них бросал необработанное
   // исключение (не просто ошибку запроса Supabase — та возвращается в
@@ -1053,6 +1081,32 @@ export async function findGuestByPhone(phone: string): Promise<Guest | null> {
   return data ? mapGuestRow(data) : null;
 }
 
+export async function getGuestByTelegramId(telegramId: number): Promise<Guest | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase.from("guests").select("*").eq("telegram_id", telegramId).maybeSingle();
+  if (error) {
+    logSyncError("getGuestByTelegramId", error);
+    return null;
+  }
+  return data ? mapGuestRow(data) : null;
+}
+
+/** Привязывает гостя к Telegram-аккаунту (если ещё не привязан или привязан к другому). */
+export async function linkGuestToTelegram(guestId: string, telegramId: number): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  // Если этот telegram_id уже занят другой карточкой — освобождаем (номер подтверждён Telegram).
+  await supabase.from("guests").update({ telegram_id: null }).eq("telegram_id", telegramId).neq("id", guestId);
+  const { error } = await supabase.from("guests").update({ telegram_id: telegramId }).eq("id", guestId);
+  if (error) logSyncError("linkGuestToTelegram", error);
+}
+
+/** Подтверждённый Telegram номер текущего пользователя (его пишет бот после requestContact). */
+export async function fetchVerifiedPhone(telegramId: number): Promise<string | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data } = await supabase.from("telegram_contacts").select("phone").eq("telegram_id", telegramId).maybeSingle();
+  return (data?.phone as string | undefined) ?? null;
+}
+
 export async function getGuestByIdRemote(guestId: string): Promise<Guest | null> {
   if (!isSupabaseConfigured || !supabase) return null;
   const { data, error } = await supabase.from("guests").select("*").eq("id", guestId).maybeSingle();
@@ -1114,6 +1168,7 @@ export async function registerGuest(
     middleName?: string;
     birthDate: string;
     gender: "male" | "female";
+    telegramId?: number;
   },
 ): Promise<{ guest: Guest } | { error: RegisterGuestError }> {
   if (!isSupabaseConfigured || !supabase) return { error: "unknown" };
@@ -1126,6 +1181,7 @@ export async function registerGuest(
     .from("guests")
     .insert({
       phone: normalized,
+      telegram_id: input.telegramId ?? null,
       display_name: displayName,
       last_name: lastName,
       first_name: firstName,

@@ -23,10 +23,13 @@ function formatLastVisit(iso?: string): string {
 export default function GuestHome({
   guest,
   tableNumber,
+  onPickTable,
 }: {
   guest: Guest;
-  tableNumber: number;
+  tableNumber: number | null;
+  onPickTable: (n: number) => void;
 }) {
+  const [tableInput, setTableInput] = useState("");
   const [sent, setSent] = useState<ServiceCallType | null>(null);
   const [showLost, setShowLost] = useState(false);
   const [lostText, setLostText] = useState("");
@@ -43,21 +46,22 @@ export default function GuestHome({
   // с Никитой 11.10.2026: завершается визит вручную сотрудником или
   // автоматически при закрытии смены.
   useEffect(() => {
-    if (guest.activeTableNumber) {
+    if (guest.activeTableNumber && (tableNumber === null || guest.activeTableNumber === tableNumber)) {
       touchGuestVisit(guest.id);
-    } else {
+    } else if (tableNumber !== null) {
       startGuestVisit(guest.id, tableNumber);
     }
-  }, [guest.id]);
+  }, [guest.id, tableNumber]);
 
   function send(type: ServiceCallType) {
+    if (tableNumber === null) return;
     createServiceCall(tableNumber, type, guest.id);
     setSent(type);
     setTimeout(() => setSent(null), 2500);
   }
 
   function leaveTip() {
-    if (!TIP_URL) return;
+    if (!TIP_URL || tableNumber === null) return;
     const url = `${TIP_URL}${TIP_URL.includes("?") ? "&" : "?"}table=${tableNumber}`;
     window.location.href = url;
   }
@@ -65,7 +69,7 @@ export default function GuestHome({
   return (
     <div className="screen" style={{ paddingTop: 24 }}>
       <div className="eyebrow" style={{ textAlign: "center" }}>
-        Roof Lounge · Стол №{tableNumber}
+        Roof Lounge{tableNumber !== null ? ` · Стол №${tableNumber}` : ""}
       </div>
       <h1 style={{ textAlign: "center" }}>{guest.displayName}</h1>
 
@@ -101,12 +105,38 @@ export default function GuestHome({
         </div>
       )}
 
+      {tableNumber === null && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>За каким вы столом?</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="Номер стола"
+              value={tableInput}
+              onChange={(e) => setTableInput(e.target.value.replace(/\D/g, "").slice(0, 3))}
+            />
+            <button
+              className="btn primary"
+              disabled={!tableInput}
+              onClick={() => onPickTable(Number(tableInput))}
+            >
+              Готово
+            </button>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            Номер указан на столе. В следующий раз отсканируйте QR-код — стол определится сам.
+          </div>
+        </div>
+      )}
+
       <h2>Позвать</h2>
       {ACTIONS.map((a) => (
         <button
           key={a.type}
           className="card card-row"
-          style={{ width: "100%", border: "1px solid var(--border)", cursor: "pointer", background: "var(--surface)" }}
+          style={{ width: "100%", border: "1px solid var(--border)", cursor: "pointer", background: "var(--surface)", opacity: tableNumber === null ? 0.5 : 1 }}
+          disabled={tableNumber === null}
           onClick={() => send(a.type)}
         >
           <span style={{ fontSize: 15, color: "var(--ink)" }}>
@@ -116,7 +146,7 @@ export default function GuestHome({
         </button>
       ))}
 
-      <button className="btn primary" style={{ marginTop: 16, width: "100%" }} disabled={!TIP_URL} onClick={leaveTip}>
+      <button className="btn primary" style={{ marginTop: 16, width: "100%" }} disabled={!TIP_URL || tableNumber === null} onClick={leaveTip}>
         💸 Оставить чаевые
       </button>
       {!TIP_URL && (
