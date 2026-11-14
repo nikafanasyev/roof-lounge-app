@@ -28,7 +28,8 @@ import Expenses from "@/screens/manager/Expenses";
 import FlavorProposals from "@/screens/manager/FlavorProposals";
 import TechTasks from "@/screens/manager/TechTasks";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
-import { isCurrentUserManager, isGuestTestAccount, isInsideTelegramClient } from "@/lib/telegram";
+import { isCurrentUserManager, isGuestTestAccount, isInsideTelegramClient, isOwner } from "@/lib/telegram";
+import ManagersAdmin from "@/screens/manager/ManagersAdmin";
 import { appModeStore, dataSyncStatusStore, flavorProposalsStore, listPendingFlavorProposals } from "@/data/repo";
 import { useStore } from "@/data/useStore";
 
@@ -153,6 +154,11 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
       <NavLink to="/manager/schedule" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">📅</span>График
       </NavLink>
+      {isOwner() && (
+        <NavLink to="/manager/managers" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+          <span className="icon">🔑</span>Руководители
+        </NavLink>
+      )}
       <NavLink to="/manager/tech" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🧽</span>Тех. задачи
       </NavLink>
@@ -181,10 +187,18 @@ function RoleShell() {
   // остальной персонал — наоборот. См. обсуждение с Никитой 13.10.2026.
   const isManager = isCurrentUserManager();
   const inTelegram = isInsideTelegramClient();
-  const canSwitchRole = isManager && !inTelegram;
+  // Владелец (VITE_MANAGER_TELEGRAM_IDS) — исключение: переключается между
+  // кабинетами и в Telegram. Остальные руководители видят только свой кабинет.
+  const restricted = isManager && inTelegram && !isOwner();
+  const canSwitchRole = isManager && !restricted;
   const [role, setRole] = useState<AppRole>(isManager && inTelegram ? "manager" : "employee");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
+  // Руководитель, назначенный через приложение, становится известен только
+  // после загрузки данных — тогда переводим его в кабинет руководителя.
+  useEffect(() => {
+    if (isManager && inTelegram) setRole("manager");
+  }, [isManager]);
   // Тестовый гостевой аккаунт (VITE_GUEST_TEST_TELEGRAM_IDS, см. lib/telegram.ts)
   // всегда видит гостевой сценарий, даже открыв мини-апп обычной кнопкой
   // бота (не по QR-ссылке стола) — иначе он попадал в кабинет "Сотрудник",
@@ -224,11 +238,11 @@ function RoleShell() {
 
   // И наоборот: руководитель в Telegram (без переключателя) не должен
   // попадать в кабинет "Сотрудник" даже прямой ссылкой/кнопкой "назад".
-  if (isManager && inTelegram && location.pathname.startsWith("/employee")) {
+  if (restricted && location.pathname.startsWith("/employee")) {
     return <Navigate to={DEFAULT_ROUTE.manager} replace />;
   }
 
-  const showEmployeeNav = (role === "employee" || !isManager) && !(isManager && inTelegram);
+  const showEmployeeNav = (role === "employee" || !isManager) && !restricted;
   const showManagerNav = role === "manager" && isManager;
 
   return (
@@ -303,6 +317,7 @@ function RoleShell() {
         <Route path="/manager/expenses" element={<Expenses />} />
         <Route path="/manager/flavors" element={<FlavorProposals />} />
         <Route path="/manager/tech" element={<TechTasks />} />
+        <Route path="/manager/managers" element={<ManagersAdmin />} />
         <Route path="/manager/problems" element={<Problems />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
