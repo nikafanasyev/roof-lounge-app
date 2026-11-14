@@ -59,6 +59,18 @@ export default function GuestProfile() {
 
   const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
 
+  // Пока у гостя нет ключа карты в Quick Resto — раз в 5 секунд проверяем,
+  // не создал ли он её сам со своего телефона, чтобы карта появилась в
+  // кабинете автоматически, без перезахода на экран.
+  const hasCardKey = !!cardGuest?.quickrestoQrKey;
+  useEffect(() => {
+    if (hasCardKey) return;
+    const timer = setInterval(() => {
+      getGuestByIdRemote(guestId).then((g) => g && setCardGuest(g));
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [guestId, hasCardKey]);
+
   async function handleRequestLoyaltyCard() {
     setRequestingLoyaltyCard(true);
     try {
