@@ -104,7 +104,7 @@ export default function GuestAuth({ onAuthed }: { onAuthed: (guest: Guest, isNew
       } else if (result.error === "duplicate_phone") {
         setError("Этот номер уже зарегистрирован — попробуйте войти");
       } else {
-        setError("Не получилось зарегистрироваться — попробуйте ещё раз");
+        setError(`Не получилось зарегистрироваться — попробуйте ещё раз${result.detail ? ` (${result.detail})` : ""}`);
       }
     } finally {
       setSaving(false);
