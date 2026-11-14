@@ -391,7 +391,14 @@ bot.catch((err) => {
 
 /** Личное сообщение каждому руководителю из REPORT_ADMIN_IDS (ссылки-приглашения и т.п.). */
 async function notifyManagers(text: string) {
-  const ids = Array.from(new Set(env.REPORT_ADMIN_IDS.split(",").map((x) => x.trim()).filter(Boolean)));
+  const set = new Set(env.REPORT_ADMIN_IDS.split(",").map((x) => x.trim()).filter(Boolean));
+  // Руководители, назначенные в приложении (staff.role = 'manager'), тоже получают сообщения.
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
+    const supa = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+    const { data } = await supa.from("staff").select("telegram_id").eq("role", "manager");
+    for (const r of data ?? []) if (Number(r.telegram_id) > 0) set.add(String(r.telegram_id));
+  }
+  const ids = Array.from(set);
   for (const id of ids) {
     try {
       await bot.api.sendMessage(id, text);

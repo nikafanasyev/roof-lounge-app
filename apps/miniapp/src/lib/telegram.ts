@@ -62,12 +62,30 @@ const MANAGER_TELEGRAM_IDS = new Set(
     .filter(Boolean),
 );
 
+// Руководители, назначенные через приложение (staff.role = 'manager'): флаг
+// выставляет initData (data/repo.ts) после чтения записи staff.
+let dbManager = false;
+export function setDbManager(value: boolean) {
+  dbManager = value;
+}
+
+/**
+ * Владелец — аккаунт из VITE_MANAGER_TELEGRAM_IDS. Только он назначает и снимает
+ * руководителей и может переключаться между кабинетами "Сотрудник" и
+ * "Руководитель" внутри Telegram. Вне Telegram (разработка) — считается владельцем.
+ */
+export function isOwner(): boolean {
+  const tgUser = getTelegramUser();
+  if (!tgUser) return true;
+  return MANAGER_TELEGRAM_IDS.has(String(tgUser.id));
+}
+
 export function isCurrentUserManager(): boolean {
   const tgUser = getTelegramUser();
   // Вне Telegram (разработка, прямая ссылка в браузере без initData) — считаем
   // руководителем, чтобы не мешать тестировать оба экрана.
   if (!tgUser) return true;
-  return MANAGER_TELEGRAM_IDS.has(String(tgUser.id));
+  return MANAGER_TELEGRAM_IDS.has(String(tgUser.id)) || dbManager;
 }
 
 /**

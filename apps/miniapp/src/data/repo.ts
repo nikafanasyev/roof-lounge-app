@@ -75,7 +75,7 @@ import {
   type WeekBlock,
 } from "./seed";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { getTelegramUser, isCurrentUserManager, isGuestTestAccount } from "@/lib/telegram";
+import { getTelegramUser, isCurrentUserManager, isGuestTestAccount, setDbManager } from "@/lib/telegram";
 import { computeShiftSalary, DEFAULT_SALARY_MODEL } from "@/lib/payroll";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
@@ -165,12 +165,43 @@ async function isStaffTelegramUser(): Promise<boolean> {
   if (!tgUser) return true; // вне Telegram (разработка) — как раньше, рабочий режим
   if (isCurrentUserManager()) return true;
   if (!supabase) return true;
-  const { data, error } = await supabase.from("staff").select("id").eq("telegram_id", tgUser.id).maybeSingle();
+  const { data, error } = await supabase.from("staff").select("id, role").eq("telegram_id", tgUser.id).maybeSingle();
   if (error) {
     logSyncError("isStaffTelegramUser", error);
     return true; // при сбое сети не выкидываем сотрудника в гостевой режим
   }
+  setDbManager(data?.role === "manager");
   return !!data;
+}
+
+export interface ManagerCandidate {
+  id: string;
+  name: string;
+  isManager: boolean;
+}
+
+/** Активные сотрудники и признак руководителя — для экрана "Руководители" (только владелец). */
+export async function fetchManagerCandidates(): Promise<ManagerCandidate[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  const { data, error } = await supabase.from("staff").select("id, name, role, archived").order("name");
+  if (error) {
+    logSyncError("fetchManagerCandidates", error);
+    return [];
+  }
+  return (data ?? [])
+    .filter((r) => !r.archived)
+    .map((r) => ({ id: r.id as string, name: r.name as string, isManager: r.role === "manager" }));
+}
+
+/** Назначить сотрудника руководителем или снять права. */
+export async function setStaffManager(staffId: string, makeManager: boolean): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return false;
+  const { error } = await supabase.from("staff").update({ role: makeManager ? "manager" : "master" }).eq("id", staffId);
+  if (error) {
+    logSyncError("setStaffManager", error);
+    return false;
+  }
+  return true;
 }
 
 // --- Синхронизация с Supabase (см. заголовок файла) ---
