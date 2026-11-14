@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { addCustomAromaTag, randomAromaTags, searchAromaTags } from "@/data/repo";
+import { addCustomAromaTag, listAromaTags, randomAromaTags, searchAromaTags } from "@/data/repo";
 import type { AromaDirection, AromaTag } from "@/types";
 
 /**
@@ -37,7 +37,14 @@ export default function AromaPicker({
   const searchResults = query.trim() ? searchAromaTags(query).filter((t) => !excludeIds.includes(t.id)) : shown;
   const byId = new Map(searchResults.map((t) => [t.id, t] as const));
   for (const t of extra) byId.set(t.id, t);
-  const visible = [...byId.values()];
+  // Выбранные ароматы всегда идут первыми — гость видит, что уже отметил.
+  // Без поиска показываем все выбранные (даже те, что не попали в случайную
+  // выборку), при поиске — только подходящие под запрос.
+  if (!query.trim()) {
+    for (const t of listAromaTags()) if (selectedIds.includes(t.id) && !byId.has(t.id)) byId.set(t.id, t);
+  }
+  const all = [...byId.values()];
+  const visible = [...all.filter((t) => selectedIds.includes(t.id)), ...all.filter((t) => !selectedIds.includes(t.id))];
 
   async function handleAdd() {
     if (!newName.trim()) return;
