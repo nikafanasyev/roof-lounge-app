@@ -24,8 +24,7 @@ function hasTasteProfile(guest: Guest): boolean {
  * обсуждение с Никитой 11.10.2026 — профиль вынесен отдельной вкладкой, а
  * не кнопкой внутри главного экрана.
  */
-export default function GuestFlow({ tableNumber: initialTable }: { tableNumber: number | null }) {
-  const [tableNumber, setTableNumber] = useState<number | null>(initialTable);
+export default function GuestFlow({ tableNumber }: { tableNumber: number | null }) {
   const [guest, setGuest] = useState<Guest | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<GuestTab>("home");
@@ -95,7 +94,7 @@ export default function GuestFlow({ tableNumber: initialTable }: { tableNumber: 
   }
 
   function renderTab() {
-    if (tab === "home") return <GuestHome guest={guest!} tableNumber={tableNumber} onPickTable={setTableNumber} />;
+    if (tab === "home") return <GuestHome guest={guest!} tableNumber={tableNumber} />;
     if (editingTaste) return <GuestTasteProfile guest={guest!} onDone={handleTasteProfileDone} />;
     return <GuestTasteSummary guest={guest!} onEdit={() => setEditingTaste(true)} />;
   }

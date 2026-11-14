@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { createServiceCall, startGuestVisit, touchGuestVisit } from "@/data/repo";
-import { parseTable, tableLabel } from "@/lib/tables";
+import { tableLabel } from "@/lib/tables";
 import type { Guest, ServiceCallType } from "@/types";
 
 // Переадресация на внешний сервис чаевых (НетМонет) — см. обсуждение с
@@ -24,13 +24,10 @@ function formatLastVisit(iso?: string): string {
 export default function GuestHome({
   guest,
   tableNumber,
-  onPickTable,
 }: {
   guest: Guest;
   tableNumber: number | null;
-  onPickTable: (n: number) => void;
 }) {
-  const [tableInput, setTableInput] = useState("");
   const [sent, setSent] = useState<ServiceCallType | null>(null);
   const [showLost, setShowLost] = useState(false);
   const [lostText, setLostText] = useState("");
@@ -107,26 +104,10 @@ export default function GuestHome({
       )}
 
       {tableNumber === null && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>За каким вы столом?</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              type="text"
-              inputMode="text"
-              placeholder="Номер стола"
-              value={tableInput}
-              onChange={(e) => setTableInput(e.target.value.replace(/[^\d-]/g, "").slice(0, 4))}
-            />
-            <button
-              className="btn primary"
-              disabled={parseTable(tableInput) === null}
-              onClick={() => { const n = parseTable(tableInput); if (n !== null) onPickTable(n); }}
-            >
-              Готово
-            </button>
-          </div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-            Номер указан на столе. В следующий раз отсканируйте QR-код — стол определится сам.
+        <div className="card" style={{ marginBottom: 12, textAlign: "center" }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Отсканируйте QR-код на столе</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            Так мы поймём, где вы сидите, и вы сможете позвать мастера, официанта или попросить счёт.
           </div>
         </div>
       )}
