@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { createServiceCall, startGuestVisit, touchGuestVisit } from "@/data/repo";
+import {
+  createServiceCall,
+  getGuestByIdRemote,
+  getLatestLoyaltyRequest,
+  requestLoyaltyCardCreation,
+  startGuestVisit,
+  touchGuestVisit,
+} from "@/data/repo";
 import { tableLabel } from "@/lib/tables";
 import type { Guest, ServiceCallType } from "@/types";
 
@@ -29,6 +36,36 @@ export default function GuestHome({
   tableNumber: number | null;
 }) {
   const [sent, setSent] = useState<ServiceCallType | null>(null);
+  // Ключ карты в Quick Resto: пока его нет, карты на кассе у гостя нет —
+  // показываем кнопку "Создать карту" вместо QR (QR с внутренним кодом на кассе не читается).
+  const [qrKey, setQrKey] = useState<string | undefined>(guest.quickrestoQrKey);
+  const [creatingCard, setCreatingCard] = useState(false);
+  const [cardError, setCardError] = useState<string | null>(null);
+
+  async function createCard() {
+    setCreatingCard(true);
+    setCardError(null);
+    try {
+      await requestLoyaltyCardCreation(guest.id);
+      // Бот создаёт карту в Quick Resto за несколько секунд — ждём результат.
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 2500));
+        const updated = await getGuestByIdRemote(guest.id);
+        if (updated?.quickrestoQrKey) {
+          setQrKey(updated.quickrestoQrKey);
+          return;
+        }
+        const req = await getLatestLoyaltyRequest(guest.id);
+        if (req?.status === "failed") {
+          setCardError("Не получилось создать карту — подойдите к мастеру, он поможет");
+          return;
+        }
+      }
+      setCardError("Карта ещё создаётся — загляните сюда через минуту");
+    } finally {
+      setCreatingCard(false);
+    }
+  }
   const [showLost, setShowLost] = useState(false);
   const [lostText, setLostText] = useState("");
   const [lostSent, setLostSent] = useState(false);
@@ -71,18 +108,31 @@ export default function GuestHome({
       </div>
       <h1 style={{ textAlign: "center" }}>{guest.displayName}</h1>
 
-      <div className="card" style={{ textAlign: "center", padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <QRCodeSVG value={guest.quickrestoQrKey ?? guest.loyaltyCode ?? guest.id} size={160} />
+      {qrKey ? (
+        <div className="card" style={{ textAlign: "center", padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "center" }}>
+            <QRCodeSVG value={qrKey} size={160} />
+          </div>
+          <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
+            Код лояльности: {guest.loyaltyCode ?? "—"} · покажите на кассе
+          </div>
         </div>
-        <div className="muted" style={{ marginTop: 10, fontSize: 13 }}>
-          {guest.quickrestoQrKey ? (
-            <>Код лояльности: {guest.loyaltyCode ?? "—"} · работает на кассе</>
-          ) : (
-            <>Код лояльности: {guest.loyaltyCode ?? "—"} · карта пока создаётся, скоро заработает на кассе</>
+      ) : (
+        <div className="card" style={{ textAlign: "center", padding: 20 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Карты лояльности пока нет</div>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+            Создайте её — копите бонусы и получайте скидки при каждом визите.
+          </div>
+          <button className="btn primary" style={{ width: "100%" }} disabled={creatingCard} onClick={createCard}>
+            {creatingCard ? "Создаём карту…" : "Создать карту лояльности"}
+          </button>
+          {cardError && (
+            <div className="muted" style={{ color: "var(--danger)", marginTop: 8, fontSize: 13 }}>
+              {cardError}
+            </div>
           )}
         </div>
-      </div>
+      )}
 
       <div className="stat-grid">
         <div className="stat-tile accent">
