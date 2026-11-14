@@ -1,3 +1,4 @@
+import { tableLabel } from "@/lib/tables";
 import { useStore } from "@/data/useStore";
 import { listServiceCalls, resolveServiceCall, serviceCallsStore } from "@/data/repo";
 import type { ServiceCallType } from "@/types";
@@ -24,7 +25,7 @@ export default function ServiceCalls() {
       {calls.map((c) => (
         <div key={c.id} className="card">
           <div className="card-row">
-            <span style={{ fontWeight: 700 }}>Стол №{c.tableNumber}</span>
+            <span style={{ fontWeight: 700 }}>Стол №{tableLabel(c.tableNumber)}</span>
             <span className={`chip ${c.status === "open" ? "accent" : ""}`}>
               {c.status === "open" ? `${minutesAgo(c.createdAt)} мин назад` : "обработан"}
             </span>

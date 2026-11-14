@@ -417,7 +417,7 @@ async function main() {
       };
       await bot.api.sendMessage(
         env.STAFF_CHAT_ID,
-        `${labels[call.type] ?? call.type}\nСтол №${call.table_number}`,
+        `${labels[call.type] ?? call.type}\nСтол №${call.table_number >= 11 ? `${Math.floor(call.table_number / 10)}-${call.table_number % 10}` : call.table_number}`,
       );
     });
     console.log("Слушаю service_calls через Supabase Realtime — уведомления персоналу включены.");

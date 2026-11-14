@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { createServiceCall, startGuestVisit, touchGuestVisit } from "@/data/repo";
+import { parseTable, tableLabel } from "@/lib/tables";
 import type { Guest, ServiceCallType } from "@/types";
 
 // Переадресация на внешний сервис чаевых (НетМонет) — см. обсуждение с
@@ -69,7 +70,7 @@ export default function GuestHome({
   return (
     <div className="screen" style={{ paddingTop: 24 }}>
       <div className="eyebrow" style={{ textAlign: "center" }}>
-        Roof Lounge{tableNumber !== null ? ` · Стол №${tableNumber}` : ""}
+        Roof Lounge{tableNumber !== null ? ` · Стол №${tableLabel(tableNumber)}` : ""}
       </div>
       <h1 style={{ textAlign: "center" }}>{guest.displayName}</h1>
 
@@ -111,15 +112,15 @@ export default function GuestHome({
           <div style={{ display: "flex", gap: 8 }}>
             <input
               type="text"
-              inputMode="numeric"
+              inputMode="text"
               placeholder="Номер стола"
               value={tableInput}
-              onChange={(e) => setTableInput(e.target.value.replace(/\D/g, "").slice(0, 3))}
+              onChange={(e) => setTableInput(e.target.value.replace(/[^\d-]/g, "").slice(0, 4))}
             />
             <button
               className="btn primary"
-              disabled={!tableInput}
-              onClick={() => onPickTable(Number(tableInput))}
+              disabled={parseTable(tableInput) === null}
+              onClick={() => { const n = parseTable(tableInput); if (n !== null) onPickTable(n); }}
             >
               Готово
             </button>

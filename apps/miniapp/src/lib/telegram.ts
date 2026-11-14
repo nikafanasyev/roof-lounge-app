@@ -1,3 +1,5 @@
+import { parseTable } from "./tables";
+
 // Тонкая обёртка над Telegram WebApp SDK.
 // Вне Telegram (обычный браузер при разработке) деградирует до заглушки,
 // чтобы можно было верстать и тестировать экраны без реального клиента.
@@ -111,8 +113,8 @@ export function getStartParam(): string | null {
 
 /** Номер стола из start_param вида "table_7" (или "table-7"). */
 export function getStartTableNumber(): number | null {
-  const m = (getStartParam() ?? "").match(/^table[_-]?(\d+)$/i);
-  return m ? Number(m[1]) : null;
+  const m = (getStartParam() ?? "").match(/^table[_-]?(.+)$/i);
+  return m ? parseTable(m[1]) : null;
 }
 
 /** Умеет ли этот Telegram-клиент запросить у пользователя номер телефона (Bot API 8.0+). */

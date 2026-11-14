@@ -1,3 +1,4 @@
+import { tableLabel } from "@/lib/tables";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
@@ -122,7 +123,7 @@ export default function GuestProfile() {
         {guest.activeTableNumber && (
           <div className="card-row" style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
             <span className="chip">
-              🟢 Стол №{guest.activeTableNumber}
+              🟢 Стол №{tableLabel(guest.activeTableNumber)}
               {guest.activeVisitStartedAt &&
                 ` · с ${new Date(guest.activeVisitStartedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`}
             </span>

@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { getStartTableNumber } from "@/lib/telegram";
+import { parseTable } from "@/lib/tables";
 import GuestFlow from "./GuestFlow";
 
 // Гостевой экран открывается по QR-коду со стола: t.me/<бот>/app?startapp=table_<N>
@@ -7,8 +8,8 @@ import GuestFlow from "./GuestFlow";
 // Если номер стола не удалось определить (гость открыл приложение кнопкой бота),
 // null — гость выберет стол сам на главном экране.
 function tableNumberFromToken(token: string | undefined): number | null {
-  const match = token?.match(/\d+/);
-  return match ? Number(match[0]) : null;
+  const m = token?.match(/^table[_-]?(.+)$/i);
+  return m ? parseTable(m[1]) : null;
 }
 
 export default function TableGuestScreen() {
