@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
-import { guestsStore, listMixesForGuest } from "@/data/repo";
+import { guestsStore, listMixesForGuest, refreshGuests } from "@/data/repo";
 import type { Guest } from "@/types";
 
 // После подключения реальной базы Quick Resto (~2500+ клиентов) список без
@@ -47,6 +47,16 @@ function GuestRow({ guest }: { guest: Guest }) {
 export default function GuestsList() {
   const guests = useStore(guestsStore);
   const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await refreshGuests();
+    } finally {
+      setRefreshing(false);
+    }
+  }
   const trimmed = query.trim().toLowerCase();
 
   const matches = trimmed ? guests.filter((g) => g.displayName.toLowerCase().includes(trimmed)) : [];
@@ -65,6 +75,9 @@ export default function GuestsList() {
           + Создать карту
         </Link>
       </div>
+      <button className="btn ghost" style={{ width: "100%", marginBottom: 12 }} disabled={refreshing} onClick={handleRefresh}>
+        {refreshing ? "Обновляем…" : "↻ Обновить гостей"}
+      </button>
       <input
         type="text"
         placeholder="Поиск гостя по имени"
