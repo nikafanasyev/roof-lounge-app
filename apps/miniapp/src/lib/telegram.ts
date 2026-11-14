@@ -8,6 +8,7 @@ interface TelegramWebApp {
   setHeaderColor?: (color: string) => void;
   setBackgroundColor?: (color: string) => void;
   initDataUnsafe?: {
+    start_param?: string;
     user?: {
       id: number;
       first_name: string;
@@ -15,6 +16,8 @@ interface TelegramWebApp {
       username?: string;
     };
   };
+  isVersionAtLeast?: (version: string) => boolean;
+  requestContact?: (callback?: (shared: boolean) => void) => void;
   HapticFeedback?: {
     impactOccurred: (style: "light" | "medium" | "heavy") => void;
   };
@@ -98,4 +101,35 @@ export function isGuestTestAccount(): boolean {
   const tgUser = getTelegramUser();
   if (!tgUser) return false;
   return GUEST_TEST_TELEGRAM_IDS.has(String(tgUser.id));
+}
+
+
+/** Параметр из ссылки t.me/<бот>/app?startapp=... (например "table_7"). */
+export function getStartParam(): string | null {
+  return window.Telegram?.WebApp?.initDataUnsafe?.start_param ?? null;
+}
+
+/** Номер стола из start_param вида "table_7" (или "table-7"). */
+export function getStartTableNumber(): number | null {
+  const m = (getStartParam() ?? "").match(/^table[_-]?(\d+)$/i);
+  return m ? Number(m[1]) : null;
+}
+
+/** Умеет ли этот Telegram-клиент запросить у пользователя номер телефона (Bot API 8.0+). */
+export function canRequestContact(): boolean {
+  const w = window.Telegram?.WebApp;
+  return !!w?.requestContact && (w.isVersionAtLeast?.("8.0") ?? false);
+}
+
+/** Показывает системное окно Telegram "Поделиться номером"; true — пользователь согласился. */
+export function requestTelegramContact(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const w = window.Telegram?.WebApp;
+    if (!w?.requestContact) return resolve(false);
+    try {
+      w.requestContact((shared) => resolve(!!shared));
+    } catch {
+      resolve(false);
+    }
+  });
 }

@@ -38,10 +38,53 @@ bot.command("start", async (ctx) => {
   const keyboard = isPrivate
     ? new InlineKeyboard().webApp("Открыть Roof Lounge", env.MINI_APP_URL)
     : new InlineKeyboard().url("Написать боту в личку", `https://t.me/${ctx.me.username}?start=open`);
+
+  const supa = env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY ? createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY) : null;
+  let isStaff = false;
+  if (ctx.from && supa) {
+    // Ссылка-приглашение для сотрудника (?start=staff) заводит запись в staff —
+    // с этого момента приложение открывается рабочим кабинетом, а не гостевым.
+    if (isPrivate && ctx.match === "staff") {
+      const fullName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ").trim() || "Сотрудник";
+      const { error } = await supa
+        .from("staff")
+        .upsert({ telegram_id: ctx.from.id, name: fullName, role: "master" }, { onConflict: "telegram_id", ignoreDuplicates: true });
+      if (error) console.error("start staff: не удалось записать сотрудника:", error.message);
+    }
+    const { data } = await supa.from("staff").select("id").eq("telegram_id", ctx.from.id).maybeSingle();
+    isStaff = !!data || (await isReportAdmin(ctx.from.id));
+  }
+
   await ctx.reply(
-    "Добро пожаловать в Roof Lounge.\n\nЗдесь — сервис за столом и рабочие инструменты для персонала. Заказ и оплата — в основном боте заведения.",
+    isStaff
+      ? "Добро пожаловать в Roof Lounge.\n\nЗдесь — рабочие инструменты для персонала. Откройте приложение кнопкой ниже."
+      : "Добро пожаловать в Roof Lounge!\n\nВ приложении можно позвать мастера или официанта, попросить счёт, посмотреть бонусы и настроить свой вкусовой профиль. Откройте его кнопкой ниже — а за столом достаточно отсканировать QR-код.",
     { reply_markup: keyboard },
   );
+});
+
+// Гость делится номером через WebApp.requestContact — Telegram присылает боту
+// контакт. Принимаем только контакт самого отправителя (иначе можно «подтвердить»
+// чужой номер) и кладём в telegram_contacts — оттуда его забирает мини-апп.
+bot.on("message:contact", async (ctx) => {
+  const contact = ctx.message.contact;
+  if (!ctx.from || contact.user_id !== ctx.from.id) {
+    await ctx.reply("Пожалуйста, поделитесь своим собственным номером через кнопку в приложении.");
+    return;
+  }
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return;
+  const supa = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const digits = contact.phone_number.replace(/\D/g, "");
+  const phone = digits.length === 11 && digits[0] === "8" ? "7" + digits.slice(1) : digits;
+  const { error } = await supa
+    .from("telegram_contacts")
+    .upsert({ telegram_id: ctx.from.id, phone, updated_at: new Date().toISOString() }, { onConflict: "telegram_id" });
+  if (error) {
+    console.error("telegram_contacts: ошибка записи:", error.message);
+    await ctx.reply("Не получилось сохранить номер — попробуйте ещё раз через минуту.");
+    return;
+  }
+  await ctx.reply("✅ Номер получен — возвращайтесь в приложение.", { reply_markup: { remove_keyboard: true } });
 });
 
 // Технический пинг, чтобы быстро проверить, что бот жив после деплоя.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { getGuestByIdRemote } from "@/data/repo";
+import { getGuestByIdRemote, getGuestByTelegramId, linkGuestToTelegram } from "@/data/repo";
+import { getTelegramUser } from "@/lib/telegram";
 import type { Guest } from "@/types";
 import GuestAuth from "./GuestAuth";
 import GuestTasteProfile from "./GuestTasteProfile";
@@ -23,7 +24,8 @@ function hasTasteProfile(guest: Guest): boolean {
  * обсуждение с Никитой 11.10.2026 — профиль вынесен отдельной вкладкой, а
  * не кнопкой внутри главного экрана.
  */
-export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
+export default function GuestFlow({ tableNumber: initialTable }: { tableNumber: number | null }) {
+  const [tableNumber, setTableNumber] = useState<number | null>(initialTable);
   const [guest, setGuest] = useState<Guest | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<GuestTab>("home");
@@ -33,16 +35,38 @@ export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
   const [editingTaste, setEditingTaste] = useState(false);
 
   useEffect(() => {
-    const storedId = localStorage.getItem(STORAGE_KEY);
-    if (!storedId) {
+    (async () => {
+      const tgUser = getTelegramUser();
+      // 1) Профиль, привязанный к Telegram-аккаунту, — главный источник.
+      if (tgUser) {
+        const byTg = await getGuestByTelegramId(tgUser.id);
+        if (byTg) {
+          localStorage.setItem(STORAGE_KEY, byTg.id);
+          setGuest(byTg);
+          setLoading(false);
+          return;
+        }
+      }
+      // 2) Старые гости, зарегистрированные до привязки к Telegram, —
+      // находим по запомненному id и привязываем к этому аккаунту.
+      const storedId = localStorage.getItem(STORAGE_KEY);
+      if (storedId) {
+        const g = await getGuestByIdRemote(storedId);
+        if (g && tgUser && (!g.tableTelegramId || g.tableTelegramId === String(tgUser.id))) {
+          await linkGuestToTelegram(g.id, tgUser.id);
+          setGuest(g);
+          setLoading(false);
+          return;
+        }
+        if (g && !tgUser) {
+          setGuest(g);
+          setLoading(false);
+          return;
+        }
+        localStorage.removeItem(STORAGE_KEY);
+      }
       setLoading(false);
-      return;
-    }
-    getGuestByIdRemote(storedId).then((g) => {
-      setGuest(g);
-      setLoading(false);
-      if (!g) localStorage.removeItem(STORAGE_KEY); // профиль не нашёлся — начинаем заново
-    });
+    })();
   }, []);
 
   function handleAuthed(g: Guest, _isNew: boolean) {
@@ -71,7 +95,7 @@ export default function GuestFlow({ tableNumber }: { tableNumber: number }) {
   }
 
   function renderTab() {
-    if (tab === "home") return <GuestHome guest={guest!} tableNumber={tableNumber} />;
+    if (tab === "home") return <GuestHome guest={guest!} tableNumber={tableNumber} onPickTable={setTableNumber} />;
     if (editingTaste) return <GuestTasteProfile guest={guest!} onDone={handleTasteProfileDone} />;
     return <GuestTasteSummary guest={guest!} onEdit={() => setEditingTaste(true)} />;
   }

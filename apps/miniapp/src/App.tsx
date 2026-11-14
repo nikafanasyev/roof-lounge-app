@@ -29,7 +29,7 @@ import FlavorProposals from "@/screens/manager/FlavorProposals";
 import TechTasks from "@/screens/manager/TechTasks";
 import TableGuestScreen from "@/screens/guest/TableGuestScreen";
 import { isCurrentUserManager, isGuestTestAccount, isInsideTelegramClient } from "@/lib/telegram";
-import { dataSyncStatusStore, flavorProposalsStore, listPendingFlavorProposals } from "@/data/repo";
+import { appModeStore, dataSyncStatusStore, flavorProposalsStore, listPendingFlavorProposals } from "@/data/repo";
 import { useStore } from "@/data/useStore";
 
 // Единый кабинет "Сотрудник" (мастер + официант в одном лице — так это
@@ -189,7 +189,8 @@ function RoleShell() {
   // всегда видит гостевой сценарий, даже открыв мини-апп обычной кнопкой
   // бота (не по QR-ссылке стола) — иначе он попадал в кабинет "Сотрудник",
   // как любой другой Telegram-аккаунт (см. обсуждение 14.10.2026).
-  const isGuestScreen = location.pathname.startsWith("/table/") || isGuestTestAccount();
+  const appMode = useStore(appModeStore);
+  const isGuestScreen = location.pathname.startsWith("/table/") || isGuestTestAccount() || appMode === "guest";
   const syncStatus = useStore(dataSyncStatusStore);
 
   // Меню само закрывается при переходе на другой экран (в т.ч. кнопкой
@@ -197,6 +198,9 @@ function RoleShell() {
   useEffect(() => {
     setDrawerOpen(false);
   }, [location.pathname]);
+
+  // Пока не выяснили, гость это или сотрудник — не показываем ни один кабинет.
+  if (appMode === "unknown" && !isGuestScreen) return <LoadingScreen />;
 
   if (isGuestScreen) {
     if (syncStatus === "loading") return <LoadingScreen />;
