@@ -391,6 +391,12 @@ async function loadAromaTags() {
 // (см. /table/:token). Телефон/дату рождения/бонусы/код лояльности других
 // гостей так светить нельзя — их тянем точечно, по конкретному гостю (см.
 // findGuestByPhone/getGuestByIdRemote ниже).
+/** Ручное обновление списка гостей (кнопка "Обновить" у сотрудника). */
+export async function refreshGuests(): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  await loadGuests();
+}
+
 async function loadGuests() {
   const { data, error } = await supabase!
     .from("guests")
