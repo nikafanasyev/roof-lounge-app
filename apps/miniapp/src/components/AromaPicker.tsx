@@ -32,6 +32,7 @@ export default function AromaPicker({
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const [extra, setExtra] = useState<AromaTag[]>([]); // добавленные вручную в этой сессии — сразу видны чипом
 
   const searchResults = query.trim() ? searchAromaTags(query).filter((t) => !excludeIds.includes(t.id)) : shown;
@@ -49,13 +50,20 @@ export default function AromaPicker({
   async function handleAdd() {
     if (!newName.trim()) return;
     setAdding(true);
-    const tag = await addCustomAromaTag(newName, defaultDirection);
-    setAdding(false);
-    if (tag) {
-      setExtra((e) => [...e, tag]);
-      onToggle(tag.id);
-      setNewName("");
-      setAddOpen(false);
+    setAddError(null);
+    try {
+      const tag = await addCustomAromaTag(newName, defaultDirection);
+      if (tag) {
+        setExtra((e) => (e.some((x) => x.id === tag.id) ? e : [...e, tag]));
+        if (!selectedIds.includes(tag.id)) onToggle(tag.id);
+        setNewName("");
+        setQuery("");
+        setAddOpen(false);
+      }
+    } catch (err) {
+      setAddError(`Не получилось добавить аромат (${err instanceof Error ? err.message : "ошибка"})`);
+    } finally {
+      setAdding(false);
     }
   }
 
@@ -112,6 +120,11 @@ export default function AromaPicker({
             style={{ marginBottom: 10, width: "100%" }}
             autoFocus
           />
+          {addError && (
+            <div className="muted" style={{ color: "var(--danger)", marginBottom: 8, fontSize: 13 }}>
+              {addError}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8 }}>
             <button type="button" className="btn primary" style={{ flex: 1 }} disabled={!newName.trim() || adding} onClick={handleAdd}>
               {adding ? "Добавляем…" : "Добавить"}

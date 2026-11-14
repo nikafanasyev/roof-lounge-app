@@ -1313,14 +1313,20 @@ export async function addCustomAromaTag(name: string, direction: AromaDirection)
     aromaTagsStore.update((list) => [...list, local]);
     return local;
   }
-  const { data, error } = await supabase
-    .from("aroma_tags")
-    .upsert({ name: trimmed, direction, custom: true }, { onConflict: "name" })
-    .select("*")
-    .single();
+  // Обычный insert (upsert требует права UPDATE и мог молча падать); если такое
+  // название уже есть — берём существующую запись. Ошибки не глотаем, а
+  // пробрасываем наверх, чтобы гость видел причину.
+  let { data, error } = await supabase.from("aroma_tags").insert({ name: trimmed, direction, custom: true }).select("*").single();
+  if (error?.code === "23505") {
+    const existing = await supabase.from("aroma_tags").select("*").eq("name", trimmed).maybeSingle();
+    if (existing.data) {
+      data = existing.data;
+      error = null;
+    }
+  }
   if (error || !data) {
     logSyncError("addCustomAromaTag", error);
-    return null;
+    throw new Error(`${error?.code ?? ""} ${error?.message ?? "нет ответа"}`.trim());
   }
   const tag: AromaTag = { id: data.id, name: data.name, direction: data.direction as AromaDirection, custom: Boolean(data.custom) };
   aromaTagsStore.update((list) => (list.some((t) => t.id === tag.id) ? list : [...list, tag]));
