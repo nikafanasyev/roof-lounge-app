@@ -69,13 +69,37 @@ export default function AromaPicker({
 
   return (
     <div>
-      <input
-        type="text"
-        placeholder="Поиск аромата…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        style={{ marginBottom: 12, width: "100%" }}
-      />
+      <div style={{ position: "relative", marginBottom: 12 }}>
+        <input
+          type="text"
+          placeholder="Поиск аромата…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ width: "100%", paddingRight: 40, boxSizing: "border-box" }}
+        />
+        {query && (
+          <button
+            type="button"
+            aria-label="Очистить поиск"
+            onClick={() => setQuery("")}
+            style={{
+              position: "absolute",
+              right: 4,
+              top: "50%",
+              transform: "translateY(-50%)",
+              width: 32,
+              height: 32,
+              border: "none",
+              background: "transparent",
+              color: "var(--muted, #8a93a0)",
+              fontSize: 18,
+              cursor: "pointer",
+            }}
+          >
+            ✕
+          </button>
+        )}
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
         {visible.map((t) => {
           const active = selectedIds.includes(t.id);
