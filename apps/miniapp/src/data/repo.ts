@@ -1170,7 +1170,8 @@ export async function registerGuest(
     gender: "male" | "female";
     telegramId?: number;
   },
-): Promise<{ guest: Guest } | { error: RegisterGuestError }> {
+  retried = false,
+): Promise<{ guest: Guest } | { error: RegisterGuestError; detail?: string }> {
   if (!isSupabaseConfigured || !supabase) return { error: "unknown" };
   const normalized = normalizePhone(input.phone);
   const lastName = input.lastName.trim();
@@ -1195,7 +1196,14 @@ export async function registerGuest(
   if (error) {
     logSyncError("registerGuest", error);
     // 23505 — уникальный телефон уже занят (кто-то уже зарегистрирован с этим номером).
-    return { error: error.code === "23505" ? "duplicate_phone" : "unknown" };
+    if (error.code === "23505" && /telegram/i.test(error.message + (error.details ?? ""))) {
+      // этот Telegram уже привязан к другой карточке — освобождаем и пробуем ещё раз
+      if (input.telegramId && !retried) {
+        await supabase.from("guests").update({ telegram_id: null }).eq("telegram_id", input.telegramId);
+        return registerGuest(input, true);
+      }
+    }
+    return { error: error.code === "23505" ? "duplicate_phone" : "unknown", detail: `${error.code ?? ""} ${error.message}`.trim() };
   }
   const guest = mapGuestRow(data);
   // Оптимистично добавляем гостя в общий справочник (guestsStore) —
