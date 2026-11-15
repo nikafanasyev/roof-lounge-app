@@ -165,13 +165,18 @@ async function isStaffTelegramUser(): Promise<boolean> {
   if (!tgUser) return true; // вне Telegram (разработка) — как раньше, рабочий режим
   if (isCurrentUserManager()) return true;
   if (!supabase) return true;
-  const { data, error } = await supabase.from("staff").select("id, role").eq("telegram_id", tgUser.id).maybeSingle();
+  const { data, error } = await supabase.from("staff").select("id, role, archived").eq("telegram_id", tgUser.id).maybeSingle();
   if (error) {
     logSyncError("isStaffTelegramUser", error);
     return true; // при сбое сети не выкидываем сотрудника в гостевой режим
   }
-  setDbManager(data?.role === "manager");
-  return !!data;
+  // Архивная (удалённая) запись — это уже не сотрудник: такой аккаунт видит гостевой экран.
+  if (!data || data.archived) {
+    setDbManager(false);
+    return false;
+  }
+  setDbManager(data.role === "manager");
+  return true;
 }
 
 export interface ManagerCandidate {
