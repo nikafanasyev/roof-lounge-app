@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
@@ -51,8 +52,8 @@ bot.command("start", async (ctx) => {
         .upsert({ telegram_id: ctx.from.id, name: fullName, role: "master" }, { onConflict: "telegram_id", ignoreDuplicates: true });
       if (error) console.error("start staff: не удалось записать сотрудника:", error.message);
     }
-    const { data } = await supa.from("staff").select("id").eq("telegram_id", ctx.from.id).maybeSingle();
-    isStaff = !!data || (await isReportAdmin(ctx.from.id));
+    const { data } = await supa.from("staff").select("id, archived").eq("telegram_id", ctx.from.id).maybeSingle();
+    isStaff = (!!data && !data.archived) || (await isReportAdmin(ctx.from.id));
   }
 
   await ctx.reply(
@@ -85,6 +86,48 @@ bot.on("message:contact", async (ctx) => {
     return;
   }
   await ctx.reply("✅ Номер получен — возвращайтесь в приложение.", { reply_markup: { remove_keyboard: true } });
+});
+
+// Показывает Telegram ID — нужен, чтобы добавить аккаунт в VITE_MANAGER_TELEGRAM_IDS / REPORT_ADMIN_IDS.
+bot.command("myid", (ctx) => ctx.reply(`Ваш Telegram ID: ${ctx.from?.id ?? "?"}`));
+
+// /del в ответ на служебное сообщение бота — удаляет его у всех руководителей.
+bot.command("del", async (ctx) => {
+  if (!ctx.from || !(await isReportAdmin(ctx.from.id))) return;
+  const replied = ctx.message?.reply_to_message;
+  if (!replied || replied.from?.id !== ctx.me.id) {
+    await ctx.reply("Ответьте командой /del на сообщение бота, которое нужно удалить у всех руководителей.");
+    return;
+  }
+  const targets = new Map<string, { chat_id: number; message_id: number }>();
+  const add = (chat_id: number, message_id: number) => targets.set(`${chat_id}:${message_id}`, { chat_id, message_id });
+  add(ctx.chat.id, replied.message_id);
+  const db = notificationsDb();
+  if (db) {
+    const { data: row } = await db
+      .from("bot_notifications")
+      .select("group_key")
+      .eq("chat_id", ctx.chat.id)
+      .eq("message_id", replied.message_id)
+      .maybeSingle();
+    if (row?.group_key) {
+      const { data: copies } = await db.from("bot_notifications").select("chat_id, message_id").eq("group_key", row.group_key);
+      for (const c of copies ?? []) add(Number(c.chat_id), Number(c.message_id));
+      await db.from("bot_notifications").delete().eq("group_key", row.group_key);
+    }
+  }
+  for (const t of targets.values()) {
+    try {
+      await ctx.api.deleteMessage(t.chat_id, t.message_id);
+    } catch (err) {
+      console.error("/del: не удалось удалить сообщение", t, err);
+    }
+  }
+  try {
+    await ctx.api.deleteMessage(ctx.chat.id, ctx.message!.message_id);
+  } catch {
+    /* команду пользователя в личке бот может не удалить — не страшно */
+  }
 });
 
 // Технический пинг, чтобы быстро проверить, что бот жив после деплоя.
@@ -390,6 +433,28 @@ bot.catch((err) => {
 });
 
 /** Личное сообщение каждому руководителю из REPORT_ADMIN_IDS (ссылки-приглашения и т.п.). */
+function notificationsDb() {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return null;
+  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+/** Удаляет служебные сообщения руководителям старше суток (Telegram разрешает до 48 часов). */
+async function cleanupOldNotifications() {
+  const db = notificationsDb();
+  if (!db) return;
+  const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const { data, error } = await db.from("bot_notifications").select("id, chat_id, message_id").lt("sent_at", cutoff).limit(200);
+  if (error) return console.error("cleanupOldNotifications:", error.message);
+  for (const r of data ?? []) {
+    try {
+      await bot.api.deleteMessage(Number(r.chat_id), Number(r.message_id));
+    } catch {
+      /* уже удалено вручную или старше 48 часов — просто убираем запись */
+    }
+  }
+  if (data?.length) await db.from("bot_notifications").delete().in("id", data.map((r) => r.id));
+}
+
 async function notifyManagers(text: string) {
   const set = new Set(env.REPORT_ADMIN_IDS.split(",").map((x) => x.trim()).filter(Boolean));
   // Руководители, назначенные в приложении (staff.role = 'manager'), тоже получают сообщения.
@@ -399,9 +464,16 @@ async function notifyManagers(text: string) {
     for (const r of data ?? []) if (Number(r.telegram_id) > 0) set.add(String(r.telegram_id));
   }
   const ids = Array.from(set);
+  const groupKey = randomUUID();
+  const db = notificationsDb();
   for (const id of ids) {
     try {
-      await bot.api.sendMessage(id, text);
+      const sent = await bot.api.sendMessage(id, text);
+      // Запоминаем отправленное, чтобы удалить через сутки или командой /del.
+      if (db) {
+        const { error } = await db.from("bot_notifications").insert({ chat_id: sent.chat.id, message_id: sent.message_id, group_key: groupKey });
+        if (error) console.error("bot_notifications: не записалось:", error.message);
+      }
     } catch (err) {
       console.error(`Не удалось отправить личное сообщение ${id}:`, err);
     }
@@ -411,6 +483,7 @@ async function notifyManagers(text: string) {
 async function main() {
   startShiftNotifier(bot);
   startFlavorProposalNotifier(notifyManagers);
+  setInterval(() => void cleanupOldNotifications().catch((e) => console.error("cleanupOldNotifications:", e)), 30 * 60_000);
 
   // Уведомления персоналу о QR-вызовах (см. README, раздел про Supabase Realtime).
   // Без настроенных SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY просто не запускается —
