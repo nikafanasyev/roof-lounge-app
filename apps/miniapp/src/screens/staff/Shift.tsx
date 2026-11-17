@@ -17,6 +17,8 @@ import type { ChecklistItem, StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
+const SHIFT_PHOTOS = 3;
+
 interface CapturedPhoto {
   url: string;
   blob: Blob;
@@ -64,8 +66,10 @@ function ZoneShift() {
   const shift = useStore(shiftStore);
   const [role, setRole] = useState<StaffRole>(getCurrentStaffRole);
   const [handoverNote, setHandoverNote] = useState("");
-  const [openPhoto, setOpenPhoto] = useState<CapturedPhoto | undefined>();
-  const [closePhoto, setClosePhoto] = useState<CapturedPhoto | undefined>();
+  const [openPhotos, setOpenPhotos] = useState<(CapturedPhoto | undefined)[]>(() => Array(SHIFT_PHOTOS).fill(undefined));
+  const [closePhotos, setClosePhotos] = useState<(CapturedPhoto | undefined)[]>(() => Array(SHIFT_PHOTOS).fill(undefined));
+  const openCount = openPhotos.filter(Boolean).length;
+  const closeCount = closePhotos.filter(Boolean).length;
 
   const roleShift = role === "bar" ? shift.bar : shift.hookah;
 
@@ -74,8 +78,8 @@ function ZoneShift() {
     setCurrentStaffRole(next);
   }
 
-  const openReady = isChecklistComplete(roleShift.openChecklist) && !!openPhoto;
-  const closeReady = isChecklistComplete(roleShift.closeChecklist) && !!closePhoto;
+  const openReady = isChecklistComplete(roleShift.openChecklist) && openCount === SHIFT_PHOTOS;
+  const closeReady = isChecklistComplete(roleShift.closeChecklist) && closeCount === SHIFT_PHOTOS;
 
   // У каждой зоны (бар/кальяны) своё открытие и закрытие, по отметке самой
   // зоны, а не по общему статусу смены: смену могут открыть двое сотрудников,
@@ -146,22 +150,26 @@ function ZoneShift() {
           <div className="eyebrow" style={{ marginTop: 8 }}>
             Фото на месте (со штампом даты и времени, уходит руководителю в Telegram)
           </div>
-          <CameraCapture
-            previewUrl={openPhoto?.url}
-            onCapture={(url, blob) => setOpenPhoto({ url, blob })}
-            label="Сфотографироваться в заведении"
-          />
+          {openPhotos.map((ph, i) => (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <CameraCapture
+                previewUrl={ph?.url}
+                onCapture={(url, blob) => setOpenPhotos((l) => l.map((x, j) => (j === i ? { url, blob } : x)))}
+                label={`Фото ${i + 1} из ${SHIFT_PHOTOS}`}
+              />
+            </div>
+          ))}
 
           <button
             className="btn primary"
             style={{ marginTop: 12 }}
             disabled={!openReady}
             onClick={() => {
-              openShift(role, getStaffProfile().name, openPhoto?.blob);
-              setOpenPhoto(undefined);
+              openShift(role, getStaffProfile().name, openPhotos.filter((x): x is CapturedPhoto => !!x).map((x) => x.blob));
+              setOpenPhotos(Array(SHIFT_PHOTOS).fill(undefined));
             }}
           >
-            {openReady ? "Отправить" : !isChecklistComplete(roleShift.openChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+            {openReady ? "Отправить" : !isChecklistComplete(roleShift.openChecklist) ? "Отметьте все пункты" : `Сделайте фото (${openCount} из ${SHIFT_PHOTOS})`}
           </button>
         </>
       )}
@@ -191,11 +199,15 @@ function ZoneShift() {
           <div className="eyebrow" style={{ marginTop: 8 }}>
             Фото контрольных зон (со штампом даты и времени, уходит руководителю в Telegram)
           </div>
-          <CameraCapture
-            previewUrl={closePhoto?.url}
-            onCapture={(url, blob) => setClosePhoto({ url, blob })}
-            label="Сфотографировать зал"
-          />
+          {closePhotos.map((ph, i) => (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <CameraCapture
+                previewUrl={ph?.url}
+                onCapture={(url, blob) => setClosePhotos((l) => l.map((x, j) => (j === i ? { url, blob } : x)))}
+                label={`Фото ${i + 1} из ${SHIFT_PHOTOS}`}
+              />
+            </div>
+          ))}
 
           <div className="eyebrow" style={{ marginTop: 12 }}>
             Передача смены (заметка для следующей)
@@ -211,12 +223,12 @@ function ZoneShift() {
             className="btn primary"
             disabled={!closeReady}
             onClick={() => {
-              closeShift(role, getStaffProfile().name, handoverNote || undefined, closePhoto?.blob);
-              setClosePhoto(undefined);
+              closeShift(role, getStaffProfile().name, handoverNote || undefined, closePhotos.filter((x): x is CapturedPhoto => !!x).map((x) => x.blob));
+              setClosePhotos(Array(SHIFT_PHOTOS).fill(undefined));
               setHandoverNote("");
             }}
           >
-            {closeReady ? "Отправить" : !isChecklistComplete(roleShift.closeChecklist) ? "Отметьте все пункты" : "Сделайте фото"}
+            {closeReady ? "Отправить" : !isChecklistComplete(roleShift.closeChecklist) ? "Отметьте все пункты" : `Сделайте фото (${closeCount} из ${SHIFT_PHOTOS})`}
           </button>
         </>
       )}
