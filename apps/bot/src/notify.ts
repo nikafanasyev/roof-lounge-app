@@ -7,7 +7,9 @@ interface ServiceCallEvent {
 }
 
 interface ShiftPhotoEvent {
-  kind: "open" | "close";
+  kind: "open" | "close" | "tech";
+  /** Для kind = "tech": текст тех. задачи. */
+  caption: string | null;
   role: "bar" | "hookah" | "kitchen" | "cleaning" | "waiter";
   staffName: string | null;
   /** Скачивает байты всех фото этого открытия/закрытия смены (одна группа, обычно 1–3 штуки). */
@@ -114,7 +116,8 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
   type PhotoRow = {
     id: string;
     shift_id: string | null;
-    kind: "open" | "close";
+    kind: "open" | "close" | "tech";
+    caption?: string | null;
     role: "bar" | "hookah" | "kitchen" | "cleaning" | "waiter";
     storage_path: string;
     staff_name: string | null;
@@ -140,6 +143,7 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
     try {
       await onEvent({
         kind: first.kind,
+        caption: first.caption ?? null,
         role: first.role,
         staffName: first.staff_name,
         downloadPhotos: async () => {
@@ -168,7 +172,7 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
   function enqueue(row: PhotoRow) {
     if (queued.has(row.id)) return;
     queued.add(row.id);
-    const key = [row.shift_id ?? "", row.role, row.kind, row.staff_name ?? ""].join("|");
+    const key = [row.shift_id ?? "", row.role, row.kind, row.staff_name ?? "", row.caption ?? ""].join("|");
     const existing = groups.get(key);
     if (existing) {
       existing.rows.push(row);
@@ -185,7 +189,7 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
   async function pollPending() {
     const { data, error } = await supabase
       .from("shift_photo_uploads")
-      .select("id, shift_id, kind, role, storage_path, staff_name, created_at")
+      .select("id, shift_id, kind, caption, role, storage_path, staff_name, created_at")
       .order("created_at", { ascending: true })
       .limit(30);
     if (error) {

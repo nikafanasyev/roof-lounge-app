@@ -12,8 +12,10 @@ import {
   toggleOpenChecklistItem,
 } from "@/data/repo";
 import CameraCapture from "@/components/CameraCapture";
-import { fetchMyArrivalToday, fetchMyShiftTimesToday, getTodayCleaningTasksForRole, recordArrival, recordDeparture, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
-import type { ChecklistItem, StaffRole } from "@/types";
+import { businessDateIso, fetchMyArrivalToday, fetchMyShiftTimesToday, fetchTodayArrivals, getTodayCleaningTasksForRole, recordArrival, recordDeparture, scheduleStore, sendTechPhotos, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
+import type { TodayArrival } from "@/data/repo";
+import { ROLE_LABELS as ALL_ROLE_LABELS } from "@/lib/roles";
+import type { ChecklistItem, StaffRole, WorkRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
@@ -51,6 +53,112 @@ function PhotoSet({ photos, onChange }: { photos: CapturedPhoto[]; onChange: (ne
           label={photos.length === 0 ? "Сделать фото (обязательно)" : `Добавить фото (${photos.length} из ${MAX_SHIFT_PHOTOS})`}
         />
       )}
+    </div>
+  );
+}
+
+/** Отправка фото выполнения тех. задачи руководителю (до трёх фото, минимум одно). */
+function TechPhotoSender({ role, task }: { role: WorkRole; task: string }) {
+  const [open, setOpen] = useState(false);
+  const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  async function send() {
+    setBusy(true);
+    setError("");
+    const ok = await sendTechPhotos(role, task, photos.map((p) => p.blob));
+    setBusy(false);
+    if (!ok) return setError("Не получилось отправить, попробуйте ещё раз");
+    setSent(true);
+    setOpen(false);
+    setPhotos([]);
+  }
+
+  if (sent) {
+    return (
+      <div className="muted" style={{ fontSize: 13, margin: "-4px 0 12px 4px" }}>
+        ✓ Фото выполнения отправлено руководителю{" "}
+        <button type="button" className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => { setSent(false); setOpen(true); }}>
+          ещё фото
+        </button>
+      </div>
+    );
+  }
+  if (!open) {
+    return (
+      <button className="btn secondary" style={{ width: "100%", margin: "-4px 0 12px" }} onClick={() => setOpen(true)}>
+        📸 Отправить фото выполнения
+      </button>
+    );
+  }
+  return (
+    <div className="card" style={{ marginTop: -4 }}>
+      <div className="eyebrow">Фото выполненной работы (со штампом даты и времени)</div>
+      <PhotoSet photos={photos} onChange={setPhotos} />
+      {error && <div style={{ color: "var(--danger, #e5484d)", fontSize: 13, marginTop: 8 }}>{error}</div>}
+      <div className="btn-row" style={{ marginTop: 10 }}>
+        <button className="btn primary" disabled={photos.length === 0 || busy} onClick={send}>
+          {busy ? "Отправляем…" : photos.length === 0 ? "Сделайте фото" : "Отправить"}
+        </button>
+        <button className="btn secondary" onClick={() => { setOpen(false); setPhotos([]); }}>
+          Отмена
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Статусы всех зон сегодня: бар и кальяны из смены заведения, остальные — по отметкам прихода и графику. */
+function ZoneStatuses({ shift }: { shift: ReturnType<typeof shiftStore.get> }) {
+  const schedule = useStore(scheduleStore);
+  const [arrivals, setArrivals] = useState<TodayArrival[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetchTodayArrivals().then((a) => alive && setArrivals(a));
+    load();
+    const t = setInterval(load, 30000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+  const today = businessDateIso();
+  const scheduled = new Set(schedule.filter((e) => e.date.slice(0, 10) === today).map((e) => e.role));
+  const order: WorkRole[] = ["bar", "hookah", "waiter", "kitchen", "cleaning"];
+
+  return (
+    <div className="card">
+      {order.map((r, i) => {
+        let state: string;
+        let who: string | undefined;
+        if (r === "bar" || r === "hookah") {
+          const rs = r === "bar" ? shift.bar : shift.hookah;
+          state = rs.closedAt ? "закрыта" : rs.openedAt ? "открыта" : "не открыта";
+          who = rs.openedBy && !rs.closedAt ? rs.openedBy : undefined;
+        } else {
+          const list = arrivals.filter((a) => a.role === r);
+          const active = list.find((a) => !a.closedAt);
+          if (active) {
+            state = "открыта";
+            who = active.staffName;
+          } else if (list.length > 0) {
+            state = "закрыта";
+          } else {
+            state = scheduled.has(r) ? "не открыта" : "нет в графике";
+          }
+        }
+        return (
+          <div key={r} className="card-row" style={{ marginTop: i === 0 ? 0 : 8 }}>
+            <span>{ALL_ROLE_LABELS[r]}</span>
+            <span className="muted" style={{ fontSize: 13 }}>
+              {state}
+              {who ? ` · ${who}` : ""}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -139,21 +247,7 @@ function ZoneShift() {
         )}
       </div>
 
-      <div className="card">
-        {(Object.keys(ROLE_LABELS) as StaffRole[]).map((r) => {
-          const rs = r === "bar" ? shift.bar : shift.hookah;
-          const state = rs.closedAt ? "закрыта" : rs.openedAt ? "открыта" : "не открыта";
-          return (
-            <div key={r} className="card-row" style={{ marginTop: r === "bar" ? 0 : 8 }}>
-              <span>{ROLE_LABELS[r]}</span>
-              <span className="muted" style={{ fontSize: 13 }}>
-                {state}
-                {rs.openedBy && !rs.closedAt ? ` · ${rs.openedBy}` : ""}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <ZoneStatuses shift={shift} />
 
       <div className="eyebrow" style={{ marginTop: 4 }}>
         Моя зона на этой смене
@@ -203,11 +297,14 @@ function ZoneShift() {
           </div>
           {techTasks.length === 0 && <div className="card muted">На сегодня тех. задач нет</div>}
           {techTasks.map((t, i) => (
-            <div key={i} className="card">
-              <div>{t.task}</div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {t.note}
+            <div key={i}>
+              <div className="card">
+                <div>{t.task}</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {t.note}
+                </div>
               </div>
+              <TechPhotoSender role={role} task={t.task} />
             </div>
           ))}
         </>
@@ -331,11 +428,14 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" | "waiter" }) {
           </div>
           {techTasks.length === 0 && <div className="card muted">На сегодня тех. задач нет</div>}
           {techTasks.map((t, i) => (
-            <div key={i} className="card">
-              <div>{t.task}</div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {t.note}
+            <div key={i}>
+              <div className="card">
+                <div>{t.task}</div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {t.note}
+                </div>
               </div>
+              <TechPhotoSender role={role} task={t.task} />
             </div>
           ))}
           {role === "waiter" && !closedAt && (
