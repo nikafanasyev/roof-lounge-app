@@ -10,8 +10,8 @@ interface ShiftPhotoEvent {
   kind: "open" | "close";
   role: "bar" | "hookah" | "kitchen" | "cleaning" | "waiter";
   staffName: string | null;
-  /** Скачивает байты фото из Storage. Вызывающий сам решает, что с ними делать. */
-  downloadPhoto: () => Promise<Buffer | null>;
+  /** Скачивает байты всех фото этого открытия/закрытия смены (одна группа, обычно 1–3 штуки). */
+  downloadPhotos: () => Promise<Buffer[]>;
 }
 
 /**
@@ -111,35 +111,72 @@ export function watchServiceCalls(onCall: (event: ServiceCallEvent) => void | Pr
 export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Promise<void>) {
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
 
-  type PhotoRow = { id: string; kind: "open" | "close"; role: "bar" | "hookah" | "kitchen" | "cleaning" | "waiter"; storage_path: string; staff_name: string | null };
-  // inFlight защищает от двойной отправки, когда одну строку ловят и Realtime,
+  type PhotoRow = {
+    id: string;
+    shift_id: string | null;
+    kind: "open" | "close";
+    role: "bar" | "hookah" | "kitchen" | "cleaning" | "waiter";
+    storage_path: string;
+    staff_name: string | null;
+  };
+  // Фото одного открытия/закрытия смены (до 3 штук) приходят отдельными строками
+  // почти одновременно — склеиваем их в одну группу и шлём в Telegram одним
+  // сообщением-альбомом. Группа отправляется, когда 4 секунды новых фото нет
+  // (или через 12 секунд после первого).
+  const QUIET_MS = 4000;
+  const MAX_WAIT_MS = 12000;
+  // queued защищает от двойной отправки, когда одну строку ловят и Realtime,
   // и запасной опрос.
-  const inFlight = new Set<string>();
+  const queued = new Set<string>();
+  const groups = new Map<string, { rows: PhotoRow[]; timer: ReturnType<typeof setTimeout>; firstAt: number }>();
 
-  async function handleRow(row: PhotoRow) {
-    if (inFlight.has(row.id)) return;
-    inFlight.add(row.id);
+  async function flush(key: string) {
+    const group = groups.get(key);
+    if (!group) return;
+    groups.delete(key);
+    clearTimeout(group.timer);
+    const rows = group.rows;
+    const first = rows[0];
     try {
       await onEvent({
-        kind: row.kind,
-        role: row.role,
-        staffName: row.staff_name,
-        downloadPhoto: async () => {
-          const { data, error } = await supabase.storage.from("shift-photos").download(row.storage_path);
-          if (error || !data) {
-            console.error("Не удалось скачать фото смены:", error?.message);
-            return null;
+        kind: first.kind,
+        role: first.role,
+        staffName: first.staff_name,
+        downloadPhotos: async () => {
+          const buffers: Buffer[] = [];
+          for (const row of rows) {
+            const { data, error } = await supabase.storage.from("shift-photos").download(row.storage_path);
+            if (error || !data) {
+              console.error("Не удалось скачать фото смены:", error?.message);
+              continue;
+            }
+            buffers.push(Buffer.from(await data.arrayBuffer()));
           }
-          return Buffer.from(await data.arrayBuffer());
+          return buffers;
         },
       });
     } catch (err) {
       console.error("Ошибка при обработке фото смены:", err);
     } finally {
       // Удаляем в любом случае — фото не должно оставаться ни в Storage, ни в таблице.
-      await supabase.storage.from("shift-photos").remove([row.storage_path]);
-      await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
-      inFlight.delete(row.id);
+      await supabase.storage.from("shift-photos").remove(rows.map((r) => r.storage_path));
+      await supabase.from("shift_photo_uploads").delete().in("id", rows.map((r) => r.id));
+      rows.forEach((r) => queued.delete(r.id));
+    }
+  }
+
+  function enqueue(row: PhotoRow) {
+    if (queued.has(row.id)) return;
+    queued.add(row.id);
+    const key = [row.shift_id ?? "", row.role, row.kind, row.staff_name ?? ""].join("|");
+    const existing = groups.get(key);
+    if (existing) {
+      existing.rows.push(row);
+      clearTimeout(existing.timer);
+      const wait = Math.max(0, Math.min(QUIET_MS, MAX_WAIT_MS - (Date.now() - existing.firstAt)));
+      existing.timer = setTimeout(() => void flush(key), wait);
+    } else {
+      groups.set(key, { rows: [row], firstAt: Date.now(), timer: setTimeout(() => void flush(key), QUIET_MS) });
     }
   }
 
@@ -148,9 +185,9 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
   async function pollPending() {
     const { data, error } = await supabase
       .from("shift_photo_uploads")
-      .select("id, kind, role, storage_path, staff_name, created_at")
+      .select("id, shift_id, kind, role, storage_path, staff_name, created_at")
       .order("created_at", { ascending: true })
-      .limit(10);
+      .limit(30);
     if (error) {
       console.error("shift_photo_uploads: ошибка опроса:", error.message);
       return;
@@ -162,7 +199,7 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
         await supabase.from("shift_photo_uploads").delete().eq("id", row.id);
         continue;
       }
-      await handleRow(row);
+      enqueue(row);
     }
   }
   pollPending();
@@ -172,8 +209,8 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
     supabase.channel(`shift_photo_uploads_inserts_${Date.now()}`).on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "shift_photo_uploads" },
-      async (payload) => {
-        await handleRow(payload.new as PhotoRow);
+      (payload) => {
+        enqueue(payload.new as PhotoRow);
       },
     ),
   );
