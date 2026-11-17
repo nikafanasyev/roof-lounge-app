@@ -520,8 +520,8 @@ async function loadServiceCalls() {
 }
 
 /** Пункты про тех. задачи в чек-листах не показываем (их нет в seed, но они могли сохраниться в старой смене в базе). */
-function dropTechItems(list: ChecklistItem[] | null | undefined): ChecklistItem[] | undefined {
-  return list?.filter((i) => i.id !== "bar-c-6" && !/тех\.?\s*задач/i.test(i.label));
+function dropTechItems(list: ChecklistItem[] | null | undefined): ChecklistItem[] {
+  return (list ?? []).filter((i) => i.id !== "bar-c-6" && !/тех\.?\s*задач/i.test(i.label));
 }
 
 async function loadShift() {
