@@ -13,10 +13,21 @@ const CATEGORY_ICONS: Record<string, string> = {
   "Правила бронирования": "📅",
 };
 
+const CAT_VIEW_KEY = "kb-cat-view";
+
+function readCatView(): "tiles" | "list" {
+  try {
+    return localStorage.getItem(CAT_VIEW_KEY) === "list" ? "list" : "tiles";
+  } catch {
+    return "tiles";
+  }
+}
+
 export default function Knowledge() {
   useStore(knowledgeStore);
   const groups = groupKnowledgeByCategory();
   const [query, setQuery] = useState("");
+  const [catView, setCatView] = useState<"tiles" | "list">(readCatView);
   const [params, setParams] = useSearchParams();
   const category = params.get("cat");
   const q = query.trim().toLowerCase();
@@ -31,6 +42,15 @@ export default function Knowledge() {
       articles: q ? g.articles.filter((a) => a.title.toLowerCase().includes(q) || a.body.toLowerCase().includes(q)) : g.articles,
     }))
     .filter((g) => g.articles.length > 0);
+
+  function chooseCatView(v: "tiles" | "list") {
+    setCatView(v);
+    try {
+      localStorage.setItem(CAT_VIEW_KEY, v);
+    } catch {
+      /* без хранилища просто не запоминаем */
+    }
+  }
 
   function openCategory(name: string) {
     setQuery("");
@@ -91,15 +111,40 @@ export default function Knowledge() {
       />
 
       {!q && (
-        <div className="kb-cat-grid">
-          {groups.map((g) => (
-            <button key={g.category} className="kb-cat-tile" onClick={() => openCategory(g.category)}>
-              <span className="icon">{CATEGORY_ICONS[g.category] ?? "📄"}</span>
-              <span className="name">{g.category}</span>
-              <span className="count">{g.articles.length}</span>
+        <>
+          <div className="seg-toggle" role="tablist">
+            <button className={catView === "tiles" ? "active" : ""} onClick={() => chooseCatView("tiles")}>
+              Плитки
             </button>
-          ))}
-        </div>
+            <button className={catView === "list" ? "active" : ""} onClick={() => chooseCatView("list")}>
+              Список
+            </button>
+          </div>
+          {catView === "tiles" ? (
+            <div className="kb-cat-grid">
+              {groups.map((g) => (
+                <button key={g.category} className="kb-cat-tile" onClick={() => openCategory(g.category)}>
+                  <span className="icon">{CATEGORY_ICONS[g.category] ?? "📄"}</span>
+                  <span className="name">{g.category}</span>
+                  <span className="count">{g.articles.length}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginBottom: 16 }}>
+              {groups.map((g) => (
+                <div key={g.category} className="card card-row" style={{ cursor: "pointer" }} onClick={() => openCategory(g.category)}>
+                  <span>
+                    {CATEGORY_ICONS[g.category] ?? "📄"} {g.category}
+                  </span>
+                  <span className="muted">
+                    {g.articles.length} →
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {q && visibleGroups.length === 0 && <div className="list-empty">Ничего не нашли</div>}
