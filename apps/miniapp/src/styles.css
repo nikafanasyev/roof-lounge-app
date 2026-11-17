@@ -1246,3 +1246,89 @@ input[type="date"]::-webkit-date-and-time-value {
   text-align: left;
   min-height: 1.2em;
 }
+
+/* База знаний: переключатель вида, плитки категорий, таблица тех. карт */
+.seg-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin: 0 0 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.seg-toggle button {
+  flex: 1;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.seg-toggle button.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.kb-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.kb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.kb-table tr + tr th,
+.kb-table tr + tr td {
+  border-top: 1px solid var(--border);
+}
+.kb-table th {
+  width: 38%;
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 12px;
+  font-weight: 700;
+}
+.kb-table td {
+  padding: 10px 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.kb-cat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.kb-cat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 12px;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.kb-cat-tile.active {
+  border-color: var(--accent);
+}
+.kb-cat-tile .icon {
+  font-size: 22px;
+}
+.kb-cat-tile .name {
+  font-weight: 700;
+}
+.kb-cat-tile .count {
+  font-size: 12px;
+  color: var(--muted);
+}

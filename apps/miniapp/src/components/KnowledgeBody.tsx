@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 // Лёгкая разметка для статей базы знаний — вместо одной "простыни" текста
 // рендерим заголовки разделов и карточки по пунктам/позициям, в духе Notion:
 //   # Раздел              -> заголовок-разделитель между блоками
@@ -51,8 +53,48 @@ function parseBody(body: string): Block[] {
   return blocks;
 }
 
+type CardBlock = Extract<Block, { kind: "card" }>;
+
+const VIEW_KEY = "kb-view";
+
+function readView(): "cards" | "table" {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "table" ? "table" : "cards";
+  } catch {
+    return "cards";
+  }
+}
+
+function CardView({ block }: { block: CardBlock }) {
+  return (
+    <div className="card">
+      {block.title && <div style={{ fontWeight: 700, marginBottom: block.items.length || block.paragraphs.length ? 8 : 0 }}>{block.title}</div>}
+      {block.paragraphs.map((p, i) => (
+        <p key={i} className={block.items.length ? "muted" : undefined} style={{ margin: i === 0 ? 0 : "8px 0 0", fontSize: 14, lineHeight: 1.5 }}>
+          {p}
+        </p>
+      ))}
+      {block.items.length > 0 && (
+        <ul style={{ margin: block.paragraphs.length ? "8px 0 0" : 0, padding: 0, listStyle: "none" }}>
+          {block.items.map((item, i) => (
+            <li key={i} style={{ display: "flex", gap: 8, padding: "3px 0", fontSize: 14, lineHeight: 1.4 }}>
+              <span className="muted">·</span>
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function isTechCard(b: Block): b is CardBlock {
+  return b.kind === "card" && !!b.title && b.items.length > 0;
+}
+
 export default function KnowledgeBody({ body, query }: { body: string; query?: string }) {
   const allBlocks = parseBody(body);
+  const [view, setView] = useState<"cards" | "table">(readView);
   const q = query?.trim().toLowerCase();
   const blocks = !q
     ? allBlocks
@@ -63,35 +105,64 @@ export default function KnowledgeBody({ body, query }: { body: string; query?: s
           block.items.some((i) => i.toLowerCase().includes(q)) ||
           block.paragraphs.some((p) => p.toLowerCase().includes(q)),
       );
+  const canToggle = allBlocks.filter(isTechCard).length >= 2;
+
+  function chooseView(v: "cards" | "table") {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* без хранилища просто не запоминаем */
+    }
+  }
+
+  // В режиме таблицы подряд идущие тех. карты склеиваем в одну таблицу.
+  const out: JSX.Element[] = [];
+  for (let idx = 0; idx < blocks.length; idx++) {
+    const block = blocks[idx];
+    if (block.kind === "h1") {
+      out.push(
+        <h2 key={idx} style={{ marginTop: idx === 0 ? 0 : 20 }}>
+          {block.text}
+        </h2>,
+      );
+    } else if (view === "table" && isTechCard(block)) {
+      const rows: CardBlock[] = [];
+      let j = idx;
+      while (j < blocks.length && isTechCard(blocks[j])) rows.push(blocks[j++] as CardBlock);
+      out.push(
+        <div key={idx} className="kb-table-wrap">
+          <table className="kb-table">
+            <tbody>
+              {rows.map((r, k) => (
+                <tr key={k}>
+                  <th>{r.title}</th>
+                  <td>{r.items.join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      );
+      idx = j - 1;
+    } else {
+      out.push(<CardView key={idx} block={block} />);
+    }
+  }
 
   return (
     <>
-      {blocks.map((block, idx) =>
-        block.kind === "h1" ? (
-          <h2 key={idx} style={{ marginTop: idx === 0 ? 0 : 20 }}>
-            {block.text}
-          </h2>
-        ) : (
-          <div key={idx} className="card">
-            {block.title && <div style={{ fontWeight: 700, marginBottom: block.items.length || block.paragraphs.length ? 8 : 0 }}>{block.title}</div>}
-            {block.paragraphs.map((p, i) => (
-              <p key={i} className={block.items.length ? "muted" : undefined} style={{ margin: i === 0 ? 0 : "8px 0 0", fontSize: 14, lineHeight: 1.5 }}>
-                {p}
-              </p>
-            ))}
-            {block.items.length > 0 && (
-              <ul style={{ margin: block.paragraphs.length ? "8px 0 0" : 0, padding: 0, listStyle: "none" }}>
-                {block.items.map((item, i) => (
-                  <li key={i} style={{ display: "flex", gap: 8, padding: "3px 0", fontSize: 14, lineHeight: 1.4 }}>
-                    <span className="muted">·</span>
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ),
+      {canToggle && (
+        <div className="seg-toggle" role="tablist">
+          <button className={view === "cards" ? "active" : ""} onClick={() => chooseView("cards")}>
+            Карточки
+          </button>
+          <button className={view === "table" ? "active" : ""} onClick={() => chooseView("table")}>
+            Таблица
+          </button>
+        </div>
       )}
+      {out}
     </>
   );
 }
