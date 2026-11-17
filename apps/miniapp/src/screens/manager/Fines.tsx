@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "@/data/useStore";
-import { addAdjustment, adjustmentsStore, deleteAdjustment, listActiveStaffDirectory, listAllAdjustments, listStaffDirectory, staffDirectoryStore } from "@/data/repo";
+import { addAdjustment, adjustmentsStore, deleteAdjustment, lateProposalsStore, listActiveStaffDirectory, listAllAdjustments, listPendingLateProposals, listStaffDirectory, resolveLateProposal, staffDirectoryStore } from "@/data/repo";
 import type { AdjustmentType } from "@/types";
 
 function money(n: number): string {
@@ -19,6 +19,8 @@ function money(n: number): string {
 export default function Fines() {
   useStore(adjustmentsStore);
   useStore(staffDirectoryStore);
+  useStore(lateProposalsStore);
+  const pendingLate = listPendingLateProposals();
   // Раньше здесь был listAdjustments() — он возвращает записи только
   // текущего вошедшего аккаунта, поэтому штрафы/премии, начисленные другим
   // сотрудникам, в этом списке фактически не появлялись (см. жалобу Никиты
@@ -90,6 +92,30 @@ export default function Fines() {
       <p className="muted" style={{ fontSize: 13, marginTop: -8, marginBottom: 16 }}>
         Учитываются в «Зарплата» и в карточке сотрудника автоматически.
       </p>
+
+      {pendingLate.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="eyebrow">Предложены штрафы за опоздание · {pendingLate.length}</div>
+          {pendingLate.map((p) => (
+            <div key={p.id} className="card">
+              <div style={{ fontWeight: 700 }}>
+                {listStaffDirectory().find((s) => s.id === p.staffId)?.name ?? "Сотрудник"} · {money(p.amount)}
+              </div>
+              <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                {p.reason}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button className="btn" onClick={() => resolveLateProposal(p.id, true)}>
+                  Применить
+                </button>
+                <button className="btn secondary" onClick={() => resolveLateProposal(p.id, false)}>
+                  Отклонить
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!showForm && (
         <button className="btn secondary" style={{ width: "100%", marginBottom: 14 }} onClick={() => setShowForm(true)}>
