@@ -1655,10 +1655,10 @@ function closeVenueShift(closedBy: string, closedAt: string, handoverNote?: stri
  * её через Realtime, пересылает фото руководителю в Telegram и сразу удаляет и
  * файл, и запись. Без Supabase — просто no-op, фото живёт только в памяти вкладки.
  */
-function uploadAndNotifyShiftPhoto(role: StaffRole, kind: "open" | "close", blob: Blob, staffName: string) {
+function uploadAndNotifyShiftPhoto(role: StaffRole, kind: "open" | "close", blob: Blob, staffName: string, index = 0) {
   if (!isSupabaseConfigured || !supabase) return;
   const shiftId = shiftStore.get().id;
-  const path = `${shiftId}/${role}-${kind}-${Date.now()}.jpg`;
+  const path = `${shiftId}/${role}-${kind}-${Date.now()}-${index}.jpg`;
   supabase.storage
     .from("shift-photos")
     .upload(path, blob, { contentType: "image/jpeg" })
@@ -1669,6 +1669,10 @@ function uploadAndNotifyShiftPhoto(role: StaffRole, kind: "open" | "close", blob
         .insert({ shift_id: shiftId, kind, role, storage_path: path, staff_name: staffName })
         .then(({ error }) => error && logSyncError("shiftPhotoUpload:insert", error));
     });
+}
+
+function toBlobList(b?: Blob | Blob[]): Blob[] {
+  return b ? (Array.isArray(b) ? b : [b]) : [];
 }
 
 function roleChecklists(shift: Shift, role: StaffRole): RoleChecklists {
@@ -1708,13 +1712,13 @@ export function toggleCloseChecklistItem(role: StaffRole, itemId: string) {
  * сохранён поштучно через toggleOpenChecklistItem. Принимает роль (бар/
  * кальяны), т.к. у каждой роли свой чек-лист и своё фото.
  */
-export async function openShift(role: StaffRole, openedBy: string, photoBlob?: Blob) {
+export async function openShift(role: StaffRole, openedBy: string, photoBlobs?: Blob | Blob[]) {
   await openVenueShiftIfNeeded();
   const at = new Date().toISOString();
   // Каждая зона (бар/кальяны) открывается отдельно и своим сотрудником.
   shiftStore.update((s) => ({ ...s, [role]: { ...s[role], openedBy, openedAt: at, closedBy: undefined, closedAt: undefined } }));
   syncRoleClaim(role, "open", at);
-  if (photoBlob) uploadAndNotifyShiftPhoto(role, "open", photoBlob, openedBy);
+  toBlobList(photoBlobs).forEach((b, i) => uploadAndNotifyShiftPhoto(role, "open", b, openedBy, i));
 }
 
 /**
@@ -1722,7 +1726,7 @@ export async function openShift(role: StaffRole, openedBy: string, photoBlob?: B
  * закрыты все открытые зоны — иначе первый закрывшийся "выключал" смену
  * второму сотруднику посреди работы.
  */
-export function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlob?: Blob) {
+export function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlobs?: Blob | Blob[]) {
   const closedAt = new Date().toISOString();
   const otherRole: StaffRole = role === "bar" ? "hookah" : "bar";
   const before = shiftStore.get();
@@ -1739,7 +1743,7 @@ export function closeShift(role: StaffRole, closedBy: string, handoverNote?: str
   else if (handoverNote && isSupabaseConfigured && supabase) {
     supabase.from("shifts").update({ handover_note: handoverNote }).eq("id", before.id).then(({ error }) => error && logSyncError("closeShift:note", error));
   }
-  if (photoBlob) uploadAndNotifyShiftPhoto(role, "close", photoBlob, closedBy);
+  toBlobList(photoBlobs).forEach((b, i) => uploadAndNotifyShiftPhoto(role, "close", b, closedBy, i));
 }
 
 export function isChecklistComplete(items: ChecklistItem[]): boolean {
