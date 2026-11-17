@@ -1,11 +1,13 @@
--- Борд кальянов: общее для всех устройств состояние столов (гости, таймер
--- кальяна, таймер замены угля). Одна строка на стол; номер "5-1" хранится как 51.
-create table if not exists board_tables (
-  table_number int primary key,
-  seated boolean not null default false,
-  hookah_started_at timestamptz,
-  coal_changed_at timestamptz,
-  updated_at timestamptz not null default now()
+-- Борд кальянов: у одного стола может быть несколько кальянов (второй, третий),
+-- у каждого свои таймеры. Завершённые кальяны остаются в таблице (история).
+alter table board_tables add column if not exists seated_at timestamptz;
+create table if not exists board_hookahs (
+  id uuid primary key default gen_random_uuid(),
+  table_number int not null,
+  started_at timestamptz not null default now(),
+  coal_changed_at timestamptz not null default now(),
+  finished_at timestamptz
 );
-alter table board_tables disable row level security;
-alter publication supabase_realtime add table board_tables;
+create index if not exists board_hookahs_table_idx on board_hookahs(table_number, started_at);
+alter table board_hookahs disable row level security;
+alter publication supabase_realtime add table board_hookahs;
