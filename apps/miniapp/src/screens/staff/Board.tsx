@@ -11,15 +11,21 @@ const COAL_WARN_MIN = 20;
 const COAL_URGENT_MIN = 30;
 
 interface TableState {
-  seated: boolean;
-  hookahStartedAt?: string;
-  coalChangedAt?: string;
+  seatedAt?: string;
 }
 
-type Board = Record<number, TableState>;
+interface Hookah {
+  id: string;
+  table: number;
+  startedAt: string;
+  coalChangedAt: string;
+  finishedAt?: string;
+}
 
-function emptyState(): TableState {
-  return { seated: false };
+function newId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : "h-" + Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
 function fmt(ms: number): string {
@@ -32,10 +38,11 @@ function fmt(ms: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-/** Борд кальянов: столы, таймер кальяна и таймер замены угля. Состояние общее для всех устройств (таблица board_tables). */
+/** Борд кальянов: столы, у каждого стола может быть несколько кальянов со своими таймерами (кальян и уголь). Состояние общее для всех устройств. */
 export default function Board() {
   const calls = useStore(serviceCallsStore);
-  const [board, setBoard] = useState<Board>({});
+  const [tables, setTables] = useState<Record<number, TableState>>({});
+  const [hookahs, setHookahs] = useState<Hookah[]>([]);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -48,22 +55,32 @@ export default function Board() {
     const client = supabase;
     let cancelled = false;
     async function load() {
-      const { data, error } = await client.from("board_tables").select("*");
-      if (error || cancelled) return;
-      const next: Board = {};
-      for (const r of data ?? []) {
-        next[r.table_number] = {
-          seated: !!r.seated,
-          hookahStartedAt: r.hookah_started_at ?? undefined,
-          coalChangedAt: r.coal_changed_at ?? undefined,
-        };
+      const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const [t, h] = await Promise.all([
+        client.from("board_tables").select("*"),
+        client.from("board_hookahs").select("*").gte("started_at", since).order("started_at"),
+      ]);
+      if (cancelled || t.error || h.error) return;
+      const nextTables: Record<number, TableState> = {};
+      for (const r of t.data ?? []) {
+        nextTables[r.table_number] = { seatedAt: r.seated ? r.seated_at ?? new Date().toISOString() : undefined };
       }
-      setBoard(next);
+      setTables(nextTables);
+      setHookahs(
+        (h.data ?? []).map((r) => ({
+          id: r.id,
+          table: r.table_number,
+          startedAt: r.started_at,
+          coalChangedAt: r.coal_changed_at,
+          finishedAt: r.finished_at ?? undefined,
+        })),
+      );
     }
     load();
     const channel = client
-      .channel("board-tables")
+      .channel("board-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "board_tables" }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "board_hookahs" }, () => load())
       .subscribe();
     const poll = setInterval(load, 30000);
     return () => {
@@ -73,19 +90,44 @@ export default function Board() {
     };
   }, []);
 
-  function save(n: number, next: TableState) {
-    setBoard((b) => ({ ...b, [n]: next }));
+  function saveTable(n: number, seatedAt?: string) {
+    setTables((t) => ({ ...t, [n]: { seatedAt } }));
     if (!isSupabaseConfigured || !supabase) return;
     supabase
       .from("board_tables")
-      .upsert({
-        table_number: n,
-        seated: next.seated,
-        hookah_started_at: next.hookahStartedAt ?? null,
-        coal_changed_at: next.coalChangedAt ?? null,
-        updated_at: new Date().toISOString(),
-      })
-      .then(({ error }) => error && console.error("board save", error));
+      .upsert({ table_number: n, seated: !!seatedAt, seated_at: seatedAt ?? null, updated_at: new Date().toISOString() })
+      .then(({ error }) => error && console.error("board table", error));
+  }
+
+  function addHookah(n: number) {
+    const t = new Date().toISOString();
+    const h: Hookah = { id: newId(), table: n, startedAt: t, coalChangedAt: t };
+    if (!tables[n]?.seatedAt) saveTable(n, t);
+    setHookahs((l) => [...l, h]);
+    if (!isSupabaseConfigured || !supabase) return;
+    supabase
+      .from("board_hookahs")
+      .insert({ id: h.id, table_number: n, started_at: t, coal_changed_at: t })
+      .then(({ error }) => error && console.error("board hookah add", error));
+  }
+
+  function patchHookah(id: string, patch: Partial<Hookah>) {
+    setHookahs((l) => l.map((h) => (h.id === id ? { ...h, ...patch } : h)));
+    if (!isSupabaseConfigured || !supabase) return;
+    const row: Record<string, string> = {};
+    if (patch.coalChangedAt) row.coal_changed_at = patch.coalChangedAt;
+    if (patch.finishedAt) row.finished_at = patch.finishedAt;
+    supabase
+      .from("board_hookahs")
+      .update(row)
+      .eq("id", id)
+      .then(({ error }) => error && console.error("board hookah update", error));
+  }
+
+  function freeTable(n: number) {
+    const t = new Date().toISOString();
+    hookahs.filter((h) => h.table === n && !h.finishedAt).forEach((h) => patchHookah(h.id, { finishedAt: t }));
+    saveTable(n, undefined);
   }
 
   const openCallTables = new Set(calls.filter((c) => c.status === "open").map((c) => c.tableNumber));
@@ -98,15 +140,14 @@ export default function Board() {
       </div>
 
       {BOARD_TABLES.map((n) => {
-        const st = board[n] ?? emptyState();
-        const running = !!st.hookahStartedAt;
-        const hookahMs = running ? now - new Date(st.hookahStartedAt!).getTime() : 0;
-        const coalMs = st.coalChangedAt ? now - new Date(st.coalChangedAt).getTime() : 0;
-        const coalMin = coalMs / 60000;
-        const urgent = running && coalMin >= COAL_URGENT_MIN;
-        const warn = running && coalMin >= COAL_WARN_MIN;
+        const seatedAt = tables[n]?.seatedAt;
+        const tableHookahs = hookahs.filter((h) => h.table === n && (!seatedAt || h.startedAt >= seatedAt));
+        const sessionHookahs = seatedAt ? tableHookahs : [];
+        const active = hookahs.filter((h) => h.table === n && !h.finishedAt);
         const hasCall = openCallTables.has(n);
-        const border = urgent ? "var(--danger)" : warn ? "var(--warn)" : undefined;
+        const worst = active.reduce((m, h) => Math.max(m, (now - new Date(h.coalChangedAt).getTime()) / 60000), 0);
+        const border = worst >= COAL_URGENT_MIN ? "var(--danger)" : worst >= COAL_WARN_MIN ? "var(--warn)" : undefined;
+        const status = active.length > 0 ? `кальянов: ${active.length}` : seatedAt ? "гости за столом" : "свободен";
 
         return (
           <div key={n} className="card" style={{ borderColor: border, borderWidth: border ? 2 : undefined }}>
@@ -114,62 +155,64 @@ export default function Board() {
               <div style={{ fontWeight: 700, fontSize: 18 }}>Стол {tableLabel(n)}</div>
               <div className="chip-row" style={{ margin: 0 }}>
                 {hasCall && <span className="chip accent">🔔 вызов</span>}
-                <span className="chip">{running ? "кальян идёт" : st.seated ? "гости за столом" : "свободен"}</span>
+                <span className="chip">{status}</span>
               </div>
             </div>
 
-            {running && (
-              <div className="card-row" style={{ marginTop: 8 }}>
-                <div>
-                  <div className="muted" style={{ fontSize: 12 }}>Кальян</div>
-                  <div style={{ fontWeight: 700, fontSize: 20 }}>{fmt(hookahMs)}</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    {urgent ? "Уголь: срочно!" : warn ? "Пора менять уголь" : "Уголь"}
+            {active.map((h) => {
+              const index = sessionHookahs.findIndex((x) => x.id === h.id) + 1;
+              const hookahMs = now - new Date(h.startedAt).getTime();
+              const coalMs = now - new Date(h.coalChangedAt).getTime();
+              const coalMin = coalMs / 60000;
+              const urgent = coalMin >= COAL_URGENT_MIN;
+              const warn = coalMin >= COAL_WARN_MIN;
+              return (
+                <div key={h.id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                  <div className="card-row">
+                    <div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        Кальян {index > 0 ? index : ""}
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 20 }}>{fmt(hookahMs)}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {urgent ? "Уголь: срочно!" : warn ? "Пора менять уголь" : "Уголь"}
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 20, color: urgent ? "var(--danger)" : warn ? "var(--warn)" : undefined }}>
+                        {fmt(coalMs)}
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ fontWeight: 700, fontSize: 20, color: urgent ? "var(--danger)" : warn ? "var(--warn)" : undefined }}>
-                    {fmt(coalMs)}
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <button className="btn" onClick={() => patchHookah(h.id, { coalChangedAt: new Date().toISOString() })}>
+                      Заменил уголь
+                    </button>
+                    <button className="btn secondary" onClick={() => patchHookah(h.id, { finishedAt: new Date().toISOString() })}>
+                      Кальян закончили
+                    </button>
                   </div>
                 </div>
+              );
+            })}
+
+            {sessionHookahs.length > 0 && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                За этот визит кальянов: {sessionHookahs.length}
               </div>
             )}
 
             <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-              {!st.seated && !running && (
-                <button className="btn" onClick={() => save(n, { seated: true })}>
+              {!seatedAt && active.length === 0 && (
+                <button className="btn secondary" onClick={() => saveTable(n, new Date().toISOString())}>
                   Посадили гостей
                 </button>
               )}
-              {st.seated && !running && (
-                <button
-                  className="btn"
-                  onClick={() => {
-                    const t = new Date().toISOString();
-                    save(n, { seated: true, hookahStartedAt: t, coalChangedAt: t });
-                  }}
-                >
-                  Старт кальяна
-                </button>
-              )}
-              {running && (
-                <button className="btn" onClick={() => save(n, { ...st, coalChangedAt: new Date().toISOString() })}>
-                  Заменил уголь
-                </button>
-              )}
-              {running && (
-                <button
-                  className="btn secondary"
-                  onClick={() => {
-                    const t = new Date().toISOString();
-                    save(n, { seated: true, hookahStartedAt: t, coalChangedAt: t });
-                  }}
-                >
-                  Новый кальян
-                </button>
-              )}
-              {(st.seated || running) && (
-                <button className="btn secondary" onClick={() => save(n, emptyState())}>
+              <button className="btn" onClick={() => addHookah(n)}>
+                {sessionHookahs.length === 0 ? "Старт кальяна" : "+ Ещё кальян"}
+              </button>
+              {(seatedAt || active.length > 0) && (
+                <button className="btn secondary" onClick={() => freeTable(n)}>
                   Освободить стол
                 </button>
               )}
