@@ -118,9 +118,13 @@ function EmployeeNav({ onNavigate }: { onNavigate: () => void }) {
       <NavLink to="/employee/shift" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">✅</span>Смена
       </NavLink>
-      <NavLink to="/employee/calls" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🔔</span>Вызовы
-      </NavLink>
+      <a
+        aria-disabled="true"
+        onClick={(e) => e.preventDefault()}
+        style={{ opacity: 0.5, pointerEvents: "none", cursor: "default" }}
+      >
+        <span className="icon">🔔</span>Вызовы <small>(в разработке)</small>
+      </a>
       <NavLink to="/employee/more" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">☰</span>Ещё
       </NavLink>
@@ -145,9 +149,13 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
       <NavLink to="/manager/expenses" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">💸</span>Расходы
       </NavLink>
-      <NavLink to="/manager/calls" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🔔</span>Вызовы
-      </NavLink>
+      <a
+        aria-disabled="true"
+        onClick={(e) => e.preventDefault()}
+        style={{ opacity: 0.5, pointerEvents: "none", cursor: "default" }}
+      >
+        <span className="icon">🔔</span>Вызовы <small>(в разработке)</small>
+      </a>
       <NavLink to="/manager/staff" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">👥</span>Сотрудники
       </NavLink>
