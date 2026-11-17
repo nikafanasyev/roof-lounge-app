@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import GuestsList from "@/screens/master/GuestsList";
 import GuestCreate from "@/screens/master/GuestCreate";
 import GuestProfile from "@/screens/master/GuestProfile";
@@ -206,6 +206,7 @@ function RoleShell() {
   const [role, setRole] = useState<AppRole>(isManager && inTelegram ? "manager" : "employee");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   // Руководитель, назначенный через приложение, становится известен только
   // после загрузки данных — тогда переводим его в кабинет руководителя.
   useEffect(() => {
@@ -270,7 +271,10 @@ function RoleShell() {
         {canSwitchRole && (
           <div className="role-switch">
             {(Object.keys(ROLE_LABEL) as AppRole[]).map((r) => (
-              <button key={r} className={role === r ? "active" : ""} onClick={() => setRole(r)}>
+              <button key={r} className={role === r ? "active" : ""} onClick={() => {
+                  setRole(r);
+                  navigate(DEFAULT_ROUTE[r]);
+                }}>
                 {ROLE_LABEL[r]}
               </button>
             ))}
