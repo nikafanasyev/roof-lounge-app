@@ -9,6 +9,7 @@ import Shift from "@/screens/staff/Shift";
 import Problems from "@/screens/staff/Problems";
 import Tasks from "@/screens/staff/Tasks";
 import Dashboard from "@/screens/employee/Dashboard";
+import Home from "@/screens/employee/Home";
 import More from "@/screens/employee/More";
 import Profile from "@/screens/employee/Profile";
 import Schedule from "@/screens/employee/Schedule";
@@ -109,6 +110,9 @@ function LoadingScreen() {
 function EmployeeNav({ onNavigate }: { onNavigate: () => void }) {
   return (
     <nav className="drawer-nav">
+      <NavLink to="/employee/home" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🏠</span>Главная
+      </NavLink>
       <NavLink to="/employee/dashboard" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">💰</span>Зарплата
       </NavLink>
@@ -181,7 +185,7 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
 }
 
 const DEFAULT_ROUTE: Record<AppRole, string> = {
-  employee: "/employee/dashboard",
+  employee: "/employee/home",
   manager: "/manager/summary",
 };
 
@@ -295,6 +299,7 @@ function RoleShell() {
       <Routes>
         <Route path="/" element={<Navigate to={DEFAULT_ROUTE[role]} replace />} />
 
+        <Route path="/employee/home" element={<Home />} />
         <Route path="/employee/dashboard" element={<Dashboard />} />
         <Route path="/employee/guests" element={<GuestsList />} />
         <Route path="/employee/guests/new" element={<GuestCreate />} />
