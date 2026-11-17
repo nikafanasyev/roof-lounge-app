@@ -11,6 +11,15 @@ import CleaningChecklist from "./CleaningChecklist";
 // "для бара и для км отображаться должны соответствующие задачи").
 const CLEANING_ARTICLE_ID = "k12";
 
+function readingMinutes(text: string): number {
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.round(words / 180));
+}
+
+function formatUpdated(iso: string): string {
+  return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
+}
+
 export default function KnowledgeArticleScreen() {
   const { articleId = "", sectionIndex } = useParams();
   const article = getKnowledgeArticle(articleId);
@@ -129,7 +138,10 @@ export default function KnowledgeArticleScreen() {
       <div className="eyebrow" style={{ marginTop: 12 }}>
         {article.category}
       </div>
-      <h1>{selectedSection ? selectedSection.title : article.title}</h1>
+      <h1 style={{ marginBottom: 4 }}>{selectedSection ? selectedSection.title : article.title}</h1>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+        {article.updatedAt ? `Обновлено ${formatUpdated(article.updatedAt)} · ` : ""}~{readingMinutes(selectedSection ? selectedSection.body : article.body)} мин чтения
+      </div>
       <input
         type="text"
         placeholder="Поиск по позициям"

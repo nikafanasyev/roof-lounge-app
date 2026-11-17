@@ -376,6 +376,8 @@ export interface KnowledgeArticle {
   category: string;
   title: string;
   body: string; // краткий текст-заглушка, наполняется реальным контентом позже
+  /** YYYY-MM-DD — когда статью последний раз правили (показывается под заголовком, если задано) */
+  updatedAt?: string;
 }
 
 export interface Tip {
