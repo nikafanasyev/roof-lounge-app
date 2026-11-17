@@ -1947,6 +1947,45 @@ export async function recordArrival(role: WorkRole, photoBlob: Blob): Promise<{ 
   return { ok: true, openedAt };
 }
 
+/** Закрытие смены у ролей без чек-листа (официант): отметка времени + фото. */
+export async function recordDeparture(role: WorkRole, photoBlob: Blob): Promise<{ ok: boolean; closedAt: string }> {
+  const me = getStaffProfile();
+  const closedAt = new Date().toISOString();
+  if (!isSupabaseConfigured || !supabase) return { ok: true, closedAt };
+  const { error } = await supabase
+    .from("staff_arrivals")
+    .update({ closed_at: closedAt })
+    .eq("staff_id", me.id)
+    .eq("date", businessDateIso());
+  if (error) {
+    logSyncError("recordDeparture", error);
+    return { ok: false, closedAt };
+  }
+  const path = `arrivals/${me.id}-close-${Date.now()}.jpg`;
+  const up = await supabase.storage.from("shift-photos").upload(path, photoBlob, { contentType: "image/jpeg" });
+  if (up.error) {
+    logSyncError("recordDeparture:upload", up.error);
+    return { ok: true, closedAt };
+  }
+  const ins = await supabase
+    .from("shift_photo_uploads")
+    .insert({ shift_id: shiftStore.get().id, kind: "close", role, storage_path: path, staff_name: me.name });
+  if (ins.error) logSyncError("recordDeparture:photo", ins.error);
+  return { ok: true, closedAt };
+}
+
+/** Открыта ли и закрыта ли смена у роли без чек-листа сегодня. */
+export async function fetchMyShiftTimesToday(): Promise<{ openedAt?: string; closedAt?: string }> {
+  if (!isSupabaseConfigured || !supabase) return {};
+  const { data } = await supabase
+    .from("staff_arrivals")
+    .select("opened_at, closed_at")
+    .eq("staff_id", getStaffProfile().id)
+    .eq("date", businessDateIso())
+    .maybeSingle();
+  return { openedAt: data?.opened_at ?? undefined, closedAt: data?.closed_at ?? undefined };
+}
+
 // --- Технические задачи (ротация из CLEANING_*_WEEKS) ---
 //
 // В чек-листах открытия/закрытия тех. задач больше нет: после открытия зоны

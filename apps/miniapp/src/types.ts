@@ -144,7 +144,7 @@ export type StaffRole = "bar" | "hookah";
 // Рабочая роль в графике и начислениях — шире StaffRole (чек-листы смены есть
 // пока только у бара и кальянов): кухня и клининг добавлены 12.11.2026,
 // чек-листы им заполним позже.
-export type WorkRole = "bar" | "hookah" | "kitchen" | "cleaning";
+export type WorkRole = "bar" | "hookah" | "kitchen" | "cleaning" | "waiter";
 
 export interface RoleChecklists {
   openChecklist: ChecklistItem[];

@@ -664,7 +664,7 @@ async function main() {
       const buffer = await event.downloadPhoto();
       if (!buffer) return;
       const kindLabel = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
-      const roleLabel = ({ bar: "Бар", hookah: "Кальяны", kitchen: "Кухня", cleaning: "Клининг" } as const)[event.role];
+      const roleLabel = ({ bar: "Бар", hookah: "Кальяны", kitchen: "Кухня", cleaning: "Клининг", waiter: "Официант" } as const)[event.role];
       await bot.api.sendPhoto(photoChatFor(event.kind), new InputFile(buffer, "shift.jpg"), {
         caption: `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}`,
       });
@@ -702,7 +702,7 @@ async function main() {
     scheduleDailyPayrollJob(
       async (issue) => {
         // onIssue срабатывает только при reconcile: true — сейчас не используется.
-        const roleLabel = ({ hookah: "Кальяны", bar: "Бар", kitchen: "Кухня", cleaning: "Клининг" } as Record<string, string>)[issue.role] ?? issue.role;
+        const roleLabel = ({ hookah: "Кальяны", bar: "Бар", kitchen: "Кухня", cleaning: "Клининг", waiter: "Официант" } as Record<string, string>)[issue.role] ?? issue.role;
         const dateLabel = new Date(`${issue.date}T00:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
         const actual = issue.actualStaffNames.length ? issue.actualStaffNames.join(", ") : "никто (по данным Quick Resto)";
         const text =
