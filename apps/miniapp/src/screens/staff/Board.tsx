@@ -6,9 +6,19 @@ import { tableLabel } from "@/lib/tables";
 
 // Столы зала: 5-1 хранится как 51 (см. lib/tables.ts).
 const BOARD_TABLES = [1, 2, 3, 4, 5, 51, 6, 7, 8, 9, 10];
-// Через сколько минут подсвечиваем «пора менять уголь» и «срочно».
-const COAL_WARN_MIN = 20;
-const COAL_URGENT_MIN = 30;
+// Уголь меняют по кругу каждые COAL_CYCLE_MIN минут работы кальяна. Кнопки нет:
+// за COAL_SOON_MIN минут до замены карточка желтеет, после — красная ещё COAL_LATE_MIN минут.
+const COAL_CYCLE_MIN = 20;
+const COAL_SOON_MIN = 3;
+const COAL_LATE_MIN = 3;
+
+function coalState(hookahMs: number): { untilMs: number; soon: boolean; now: boolean } {
+  const cycle = COAL_CYCLE_MIN * 60000;
+  const pos = hookahMs % cycle;
+  const now = hookahMs >= cycle && pos < COAL_LATE_MIN * 60000;
+  const soon = !now && cycle - pos <= COAL_SOON_MIN * 60000;
+  return { untilMs: cycle - pos, soon, now };
+}
 
 interface TableState {
   seatedAt?: string;
@@ -136,7 +146,7 @@ export default function Board() {
     <div className="screen">
       <h1>Борд кальянов</h1>
       <div className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
-        Прототип. Уголь: подсветка через {COAL_WARN_MIN} мин, «срочно» через {COAL_URGENT_MIN} мин.
+        Прототип. Уголь: подсветка каждые {COAL_CYCLE_MIN} мин работы кальяна.
       </div>
 
       {BOARD_TABLES.map((n) => {
@@ -145,8 +155,8 @@ export default function Board() {
         const sessionHookahs = seatedAt ? tableHookahs : [];
         const active = hookahs.filter((h) => h.table === n && !h.finishedAt);
         const hasCall = openCallTables.has(n);
-        const worst = active.reduce((m, h) => Math.max(m, (now - new Date(h.coalChangedAt).getTime()) / 60000), 0);
-        const border = worst >= COAL_URGENT_MIN ? "var(--danger)" : worst >= COAL_WARN_MIN ? "var(--warn)" : undefined;
+        const states = active.map((h) => coalState(now - new Date(h.startedAt).getTime()));
+        const border = states.some((c) => c.now) ? "var(--danger)" : states.some((c) => c.soon) ? "var(--warn)" : undefined;
         const status = active.length > 0 ? `кальянов: ${active.length}` : seatedAt ? "гости за столом" : "свободен";
 
         return (
@@ -162,10 +172,9 @@ export default function Board() {
             {active.map((h) => {
               const index = sessionHookahs.findIndex((x) => x.id === h.id) + 1;
               const hookahMs = now - new Date(h.startedAt).getTime();
-              const coalMs = now - new Date(h.coalChangedAt).getTime();
-              const coalMin = coalMs / 60000;
-              const urgent = coalMin >= COAL_URGENT_MIN;
-              const warn = coalMin >= COAL_WARN_MIN;
+              const coal = coalState(hookahMs);
+              const urgent = coal.now;
+              const warn = coal.soon;
               return (
                 <div key={h.id} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
                   <div className="card-row">
@@ -177,17 +186,14 @@ export default function Board() {
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <div className="muted" style={{ fontSize: 12 }}>
-                        {urgent ? "Уголь: срочно!" : warn ? "Пора менять уголь" : "Уголь"}
+                        {urgent ? "Пора менять уголь!" : warn ? "Скоро менять уголь" : "До замены угля"}
                       </div>
                       <div style={{ fontWeight: 700, fontSize: 20, color: urgent ? "var(--danger)" : warn ? "var(--warn)" : undefined }}>
-                        {fmt(coalMs)}
+                        {fmt(coal.untilMs)}
                       </div>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                    <button className="btn" onClick={() => patchHookah(h.id, { coalChangedAt: new Date().toISOString() })}>
-                      Заменил уголь
-                    </button>
                     <button className="btn secondary" onClick={() => patchHookah(h.id, { finishedAt: new Date().toISOString() })}>
                       Кальян закончили
                     </button>
