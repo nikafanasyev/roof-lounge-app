@@ -2011,6 +2011,56 @@ export function resolveLateProposal(id: string, apply: boolean) {
   }
 }
 
+/** Фото выполнения тех. задачи: уходит руководителю в Telegram (как фото смены). */
+export async function sendTechPhotos(role: WorkRole, task: string, photoBlobs: Blob[]): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return true;
+  const me = getStaffProfile();
+  let ok = true;
+  for (let i = 0; i < photoBlobs.length; i++) {
+    const path = `tech/${me.id}-${Date.now()}-${i}.jpg`;
+    const up = await supabase.storage.from("shift-photos").upload(path, photoBlobs[i], { contentType: "image/jpeg" });
+    if (up.error) {
+      logSyncError("sendTechPhotos:upload", up.error);
+      ok = false;
+      continue;
+    }
+    const ins = await supabase
+      .from("shift_photo_uploads")
+      .insert({ shift_id: shiftStore.get().id, kind: "tech", role, storage_path: path, staff_name: me.name, caption: task });
+    if (ins.error) {
+      logSyncError("sendTechPhotos:insert", ins.error);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
+export interface TodayArrival {
+  role: WorkRole;
+  staffName?: string;
+  openedAt: string;
+  closedAt?: string;
+}
+
+/** Кто из ролей без чек-листов (официант/кухня/клининг) сегодня открыл смену. */
+export async function fetchTodayArrivals(): Promise<TodayArrival[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  const { data, error } = await supabase
+    .from("staff_arrivals")
+    .select("role, opened_at, closed_at, staff:staff_id(name)")
+    .eq("date", businessDateIso());
+  if (error) {
+    logSyncError("fetchTodayArrivals", error);
+    return [];
+  }
+  return (data ?? []).map((r: any) => ({
+    role: r.role as WorkRole,
+    staffName: (Array.isArray(r.staff) ? r.staff[0]?.name : r.staff?.name) ?? undefined,
+    openedAt: r.opened_at,
+    closedAt: r.closed_at ?? undefined,
+  }));
+}
+
 /** Закрытие смены у ролей без чек-листа (официант): отметка времени + фото. */
 export async function recordDeparture(role: WorkRole, photoBlob: Blob): Promise<{ ok: boolean; closedAt: string }> {
   const me = getStaffProfile();

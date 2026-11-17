@@ -655,7 +655,7 @@ async function main() {
   // если задан SHIFT_PHOTOS_CHAT_ID) и сразу стираем из Storage — не храним.
   // Фото открытия — в чат открытия, фото закрытия — в чат закрытия (если
   // отдельные чаты не заданы, как раньше: SHIFT_PHOTOS_CHAT_ID или STAFF_CHAT_ID).
-  const photoChatFor = (kind: "open" | "close") =>
+  const photoChatFor = (kind: "open" | "close" | "tech") =>
     kind === "open"
       ? env.SHIFT_OPEN_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID
       : env.SHIFT_CLOSE_CHAT_ID || env.STAFF_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID;
@@ -663,9 +663,9 @@ async function main() {
     watchShiftPhotos(async (event) => {
       const buffers = await event.downloadPhotos();
       if (buffers.length === 0) return;
-      const kindLabel = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
+      const kindLabel = event.kind === "open" ? "Открытие смены" : event.kind === "tech" ? "Тех. задача выполнена" : "Закрытие смены";
       const roleLabel = ({ bar: "Бар", hookah: "Кальяны", kitchen: "Кухня", cleaning: "Клининг", waiter: "Официант" } as const)[event.role];
-      const caption = `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}`;
+      const caption = `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}${event.caption ? `\n${event.caption}` : ""}`;
       if (buffers.length === 1) {
         await bot.api.sendPhoto(photoChatFor(event.kind), new InputFile(buffers[0], "shift.jpg"), { caption });
         return;
