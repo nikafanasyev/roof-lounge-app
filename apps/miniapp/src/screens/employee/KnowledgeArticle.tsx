@@ -41,7 +41,7 @@ export default function KnowledgeArticleScreen() {
   if (isCleaningArticle && ownCleaningRole && !showAllRoles && !selectedSection) {
     return (
       <div className="screen">
-        <Link to="/employee/knowledge" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+        <Link to={`/employee/knowledge?cat=${encodeURIComponent(article.category)}`} className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
           ← База знаний
         </Link>
         <div className="eyebrow" style={{ marginTop: 12 }}>
@@ -87,7 +87,7 @@ export default function KnowledgeArticleScreen() {
       : sections.filter((section, idx) => sections[idx].title.toLowerCase().includes(q) || section.body.toLowerCase().includes(q));
     return (
       <div className="screen">
-        <Link to="/employee/knowledge" className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
+        <Link to={`/employee/knowledge?cat=${encodeURIComponent(article.category)}`} className="muted" style={{ textDecoration: "none", fontSize: 14 }}>
           ← База знаний
         </Link>
         <div className="eyebrow" style={{ marginTop: 12 }}>
@@ -120,7 +120,7 @@ export default function KnowledgeArticleScreen() {
   return (
     <div className="screen">
       <Link
-        to={hasCategories ? `/employee/knowledge/${article.id}` : "/employee/knowledge"}
+        to={hasCategories ? `/employee/knowledge/${article.id}` : `/employee/knowledge?cat=${encodeURIComponent(article.category)}`}
         className="muted"
         style={{ textDecoration: "none", fontSize: 14 }}
       >

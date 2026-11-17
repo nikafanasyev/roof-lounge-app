@@ -1303,30 +1303,33 @@ input[type="date"]::-webkit-date-and-time-value {
 .kb-cat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 16px;
 }
 .kb-cat-tile {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px 12px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
   text-align: left;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   color: inherit;
   font: inherit;
+  font-size: 14px;
   cursor: pointer;
-}
-.kb-cat-tile.active {
-  border-color: var(--accent);
+  min-width: 0;
 }
 .kb-cat-tile .icon {
-  font-size: 22px;
+  font-size: 16px;
 }
 .kb-cat-tile .name {
-  font-weight: 700;
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .kb-cat-tile .count {
   font-size: 12px;
