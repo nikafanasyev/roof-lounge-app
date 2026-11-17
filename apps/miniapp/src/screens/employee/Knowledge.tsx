@@ -114,9 +114,11 @@ export default function Knowledge() {
         <>
           <div className="seg-toggle" role="tablist">
             <button className={catView === "tiles" ? "active" : ""} onClick={() => chooseCatView("tiles")}>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1.5" y="1.5" width="5" height="5" rx="1" /><rect x="9.5" y="1.5" width="5" height="5" rx="1" /><rect x="1.5" y="9.5" width="5" height="5" rx="1" /><rect x="9.5" y="9.5" width="5" height="5" rx="1" /></svg>
               Плитки
             </button>
             <button className={catView === "list" ? "active" : ""} onClick={() => chooseCatView("list")}>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M5 3.5h9.5M5 8h9.5M5 12.5h9.5M1.5 3.5h.5M1.5 8h.5M1.5 12.5h.5" /></svg>
               Список
             </button>
           </div>

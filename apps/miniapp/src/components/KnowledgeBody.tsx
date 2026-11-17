@@ -95,6 +95,7 @@ function isTechCard(b: Block): b is CardBlock {
 export default function KnowledgeBody({ body, query }: { body: string; query?: string }) {
   const allBlocks = parseBody(body);
   const [view, setView] = useState<"cards" | "table">(readView);
+  const [expanded, setExpanded] = useState(false);
   const q = query?.trim().toLowerCase();
   const blocks = !q
     ? allBlocks
@@ -122,7 +123,7 @@ export default function KnowledgeBody({ body, query }: { body: string; query?: s
     const block = blocks[idx];
     if (block.kind === "h1") {
       out.push(
-        <h2 key={idx} style={{ marginTop: idx === 0 ? 0 : 20 }}>
+        <h2 key={idx} id={`kb-h-${idx}`} style={{ marginTop: idx === 0 ? 0 : 20, scrollMarginTop: 12 }}>
           {block.text}
         </h2>,
       );
@@ -150,19 +151,62 @@ export default function KnowledgeBody({ body, query }: { body: string; query?: s
     }
   }
 
-  return (
+  const headings = blocks.map((b, idx) => (b.kind === "h1" ? { idx, text: b.text } : null)).filter((x): x is { idx: number; text: string } => !!x);
+
+  function jump(idx: number) {
+    document.getElementById(`kb-h-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  const content = (
     <>
-      {canToggle && (
-        <div className="seg-toggle" role="tablist">
-          <button className={view === "cards" ? "active" : ""} onClick={() => chooseView("cards")}>
-            Карточки
-          </button>
-          <button className={view === "table" ? "active" : ""} onClick={() => chooseView("table")}>
-            Таблица
-          </button>
+      {headings.length >= 2 && !q && (
+        <div className="kb-contents">
+          {headings.map((h) => (
+            <button key={h.idx} onClick={() => jump(h.idx)}>
+              {h.text}
+            </button>
+          ))}
         </div>
       )}
       {out}
+    </>
+  );
+
+  const toolbar = (
+    <div className="kb-toolbar">
+      {canToggle && (
+        <div className="seg-toggle" role="tablist" style={{ margin: 0 }}>
+          <button className={view === "table" ? "active" : ""} onClick={() => chooseView("table")}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><path d="M1.5 6.5h13M6 6.5v7" /></svg>
+            Таблица
+          </button>
+          <button className={view === "cards" ? "active" : ""} onClick={() => chooseView("cards")}>
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1.5" y="2" width="13" height="5" rx="1.5" /><rect x="1.5" y="9" width="13" height="5" rx="1.5" /></svg>
+            Карточки
+          </button>
+        </div>
+      )}
+      <button className="kb-expand-btn" onClick={() => setExpanded((e) => !e)}>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          {expanded ? <path d="M6 1.5V6H1.5M10 14.5V10h4.5M10 1.5V6h4.5M6 14.5V10H1.5" /> : <path d="M9.5 1.5h5v5M6.5 14.5h-5v-5M14.5 1.5L9 7M1.5 14.5L7 9" />}
+        </svg>
+        {expanded ? "Свернуть" : "Развернуть"}
+      </button>
+    </div>
+  );
+
+  if (expanded) {
+    return (
+      <div className="kb-expanded">
+        {toolbar}
+        {content}
+      </div>
+    );
+  }
+  return (
+    <>
+      {toolbar}
+      {content}
     </>
   );
 }
