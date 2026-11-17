@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Bot, InlineKeyboard, InputFile } from "grammy";
+import { Bot, InlineKeyboard, InputFile, InputMediaBuilder } from "grammy";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "./env";
 import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls, watchShiftPhotos, watchStaffArchived, watchStaffInvites } from "./notify";
@@ -661,13 +661,20 @@ async function main() {
       : env.SHIFT_CLOSE_CHAT_ID || env.STAFF_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID;
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY && (env.SHIFT_OPEN_CHAT_ID || env.SHIFT_PHOTOS_CHAT_ID || env.STAFF_CHAT_ID)) {
     watchShiftPhotos(async (event) => {
-      const buffer = await event.downloadPhoto();
-      if (!buffer) return;
+      const buffers = await event.downloadPhotos();
+      if (buffers.length === 0) return;
       const kindLabel = event.kind === "open" ? "Открытие смены" : "Закрытие смены";
       const roleLabel = ({ bar: "Бар", hookah: "Кальяны", kitchen: "Кухня", cleaning: "Клининг", waiter: "Официант" } as const)[event.role];
-      await bot.api.sendPhoto(photoChatFor(event.kind), new InputFile(buffer, "shift.jpg"), {
-        caption: `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}`,
-      });
+      const caption = `${kindLabel} — ${roleLabel}${event.staffName ? ` · ${event.staffName}` : ""}`;
+      if (buffers.length === 1) {
+        await bot.api.sendPhoto(photoChatFor(event.kind), new InputFile(buffers[0], "shift.jpg"), { caption });
+        return;
+      }
+      // Несколько фото — одним сообщением-альбомом, подпись у первого.
+      await bot.api.sendMediaGroup(
+        photoChatFor(event.kind),
+        buffers.map((buf, i) => InputMediaBuilder.photo(new InputFile(buf, `shift-${i + 1}.jpg`), i === 0 ? { caption } : {})),
+      );
     });
     console.log("Слушаю shift_photo_uploads через Supabase Realtime — пересылка фото смен включена.");
   } else {
