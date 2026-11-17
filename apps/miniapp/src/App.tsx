@@ -8,6 +8,7 @@ import MixView from "@/screens/master/MixView";
 import Shift from "@/screens/staff/Shift";
 import Problems from "@/screens/staff/Problems";
 import Tasks from "@/screens/staff/Tasks";
+import Board from "@/screens/staff/Board";
 import Dashboard from "@/screens/employee/Dashboard";
 import Home from "@/screens/employee/Home";
 import More from "@/screens/employee/More";
@@ -119,6 +120,9 @@ function EmployeeNav({ onNavigate }: { onNavigate: () => void }) {
       <NavLink to="/employee/guests" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🧪</span>Гости
       </NavLink>
+      <NavLink to="/employee/board" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🪑</span>Борд
+      </NavLink>
       <NavLink to="/employee/shift" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">✅</span>Смена
       </NavLink>
@@ -176,6 +180,9 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
       </NavLink>
       <NavLink to="/manager/flavors" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🍃</span>Новые вкусы{pendingFlavors > 0 ? ` (${pendingFlavors})` : ""}
+      </NavLink>
+      <NavLink to="/manager/board" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">🪑</span>Борд
       </NavLink>
       <NavLink to="/manager/problems" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🛠</span>Проблемы
@@ -311,6 +318,7 @@ function RoleShell() {
         <Route path="/employee/guests/:guestId/mix" element={<MixBuilder />} />
         <Route path="/employee/mix/:mixId" element={<MixView />} />
         <Route path="/employee/shift" element={<Shift />} />
+        <Route path="/employee/board" element={<Board />} />
         <Route path="/employee/calls" element={<ServiceCalls />} />
         <Route path="/employee/problems" element={<Problems backTo="/employee/more" />} />
         <Route path="/employee/tasks" element={<Tasks />} />
@@ -336,6 +344,7 @@ function RoleShell() {
         <Route path="/manager/tech" element={<TechTasks />} />
         <Route path="/manager/managers" element={<ManagersAdmin />} />
         <Route path="/manager/problems" element={<Problems />} />
+        <Route path="/manager/board" element={<Board />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
