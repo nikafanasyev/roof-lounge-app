@@ -406,3 +406,14 @@ export interface FlavorProposal {
   status: "pending" | "approved" | "rejected";
   createdAt: string;
 }
+
+export interface LateProposal {
+  id: string;
+  staffId: string;
+  date: string; // YYYY-MM-DD (бизнес-день)
+  role: WorkRole;
+  arrivedAt: string;
+  amount: number;
+  reason: string;
+  status: "pending" | "applied" | "dismissed";
+}

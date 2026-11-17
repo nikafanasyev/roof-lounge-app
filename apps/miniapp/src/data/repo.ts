@@ -50,6 +50,7 @@ import type {
   StaffProfile,
   StaffRole,
   WorkRole,
+  LateProposal,
   Task,
   TaskPriority,
   TaskStatus,
@@ -79,6 +80,7 @@ import {
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { getTelegramUser, isCurrentUserManager, isGuestTestAccount, setDbManager } from "@/lib/telegram";
 import { computeShiftSalary, DEFAULT_SALARY_MODEL } from "@/lib/payroll";
+import { computeLateFine } from "@/lib/lateness";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
 
@@ -115,6 +117,7 @@ export const serviceCallsStore = new Store<ServiceCall[]>(seedServiceCalls);
 export const shiftStore = new Store<Shift>(seedShift);
 export const problemsStore = new Store<Problem[]>(seedProblems);
 export const tasksStore = new Store<Task[]>(seedTasks);
+export const lateProposalsStore = new Store<LateProposal[]>([]);
 export const staffProfileStore = new Store<StaffProfile>(seedStaffProfile);
 export const staffDirectoryStore = new Store<StaffProfile[]>(seedStaffDirectory);
 export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll);
@@ -284,6 +287,7 @@ export async function initData(): Promise<void> {
           loadShift(),
           loadProblems(),
           loadTasks(),
+          loadLateProposals(),
           loadStaffDirectory(),
           loadShiftPayroll(),
           loadAdjustments(),
@@ -586,6 +590,23 @@ async function loadTasks() {
   );
 }
 
+async function loadLateProposals() {
+  const { data, error } = await supabase!.from("late_proposals").select("*").order("created_at", { ascending: false });
+  if (error) return logSyncError("loadLateProposals", error);
+  lateProposalsStore.set(
+    (data ?? []).map((r) => ({
+      id: r.id,
+      staffId: r.staff_id,
+      date: r.date,
+      role: r.role,
+      arrivedAt: r.arrived_at,
+      amount: r.amount,
+      reason: r.reason,
+      status: r.status,
+    })),
+  );
+}
+
 async function loadStaffDirectory() {
   // Загружаем ВСЕХ сотрудников, включая уволенных (archived=true) — раньше
   // фильтровали .eq("archived", false) прямо в запросе, из-за чего уволенный
@@ -851,6 +872,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "shifts" }, () => loadShift())
     .on("postgres_changes", { event: "*", schema: "public", table: "problems" }, () => loadProblems())
     .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => loadTasks())
+    .on("postgres_changes", { event: "*", schema: "public", table: "late_proposals" }, () => loadLateProposals())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff" }, () => loadStaffDirectory())
     .on("postgres_changes", { event: "*", schema: "public", table: "shift_payroll" }, () => loadShiftPayroll())
     .on("postgres_changes", { event: "*", schema: "public", table: "adjustments" }, () => loadAdjustments())
@@ -1725,6 +1747,7 @@ export async function openShift(role: StaffRole, openedBy: string, photoBlobs?: 
   shiftStore.update((s) => ({ ...s, [role]: { ...s[role], openedBy, openedAt: at, closedBy: undefined, closedAt: undefined } }));
   syncRoleClaim(role, "open", at);
   toBlobList(photoBlobs).forEach((b, i) => uploadAndNotifyShiftPhoto(role, "open", b, openedBy, i));
+  proposeLateFine(role, new Date(at));
 }
 
 /**
@@ -1944,7 +1967,48 @@ export async function recordArrival(role: WorkRole, photoBlob: Blob): Promise<{ 
     .from("shift_photo_uploads")
     .insert({ shift_id: shiftStore.get().id, kind: "open", role, storage_path: path, staff_name: me.name });
   if (ins.error) logSyncError("recordArrival:photo", ins.error);
+  proposeLateFine(role, new Date(openedAt));
   return { ok: true, openedAt };
+}
+
+/** Если сотрудник пришёл позже допустимого — создаём предложение штрафа (раз в бизнес-день); применяет или отклоняет руководитель. */
+function proposeLateFine(role: WorkRole, arrivedAt: Date) {
+  const fine = computeLateFine(role, arrivedAt);
+  if (!fine || !isSupabaseConfigured || !supabase) return;
+  supabase
+    .from("late_proposals")
+    .upsert(
+      {
+        staff_id: getStaffProfile().id,
+        date: businessDateIso(arrivedAt),
+        role,
+        arrived_at: arrivedAt.toISOString(),
+        amount: fine.amount,
+        reason: fine.reason,
+      },
+      { onConflict: "staff_id,date", ignoreDuplicates: true },
+    )
+    .then(({ error }) => error && logSyncError("proposeLateFine", error));
+}
+
+export function listPendingLateProposals(): LateProposal[] {
+  return lateProposalsStore.get().filter((p) => p.status === "pending");
+}
+
+/** Руководитель применяет предложение (создаётся штраф) или отклоняет его. */
+export function resolveLateProposal(id: string, apply: boolean) {
+  const p = lateProposalsStore.get().find((x) => x.id === id);
+  if (!p) return;
+  const status = apply ? "applied" : "dismissed";
+  if (apply) addAdjustment("fine", p.amount, p.reason, p.staffId, p.date);
+  lateProposalsStore.update((list) => list.map((x) => (x.id === id ? { ...x, status } : x)));
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("late_proposals")
+      .update({ status })
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("resolveLateProposal", error));
+  }
 }
 
 /** Закрытие смены у ролей без чек-листа (официант): отметка времени + фото. */
