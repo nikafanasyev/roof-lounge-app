@@ -184,6 +184,9 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
       <NavLink to="/manager/board" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🪑</span>Борд
       </NavLink>
+      <NavLink to="/manager/tasks" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">📋</span>Задачи
+      </NavLink>
       <NavLink to="/manager/problems" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🛠</span>Проблемы
       </NavLink>
@@ -344,6 +347,7 @@ function RoleShell() {
         <Route path="/manager/tech" element={<TechTasks />} />
         <Route path="/manager/managers" element={<ManagersAdmin />} />
         <Route path="/manager/problems" element={<Problems />} />
+        <Route path="/manager/tasks" element={<Tasks backTo="/manager/summary" />} />
         <Route path="/manager/board" element={<Board />} />
 
         <Route path="*" element={<Navigate to="/" replace />} />

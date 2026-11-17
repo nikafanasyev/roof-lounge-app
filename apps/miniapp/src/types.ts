@@ -191,12 +191,20 @@ export interface Problem {
   assignee?: string;
 }
 
+export type TaskPriority = "critical" | "high" | "medium" | "low";
+export type TaskStatus = "created" | "in_progress" | "done";
+
 export interface Task {
   id: string;
   title: string;
+  /** YYYY-MM-DD */
   dueDate?: string;
-  assignee?: string;
-  done: boolean;
+  priority: TaskPriority;
+  status: TaskStatus;
+  assigneeId?: string; // ответственный (staff.id)
+  helperIds: string[]; // помощники (staff.id)
+  createdById?: string;
+  done: boolean; // = status === "done", оставлено для совместимости со "Сводкой"
 }
 
 export interface WaitlistEntry {

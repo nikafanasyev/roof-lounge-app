@@ -51,6 +51,8 @@ import type {
   StaffRole,
   WorkRole,
   Task,
+  TaskPriority,
+  TaskStatus,
 } from "@/types";
 import {
   CLEANING_BAR_WEEKS,
@@ -574,8 +576,12 @@ async function loadTasks() {
       id: r.id,
       title: r.title,
       dueDate: r.due_date ?? undefined,
-      assignee: r.assignee ? staffNameById.get(r.assignee) : undefined,
-      done: r.done,
+      priority: (r.priority ?? "medium") as TaskPriority,
+      status: (r.status ?? (r.done ? "done" : "created")) as TaskStatus,
+      assigneeId: r.assignee ?? undefined,
+      helperIds: (r.helpers ?? []) as string[],
+      createdById: r.created_by ?? undefined,
+      done: r.status ? r.status === "done" : !!r.done,
     })),
   );
 }
@@ -2066,26 +2072,29 @@ export async function setCleaningTaskDone(role: string, task: string, done: bool
   }
 }
 
-export function toggleTask(id: string) {
-  let nextDone = false;
-  tasksStore.update((tasks) =>
-    tasks.map((t) => {
-      if (t.id !== id) return t;
-      nextDone = !t.done;
-      return { ...t, done: nextDone };
-    }),
-  );
+export function setTaskStatus(id: string, status: TaskStatus) {
+  tasksStore.update((tasks) => tasks.map((t) => (t.id === id ? { ...t, status, done: status === "done" } : t)));
   if (isSupabaseConfigured && supabase) {
     supabase
       .from("tasks")
-      .update({ done: nextDone })
+      .update({ status, done: status === "done" })
       .eq("id", id)
-      .then(({ error }) => error && logSyncError("toggleTask", error));
+      .then(({ error }) => error && logSyncError("setTaskStatus", error));
   }
 }
 
-export function addTask(title: string, assignee?: string, dueDate?: string) {
-  const task: Task = { id: uid(), title, assignee, dueDate, done: false };
+export function addTask(input: { title: string; priority: TaskPriority; assigneeId?: string; helperIds?: string[]; dueDate?: string }) {
+  const task: Task = {
+    id: uid(),
+    title: input.title,
+    priority: input.priority,
+    status: "created",
+    assigneeId: input.assigneeId,
+    helperIds: input.helperIds ?? [],
+    dueDate: input.dueDate,
+    createdById: getStaffProfile().id,
+    done: false,
+  };
   tasksStore.update((tasks) => [task, ...tasks]);
   if (isSupabaseConfigured && supabase) {
     supabase
@@ -2093,9 +2102,13 @@ export function addTask(title: string, assignee?: string, dueDate?: string) {
       .insert({
         id: task.id,
         title: task.title,
+        priority: task.priority,
+        status: task.status,
+        assignee: task.assigneeId ?? null,
+        helpers: task.helperIds,
         due_date: task.dueDate ?? null,
         done: false,
-        created_by: getStaffProfile().id,
+        created_by: task.createdById,
       })
       .then(({ error }) => error && logSyncError("addTask", error));
   }

@@ -207,8 +207,8 @@ export const seedProblems: Problem[] = [
 ];
 
 export const seedTasks: Task[] = [
-  { id: "t1", title: "Заменить лампу на балконе", dueDate: "Пятница", assignee: "Дмитрий", done: false },
-  { id: "t2", title: "Пересчитать склад расходников", done: true },
+  { id: "t1", title: "Заменить лампу на балконе", priority: "medium", status: "created", helperIds: [], done: false },
+  { id: "t2", title: "Пересчитать склад расходников", priority: "low", status: "done", helperIds: [], done: true },
 ];
 
 // --- Личный кабинет сотрудника ---
