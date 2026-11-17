@@ -12,7 +12,7 @@ import {
   toggleOpenChecklistItem,
 } from "@/data/repo";
 import CameraCapture from "@/components/CameraCapture";
-import { fetchMyArrivalToday, getTodayCleaningTasksForRole, recordArrival, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
+import { fetchMyArrivalToday, fetchMyShiftTimesToday, getTodayCleaningTasksForRole, recordArrival, recordDeparture, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
 import type { ChecklistItem, StaffRole } from "@/types";
 
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
@@ -252,14 +252,23 @@ function ZoneShift() {
 }
 
 /** Кухня и клининг: без чек-листа — кнопка "Открыть смену" + фото на месте. */
-function SimpleShift({ role }: { role: "kitchen" | "cleaning" }) {
+function SimpleShift({ role }: { role: "kitchen" | "cleaning" | "waiter" }) {
   const [openedAt, setOpenedAt] = useState<string | undefined>();
+  const [closedAt, setClosedAt] = useState<string | undefined>();
+  const [closePhoto, setClosePhoto] = useState<CapturedPhoto | undefined>();
   const [photo, setPhoto] = useState<CapturedPhoto | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    fetchMyArrivalToday().then(setOpenedAt);
-  }, []);
+    if (role === "waiter") {
+      fetchMyShiftTimesToday().then((t) => {
+        setOpenedAt(t.openedAt);
+        setClosedAt(t.closedAt);
+      });
+    } else {
+      fetchMyArrivalToday().then(setOpenedAt);
+    }
+  }, [role]);
   const techKey = techRoleKeyForWorkRole(role);
   const techTasks = techKey ? getTodayCleaningTasksForRole(techKey) : [];
 
@@ -272,6 +281,17 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" }) {
     if (!res.ok) return setError("Не получилось открыть смену, попробуйте ещё раз");
     setOpenedAt(res.openedAt);
     setPhoto(undefined);
+  }
+
+  async function close() {
+    if (!closePhoto) return;
+    setBusy(true);
+    setError("");
+    const res = await recordDeparture(role, closePhoto.blob);
+    setBusy(false);
+    if (!res.ok) return setError("Не получилось закрыть смену, попробуйте ещё раз");
+    setClosedAt(res.closedAt);
+    setClosePhoto(undefined);
   }
 
   return (
@@ -304,6 +324,24 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" }) {
               </div>
             </div>
           ))}
+          {role === "waiter" && !closedAt && (
+            <>
+              <div className="eyebrow" style={{ marginTop: 20 }}>
+                Закрытие смены: фото (со штампом даты и времени)
+              </div>
+              <CameraCapture previewUrl={closePhoto?.url} onCapture={(url, blob) => setClosePhoto({ url, blob })} label="Сфотографировать зал" />
+              {error && <div style={{ color: "var(--danger, #e5484d)", fontSize: 13, marginTop: 8 }}>{error}</div>}
+              <button className="btn primary" style={{ marginTop: 12, width: "100%" }} disabled={!closePhoto || busy} onClick={close}>
+                {busy ? "Закрываем…" : closePhoto ? "Закрыть смену" : "Сделайте фото"}
+              </button>
+            </>
+          )}
+          {role === "waiter" && closedAt && (
+            <div className="card" style={{ marginTop: 12 }}>
+              <span className="badge-dot done" />
+              Смена закрыта в {new Date(closedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -312,6 +350,6 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" }) {
 
 export default function Shift() {
   const me = useStore(staffProfileStore);
-  if (me.role === "kitchen" || me.role === "cleaning") return <SimpleShift role={me.role} />;
+  if (me.role === "kitchen" || me.role === "cleaning" || me.role === "waiter") return <SimpleShift role={me.role} />;
   return <ZoneShift />;
 }

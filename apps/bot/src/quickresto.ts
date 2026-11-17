@@ -682,11 +682,11 @@ type SalaryModel =
 // бара формулы не было вообще) — заменена этой единой формулой. Используется,
 // только если у сотрудника ещё не проставлена своя salary_model в Supabase.
 // Рабочие роли в графике (кухня и клининг добавлены 12.11.2026).
-type WorkRole = "bar" | "hookah" | "kitchen" | "cleaning";
+type WorkRole = "bar" | "hookah" | "kitchen" | "cleaning" | "waiter";
 // Кухня и клининг не заходят на терминал Quick Resto по ПИН — сверку графика с
 // терминалом для них пропускаем (начисляем по графику).
 const TERMINAL_ROLES: WorkRole[] = ["bar", "hookah"];
-const ROLE_NAMES: Record<WorkRole, string> = { bar: "бар", hookah: "кальяны", kitchen: "кухня", cleaning: "клининг" };
+const ROLE_NAMES: Record<WorkRole, string> = { bar: "бар", hookah: "кальяны", kitchen: "кухня", cleaning: "клининг", waiter: "официант" };
 
 const DEFAULT_SALARY_MODEL: SalaryModel = { type: "percent", value: 8.5 };
 
