@@ -519,6 +519,11 @@ async function loadServiceCalls() {
   );
 }
 
+/** Пункты про тех. задачи в чек-листах не показываем (их нет в seed, но они могли сохраниться в старой смене в базе). */
+function dropTechItems(list: ChecklistItem[] | null | undefined): ChecklistItem[] | undefined {
+  return list?.filter((i) => i.id !== "bar-c-6" && !/тех\.?\s*задач/i.test(i.label));
+}
+
 async function loadShift() {
   const { data, error } = await supabase!
     .from("shifts")
@@ -537,16 +542,16 @@ async function loadShift() {
     closedBy: data.closed_by ? staffNameById.get(data.closed_by) ?? DEMO_STAFF_NAME : undefined,
     closedAt: data.closed_at ?? undefined,
     bar: {
-      openChecklist: data.bar_open_checklist?.length ? data.bar_open_checklist : prev.bar.openChecklist,
-      closeChecklist: data.bar_close_checklist?.length ? data.bar_close_checklist : prev.bar.closeChecklist,
+      openChecklist: dropTechItems(data.bar_open_checklist)?.length ? dropTechItems(data.bar_open_checklist) : prev.bar.openChecklist,
+      closeChecklist: dropTechItems(data.bar_close_checklist)?.length ? dropTechItems(data.bar_close_checklist) : prev.bar.closeChecklist,
       openedBy: data.bar_opened_by ? staffNameById.get(data.bar_opened_by) ?? DEMO_STAFF_NAME : undefined,
       openedAt: data.bar_opened_at ?? undefined,
       closedBy: data.bar_closed_by ? staffNameById.get(data.bar_closed_by) ?? DEMO_STAFF_NAME : undefined,
       closedAt: data.bar_closed_at ?? undefined,
     },
     hookah: {
-      openChecklist: data.hookah_open_checklist?.length ? data.hookah_open_checklist : prev.hookah.openChecklist,
-      closeChecklist: data.hookah_close_checklist?.length ? data.hookah_close_checklist : prev.hookah.closeChecklist,
+      openChecklist: dropTechItems(data.hookah_open_checklist)?.length ? dropTechItems(data.hookah_open_checklist) : prev.hookah.openChecklist,
+      closeChecklist: dropTechItems(data.hookah_close_checklist)?.length ? dropTechItems(data.hookah_close_checklist) : prev.hookah.closeChecklist,
       openedBy: data.hookah_opened_by ? staffNameById.get(data.hookah_opened_by) ?? DEMO_STAFF_NAME : undefined,
       openedAt: data.hookah_opened_at ?? undefined,
       closedBy: data.hookah_closed_by ? staffNameById.get(data.hookah_closed_by) ?? DEMO_STAFF_NAME : undefined,
