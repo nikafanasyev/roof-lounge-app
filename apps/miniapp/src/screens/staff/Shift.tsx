@@ -195,7 +195,8 @@ function ZoneShift() {
         </>
       )}
 
-      {roleOpened && !roleClosed && (
+      {/* У бара тех. задачи не показываем (фидбек Никиты 17.11.2026). */}
+      {roleOpened && !roleClosed && role !== "bar" && (
         <>
           <div className="eyebrow" style={{ marginTop: 20 }}>
             Тех. задача на сегодня
