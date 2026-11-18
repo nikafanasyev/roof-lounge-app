@@ -143,6 +143,11 @@ export default function Summary() {
         в monthly_cash_split не будет, пока нет отдельной команды для
         ручной синхронизации задним числом, поэтому показываем "—", а не 0 ₽.
       */}
+      <div className="card" style={{ marginBottom: 16, opacity: 0.55 }}>
+        <div className="eyebrow">Наличных в кассе</div>
+        <div className="muted" style={{ fontSize: 15, fontWeight: 600 }}>в разработке</div>
+      </div>
+
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="eyebrow" style={{ marginBottom: 8 }}>
           Нал / безнал
@@ -171,13 +176,13 @@ export default function Summary() {
 
       <div className="eyebrow">Операционка</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <Link to="/manager/calls" className="card" style={{ display: "block" }}>
+        <div className="card" style={{ opacity: 0.55 }}>
           <div className="eyebrow">Открытые вызовы</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{openCalls.length}</div>
-        </Link>
-        <div className="card">
+          <div className="muted" style={{ fontSize: 15, fontWeight: 600 }}>в разработке</div>
+        </div>
+        <div className="card" style={{ opacity: 0.55 }}>
           <div className="eyebrow">Ср. время реакции</div>
-          <div style={{ fontSize: 28, fontWeight: 700 }}>{avgReaction !== null ? `${avgReaction} мин` : "—"}</div>
+          <div className="muted" style={{ fontSize: 15, fontWeight: 600 }}>в разработке</div>
         </div>
         <Link to="/manager/problems" className="card" style={{ display: "block" }}>
           <div className="eyebrow">Открытые проблемы</div>
