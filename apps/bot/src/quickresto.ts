@@ -1629,9 +1629,107 @@ export function scheduleDailyCrmCustomerSync() {
 // без удалённых; считаем, что платятся из кассы) − выплаты сотрудникам (payouts).
 // Начисленная ЗП (shift_payroll) показывается справочно: это долг, а не выход
 // наличных, пока её не выплатили.
+// --- Z-отчёты Quick Resto (front.zreport): остатки наличных по кассам ---
+interface ZReportRaw {
+  object?: {
+    kkmTerminalName?: string;
+    shiftNumber?: number;
+    serverRegisterTime?: number;
+    openCashInRegister?: number;
+    closeCashInRegister?: number;
+    closeCashInRegisterDiff?: number;
+    totalCashInRegister?: number;
+    totalCash?: number;
+    totalReturnCash?: number;
+    totalCashOut?: number;
+    totalCashIn?: number;
+    closingEncashment?: number;
+  };
+}
+export interface ZReport {
+  terminal: string;
+  shift: number;
+  at: number;
+  open: number;
+  close: number;
+  diff: number;
+  inRegister: number;
+  cashSales: number;
+  returns: number;
+  cashOut: number;
+  cashIn: number;
+  encashment: number;
+}
+const ZREPORT_PATH = "/platform/data/front.zreport/select";
+const zPath = (start: number, count: number) => `${ZREPORT_PATH}?start=${start}&count=${count}&businessDayOffsetInMs=43200000&timeZone=-180`;
+
+/** Свежие Z-отчёты (список отдаётся от старых к новым — находим конец бинарным поиском и берём последнюю страницу). */
+async function fetchRecentZReports(): Promise<ZReport[]> {
+  const exists = async (i: number) => ((await qrFetchJson<{ ds?: unknown[] }>(zPath(i, 1))).ds ?? []).length > 0;
+  let hi = 256;
+  while (await exists(hi)) hi *= 2;
+  let lo = 0;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (await exists(mid)) lo = mid;
+    else hi = mid;
+  }
+  const total = lo + 1;
+  const start = Math.max(0, total - 150);
+  const data = await qrFetchJson<{ ds?: ZReportRaw[] }>(zPath(start, 150));
+  return (data.ds ?? [])
+    .map((r) => r.object)
+    .filter((o): o is NonNullable<ZReportRaw["object"]> => Boolean(o))
+    .map((o) => ({
+      terminal: String(o.kkmTerminalName ?? ""),
+      shift: Number(o.shiftNumber ?? 0),
+      at: Number(o.serverRegisterTime ?? 0),
+      open: Number(o.openCashInRegister ?? 0),
+      close: Number(o.closeCashInRegister ?? 0),
+      diff: Number(o.closeCashInRegisterDiff ?? 0),
+      inRegister: Number(o.totalCashInRegister ?? 0),
+      cashSales: Number(o.totalCash ?? 0),
+      returns: Number(o.totalReturnCash ?? 0),
+      cashOut: Number(o.totalCashOut ?? 0),
+      cashIn: Number(o.totalCashIn ?? 0),
+      encashment: Number(o.closingEncashment ?? 0),
+    }))
+    .sort((x, y) => x.at - y.at);
+}
+
+/** Сколько наличных в кассе сейчас: последний Z-отчёт каждой кассы (открытая смена — текущий итог). */
+export async function fetchCashInRegister(): Promise<{ total: number; terminals: { terminal: string; amount: number }[] }> {
+  const reports = await fetchRecentZReports();
+  const last = new Map<string, ZReport>();
+  for (const r of reports) last.set(r.terminal, r);
+  const terminals = [...last.values()].map((r) => ({ terminal: r.terminal, amount: r.inRegister }));
+  return { total: terminals.reduce((a, t) => a + t.amount, 0), terminals };
+}
+
+/** Каждые 5 минут кладёт остаток кассы в таблицу cash_in_register — оттуда его показывает мини-апп. */
+export function scheduleCashInRegisterSync() {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const run = async () => {
+    try {
+      const { total, terminals } = await fetchCashInRegister();
+      const { error } = await supabase.from("cash_in_register").upsert({ id: 1, amount: total, details: terminals, updated_at: new Date().toISOString() });
+      if (error) console.error("Касса: ошибка записи cash_in_register:", error.message);
+    } catch (err) {
+      console.error("Касса: не удалось получить остаток из Quick Resto:", err);
+    }
+  };
+  void run();
+  setInterval(run, 5 * 60_000);
+}
+
+// --- Сверка кассы за бизнес-день ---
+// Z-отчёты Quick Resto: остаток на начало, наличные продажи, возвраты, изъятия;
+// сравнение изъятий из кассы с нашими расходами и выплатами (expenses, payouts)
+// и расхождение по кассе (closeCashInRegisterDiff). Начисленная ЗП — справочно.
 export async function buildCashReconText(supabase: SupabaseClient, dateIso: string): Promise<string> {
   const { sinceMs, tillMs } = businessDayRangeMs(new Date(`${dateIso}T12:00:00+03:00`));
-  const { cash } = await fetchCashCashlessSplit(sinceMs, tillMs);
+  // Z-отчёт, закрывающий бизнес-день, регистрируется утром следующего дня (до 11:00).
+  const day = (await fetchRecentZReports()).filter((r) => r.at >= sinceMs && r.at < tillMs);
   const [exp, pay, acc] = await Promise.all([
     supabase.from("expenses").select("amount").eq("date", dateIso).is("deleted_at", null),
     supabase.from("payouts").select("amount").eq("date", dateIso),
@@ -1644,17 +1742,44 @@ export async function buildCashReconText(supabase: SupabaseClient, dateIso: stri
   const expenses = sum(exp.data, "amount");
   const payouts = sum(pay.data, "amount");
   const accrued = sum(acc.data, "salary");
-  const delta = cash - expenses - payouts;
-  const f = (n: number) => Math.round(n).toLocaleString("ru-RU");
+  const f = (n: number) => Math.round(n * 100) / 100;
+  const fmt = (n: number) => f(n).toLocaleString("ru-RU");
+  const signed = (n: number) => `${n >= 0 ? "+" : "−"}${fmt(Math.abs(n))}`;
   const [y, m, d] = dateIso.split("-");
+  const head = `Касса за ${d}.${m}.${y}\n`;
+  if (!day.length) {
+    return head + "Z-отчёты Quick Resto за этот день не найдены (смена ещё не закрыта или данных нет).";
+  }
+  const tot = day.reduce(
+    (a, r) => ({
+      open: a.open + r.open,
+      close: a.close + r.close,
+      diff: a.diff + r.diff,
+      sales: a.sales + r.cashSales,
+      returns: a.returns + r.returns,
+      out: a.out + r.cashOut + r.encashment,
+      inn: a.inn + r.cashIn,
+    }),
+    { open: 0, close: 0, diff: 0, sales: 0, returns: 0, out: 0, inn: 0 },
+  );
+  const calculated = tot.open + tot.sales + tot.inn - tot.returns - tot.out;
+  const ours = expenses + payouts;
+  const outDiff = tot.out - ours;
   return (
-    `Касса за ${d}.${m}.${y}\n` +
-    `+ Наличная выручка: ${f(cash)} ₽\n` +
-    `− Расходы: ${f(expenses)} ₽\n` +
-    `− Выплаты сотрудникам: ${f(payouts)} ₽\n` +
-    `= Ожидаемое изменение кассы: ${delta >= 0 ? "+" : "−"}${f(Math.abs(delta))} ₽\n\n` +
-    `Начислено зарплаты за день: ${f(accrued)} ₽ (выплачено ${f(payouts)} ₽).\n` +
-    `Остаток на утро = остаток предыдущего утра ${delta >= 0 ? "+" : "−"} ${f(Math.abs(delta))} ₽; сравните с «Наличных в кассе» в Quick Resto.`
+    head +
+    `Остаток на начало: ${fmt(tot.open)} ₽\n` +
+    `+ Наличные продажи: ${fmt(tot.sales)} ₽\n` +
+    (tot.inn ? `+ Внесено в кассу: ${fmt(tot.inn)} ₽\n` : "") +
+    `− Возвраты наличными: ${fmt(tot.returns)} ₽\n` +
+    `− Изъято из кассы (Quick Resto): ${fmt(tot.out)} ₽\n` +
+    `= Расчётный остаток: ${fmt(calculated)} ₽\n` +
+    `Фактический остаток на закрытии: ${fmt(tot.close)} ₽\n` +
+    (Math.abs(tot.diff) >= 1 ? `⚠️ Расхождение кассы по Quick Resto: ${signed(tot.diff)} ₽\n` : "Расхождения по кассе нет.\n") +
+    `\nИзъятия сверяем с нашими записями:\n` +
+    `Расходы ${fmt(expenses)} ₽ + выплаты сотрудникам ${fmt(payouts)} ₽ = ${fmt(ours)} ₽\n` +
+    (Math.abs(outDiff) >= 1
+      ? `⚠️ Изъято в Quick Resto ${fmt(tot.out)} ₽, в приложении записано ${fmt(ours)} ₽ — не хватает записей на ${fmt(Math.abs(outDiff))} ₽ ${outDiff > 0 ? "(внесите расходы/выплаты)" : "(записано больше, чем изъято)"}.\n` : "Изъятия и записи в приложении совпадают.\n") +
+    `\nНачислено зарплаты за день: ${fmt(accrued)} ₽ (выплачено ${fmt(payouts)} ₽).`
   );
 }
 

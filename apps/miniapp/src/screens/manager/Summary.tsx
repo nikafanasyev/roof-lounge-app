@@ -4,6 +4,7 @@ import { useStore } from "@/data/useStore";
 import {
   averageReactionMinutes,
   cashSplitStore,
+  cashInRegisterStore,
   computeMonthFinancials,
   currentMonthKey,
   expensesStore,
@@ -44,6 +45,7 @@ export default function Summary() {
   useStore(expensesStore);
   useStore(incomesStore);
   useStore(cashSplitStore);
+  const cashReg = useStore(cashInRegisterStore);
 
   const openCalls = calls.filter((c) => c.status === "open");
   const openProblems = problems.filter((p) => p.status !== "done");
@@ -143,9 +145,21 @@ export default function Summary() {
         в monthly_cash_split не будет, пока нет отдельной команды для
         ручной синхронизации задним числом, поэтому показываем "—", а не 0 ₽.
       */}
-      <div className="card" style={{ marginBottom: 16, opacity: 0.55 }}>
-        <div className="eyebrow">Наличных в кассе</div>
-        <div className="muted" style={{ fontSize: 15, fontWeight: 600 }}>в разработке</div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-row">
+          <div className="eyebrow">Наличных в кассе</div>
+          {cashReg && (
+            <div className="muted" style={{ fontSize: 12 }}>
+              {new Date(cashReg.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}{" "}
+              {new Date(cashReg.updatedAt).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" })}
+            </div>
+          )}
+        </div>
+        {cashReg ? (
+          <div style={{ fontSize: 28, fontWeight: 700 }}>{money(cashReg.amount)}</div>
+        ) : (
+          <div className="muted" style={{ fontSize: 13 }}>Ждём первую синхронизацию с Quick Resto</div>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>

@@ -202,6 +202,19 @@ export const incomesStore = new Store<Income[]>([]);
 // просто нет строки (см. getCashSplitForMonth ниже).
 export const cashSplitStore = new Store<MonthCashSplit[]>([]);
 
+/** Остаток наличных в кассе по Quick Resto (бот обновляет каждые 5 минут). */
+export interface CashInRegister {
+  amount: number;
+  updatedAt: string;
+  terminals: { terminal: string; amount: number }[];
+}
+export const cashInRegisterStore = new Store<CashInRegister | null>(null);
+async function loadCashInRegister() {
+  const { data, error } = await supabase!.from("cash_in_register").select("*").eq("id", 1).maybeSingle();
+  if (error) return logSyncError("loadCashInRegister", error);
+  cashInRegisterStore.set(data ? { amount: Number(data.amount), updatedAt: data.updated_at, terminals: data.details ?? [] } : null);
+}
+
 // Статус загрузки реальных данных — см. initData() ниже. Пока он не "ok",
 // сотрудник/руководитель видит примерные данные из data/seed.ts (гости,
 // сотрудники, смены, ЗП, штрафы — правдоподобные цифры "для верстки",
@@ -352,6 +365,7 @@ export async function initData(): Promise<void> {
           loadTasks(),
           loadLateProposals(),
           loadVenueSettings(),
+          loadCashInRegister(),
           loadStaffDirectory(),
           loadShiftPayroll(),
           loadAdjustments(),
@@ -957,6 +971,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => loadTasks())
     .on("postgres_changes", { event: "*", schema: "public", table: "late_proposals" }, () => loadLateProposals())
     .on("postgres_changes", { event: "*", schema: "public", table: "venue_settings" }, () => loadVenueSettings())
+    .on("postgres_changes", { event: "*", schema: "public", table: "cash_in_register" }, () => loadCashInRegister())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff" }, () => loadStaffDirectory())
     .on("postgres_changes", { event: "*", schema: "public", table: "shift_payroll" }, () => loadShiftPayroll())
     .on("postgres_changes", { event: "*", schema: "public", table: "adjustments" }, () => loadAdjustments())
