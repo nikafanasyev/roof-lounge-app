@@ -1623,3 +1623,60 @@ export function scheduleDailyCrmCustomerSync() {
   // Сразу при старте бота — чтобы не ждать до следующих 9:00 МСК первого переноса базы.
   runOnce().then(scheduleNext);
 }
+
+// --- Сверка кассы (расчёт ожидаемого движения наличных за бизнес-день) ---
+// Наличная выручка (Quick Resto, финансовый отчёт) − расходы за день (expenses,
+// без удалённых; считаем, что платятся из кассы) − выплаты сотрудникам (payouts).
+// Начисленная ЗП (shift_payroll) показывается справочно: это долг, а не выход
+// наличных, пока её не выплатили.
+export async function buildCashReconText(supabase: SupabaseClient, dateIso: string): Promise<string> {
+  const { sinceMs, tillMs } = businessDayRangeMs(new Date(`${dateIso}T12:00:00+03:00`));
+  const { cash } = await fetchCashCashlessSplit(sinceMs, tillMs);
+  const [exp, pay, acc] = await Promise.all([
+    supabase.from("expenses").select("amount").eq("date", dateIso).is("deleted_at", null),
+    supabase.from("payouts").select("amount").eq("date", dateIso),
+    supabase.from("shift_payroll").select("salary").eq("date", dateIso),
+  ]);
+  if (exp.error) throw exp.error;
+  if (pay.error) throw pay.error;
+  if (acc.error) throw acc.error;
+  const sum = (rows: { [k: string]: unknown }[] | null, k: string) => (rows ?? []).reduce((a, r) => a + Number(r[k] ?? 0), 0);
+  const expenses = sum(exp.data, "amount");
+  const payouts = sum(pay.data, "amount");
+  const accrued = sum(acc.data, "salary");
+  const delta = cash - expenses - payouts;
+  const f = (n: number) => Math.round(n).toLocaleString("ru-RU");
+  const [y, m, d] = dateIso.split("-");
+  return (
+    `Касса за ${d}.${m}.${y}\n` +
+    `+ Наличная выручка: ${f(cash)} ₽\n` +
+    `− Расходы: ${f(expenses)} ₽\n` +
+    `− Выплаты сотрудникам: ${f(payouts)} ₽\n` +
+    `= Ожидаемое изменение кассы: ${delta >= 0 ? "+" : "−"}${f(Math.abs(delta))} ₽\n\n` +
+    `Начислено зарплаты за день: ${f(accrued)} ₽ (выплачено ${f(payouts)} ₽).\n` +
+    `Остаток на утро = остаток предыдущего утра ${delta >= 0 ? "+" : "−"} ${f(Math.abs(delta))} ₽; сравните с «Наличных в кассе» в Quick Resto.`
+  );
+}
+
+/** Каждое утро в 11:15 МСК (бизнес-день закрылся в 11:00) присылает сверку кассы за прошедший день. */
+export function scheduleDailyCashRecon(send: (text: string) => Promise<unknown>) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  function scheduleNext() {
+    const now = new Date();
+    const msk = new Date(now.getTime() + 3 * 3600_000);
+    const target = new Date(Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth(), msk.getUTCDate(), 11, 15, 0));
+    if (target.getTime() <= msk.getTime()) target.setUTCDate(target.getUTCDate() + 1);
+    const delay = target.getTime() - msk.getTime();
+    setTimeout(async () => {
+      try {
+        const y = new Date(Date.now() + 3 * 3600_000 - 86400000).toISOString().slice(0, 10);
+        await send(await buildCashReconText(supabase, y));
+      } catch (err) {
+        console.error("Сверка кассы: ошибка:", err);
+      }
+      scheduleNext();
+    }, delay);
+    console.log(`Сверка кассы: следующая — через ${Math.round(delay / 60000)} мин (11:15 МСК)`);
+  }
+  scheduleNext();
+}
