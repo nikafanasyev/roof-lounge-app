@@ -534,6 +534,20 @@ async function loadShift() {
   if (error) return logSyncError("loadShift", error);
   if (!data) return; // смен ещё не было — оставляем закрытую заготовку из seed
   const prev = shiftStore.get();
+  // Последняя смена из прошлого бизнес-дня (день меняется в 11:00) и уже закрыта —
+  // показываем новую пустую смену, иначе у зон нет кнопки «Открыть» и открыть смену нельзя.
+  const lastTs = new Date(data.opened_at ?? data.created_at ?? Date.now());
+  if (data.closed_at && businessDateIso(lastTs) !== businessDateIso()) {
+    if (prev.status === "open") return; // уже открыли новую локально, ждём ответ Supabase
+    const clear = (items: ChecklistItem[]) => items.map((i) => ({ ...i, done: false }));
+    shiftStore.set({
+      id: crypto.randomUUID(),
+      status: "closed",
+      bar: { openChecklist: clear(prev.bar.openChecklist), closeChecklist: clear(prev.bar.closeChecklist) },
+      hookah: { openChecklist: clear(prev.hookah.openChecklist), closeChecklist: clear(prev.hookah.closeChecklist) },
+    });
+    return;
+  }
   shiftStore.set({
     id: data.id,
     status: data.closed_at ? "closed" : data.opened_at ? "open" : "closed",
