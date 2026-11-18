@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "@/data/useStore";
-import { TECH_ROLES, getTechTasksForRoleOnDate, loadTechLog, localDateIso, setTechTaskDone, techLogStore, techTaskMark } from "@/data/repo";
+import { TECH_ROLES, getTechTasksForRoleOnDate, loadTechLog, localDateIso, businessDateIso, setTechTaskDone, techLogStore, techTaskMark } from "@/data/repo";
 
 function shiftDay(iso: string, delta: number): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -9,7 +9,7 @@ function shiftDay(iso: string, delta: number): string {
 
 export default function TechTasks() {
   useStore(techLogStore);
-  const [date, setDate] = useState(localDateIso());
+  const [date, setDate] = useState(businessDateIso());
   useEffect(() => {
     loadTechLog(date);
   }, [date]);

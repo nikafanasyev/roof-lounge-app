@@ -1987,7 +1987,16 @@ export interface TodayCleaningTask {
 }
 
 /** Задачи генеральной уборки на сегодня для одной роли (Бар/Кухня/Уборщица/Кальянный мастер). */
-export function getTodayCleaningTasksForRole(role: string, now: Date = new Date()): TodayCleaningTask[] {
+/**
+ * «Сегодня» для тех. задач — по бизнес-дню (рабочий интервал заведения), а не по
+ * календарю: после полуночи смена ещё идёт, и задачи остаются вчерашними до начала
+ * нового бизнес-дня (по умолчанию 11:00).
+ */
+export function getTodayCleaningTasksForRole(role: string, nowArg?: Date): TodayCleaningTask[] {
+  const now = nowArg ?? (() => {
+    const [y, m, d] = businessDateIso().split("-").map(Number);
+    return new Date(y, m - 1, d, 12, 0, 0);
+  })();
   const weeks = CLEANING_ROLE_WEEKS[role];
   if (!weeks) return [];
   const { index: weekIndex } = cleaningRotationWeek(now);
