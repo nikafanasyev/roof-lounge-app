@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "@/data/useStore";
-import { serviceCallsStore } from "@/data/repo";
+import { serviceCallsStore, venueSettingsStore } from "@/data/repo";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { tableLabel } from "@/lib/tables";
 
@@ -8,11 +8,8 @@ import { tableLabel } from "@/lib/tables";
 const BOARD_TABLES = [1, 2, 3, 4, 5, 51, 6, 7, 8, 9, 10];
 // Уголь меняют по кругу каждые COAL_CYCLE_MIN минут работы кальяна. Кнопки нет:
 // за COAL_SOON_MIN минут до замены карточка желтеет, после — красная ещё COAL_LATE_MIN минут.
-const COAL_CYCLE_MIN = 20;
-const COAL_SOON_MIN = 3;
-const COAL_LATE_MIN = 3;
-
 function coalState(hookahMs: number): { untilMs: number; soon: boolean; now: boolean } {
+  const { coalCycleMin: COAL_CYCLE_MIN, coalSoonMin: COAL_SOON_MIN, coalLateMin: COAL_LATE_MIN } = venueSettingsStore.get();
   const cycle = COAL_CYCLE_MIN * 60000;
   const pos = hookahMs % cycle;
   const now = hookahMs >= cycle && pos < COAL_LATE_MIN * 60000;
@@ -51,6 +48,7 @@ function fmt(ms: number): string {
 /** Борд кальянов: столы, у каждого стола может быть несколько кальянов со своими таймерами (кальян и уголь). Состояние общее для всех устройств. */
 export default function Board() {
   const calls = useStore(serviceCallsStore);
+  useStore(venueSettingsStore);
   const [tables, setTables] = useState<Record<number, TableState>>({});
   const [hookahs, setHookahs] = useState<Hookah[]>([]);
   const [now, setNow] = useState(() => Date.now());
@@ -146,7 +144,7 @@ export default function Board() {
     <div className="screen">
       <h1>Борд кальянов</h1>
       <div className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
-        Прототип. Уголь: подсветка каждые {COAL_CYCLE_MIN} мин работы кальяна.
+        Прототип. Уголь: подсветка каждые {venueSettingsStore.get().coalCycleMin} мин работы кальяна.
       </div>
 
       {BOARD_TABLES.map((n) => {

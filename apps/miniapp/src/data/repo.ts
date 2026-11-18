@@ -118,6 +118,51 @@ export const shiftStore = new Store<Shift>(seedShift);
 export const problemsStore = new Store<Problem[]>(seedProblems);
 export const tasksStore = new Store<Task[]>(seedTasks);
 export const lateProposalsStore = new Store<LateProposal[]>([]);
+
+/** Настройки заведения (раздел «Настройки» у руководителя). */
+export interface DayHours {
+  closed: boolean;
+  open: string; // "12:00"
+  close: string; // "02:00" — может быть после полуночи
+}
+export interface VenueSettings {
+  /** Часы работы по дням недели, 0 = воскресенье … 6 = суббота (как Date.getDay()). */
+  hours: DayHours[];
+  /** Час, с которого начинается бизнес-день (смена, выручка, начисления). */
+  businessDayStartHour: number;
+  coalCycleMin: number;
+  coalSoonMin: number;
+  coalLateMin: number;
+}
+export const DEFAULT_VENUE_SETTINGS: VenueSettings = {
+  hours: Array.from({ length: 7 }, () => ({ closed: false, open: "12:00", close: "02:00" })),
+  businessDayStartHour: 11,
+  coalCycleMin: 20,
+  coalSoonMin: 3,
+  coalLateMin: 3,
+};
+export const venueSettingsStore = new Store<VenueSettings>(DEFAULT_VENUE_SETTINGS);
+
+async function loadVenueSettings() {
+  const { data, error } = await supabase!.from("venue_settings").select("data").eq("id", 1).maybeSingle();
+  if (error) return logSyncError("loadVenueSettings", error);
+  const d = (data?.data ?? {}) as Partial<VenueSettings>;
+  venueSettingsStore.set({
+    ...DEFAULT_VENUE_SETTINGS,
+    ...d,
+    hours: Array.isArray(d.hours) && d.hours.length === 7 ? d.hours : DEFAULT_VENUE_SETTINGS.hours,
+  });
+}
+
+export function saveVenueSettings(next: VenueSettings) {
+  venueSettingsStore.set(next);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("venue_settings")
+      .upsert({ id: 1, data: next, updated_at: new Date().toISOString() })
+      .then(({ error }) => error && logSyncError("saveVenueSettings", error));
+  }
+}
 export const staffProfileStore = new Store<StaffProfile>(seedStaffProfile);
 export const staffDirectoryStore = new Store<StaffProfile[]>(seedStaffDirectory);
 export const shiftPayrollStore = new Store<ShiftPayrollEntry[]>(seedShiftPayroll);
@@ -288,6 +333,7 @@ export async function initData(): Promise<void> {
           loadProblems(),
           loadTasks(),
           loadLateProposals(),
+          loadVenueSettings(),
           loadStaffDirectory(),
           loadShiftPayroll(),
           loadAdjustments(),
@@ -892,6 +938,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "problems" }, () => loadProblems())
     .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => loadTasks())
     .on("postgres_changes", { event: "*", schema: "public", table: "late_proposals" }, () => loadLateProposals())
+    .on("postgres_changes", { event: "*", schema: "public", table: "venue_settings" }, () => loadVenueSettings())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff" }, () => loadStaffDirectory())
     .on("postgres_changes", { event: "*", schema: "public", table: "shift_payroll" }, () => loadShiftPayroll())
     .on("postgres_changes", { event: "*", schema: "public", table: "adjustments" }, () => loadAdjustments())
@@ -1942,9 +1989,9 @@ export function getTodayCleaningTasksForRole(role: string, now: Date = new Date(
 
 // --- Открытие смены без чек-листа (кухня, клининг) ---
 
-/** Бизнес-дата: до 11:00 ещё идёт вчерашняя смена. */
+/** Бизнес-дата: до начала бизнес-дня (по умолчанию 11:00) ещё идёт вчерашняя смена. */
 export function businessDateIso(now: Date = new Date()): string {
-  const d = new Date(now.getTime() - 11 * 3600_000);
+  const d = new Date(now.getTime() - venueSettingsStore.get().businessDayStartHour * 3600_000);
   return localDateIso(d);
 }
 

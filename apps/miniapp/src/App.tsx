@@ -7,6 +7,7 @@ import MixBuilder from "@/screens/master/MixBuilder";
 import MixView from "@/screens/master/MixView";
 import Shift from "@/screens/staff/Shift";
 import Problems from "@/screens/staff/Problems";
+import Settings from "@/screens/manager/Settings";
 import Tasks from "@/screens/staff/Tasks";
 import Board from "@/screens/staff/Board";
 import Dashboard from "@/screens/employee/Dashboard";
@@ -190,6 +191,9 @@ function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
       <NavLink to="/manager/problems" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
         <span className="icon">🛠</span>Проблемы
       </NavLink>
+      <NavLink to="/manager/settings" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+        <span className="icon">⚙️</span>Настройки
+      </NavLink>
     </nav>
   );
 }
@@ -347,6 +351,7 @@ function RoleShell() {
         <Route path="/manager/tech" element={<TechTasks />} />
         <Route path="/manager/managers" element={<ManagersAdmin />} />
         <Route path="/manager/problems" element={<Problems />} />
+        <Route path="/manager/settings" element={<Settings />} />
         <Route path="/manager/tasks" element={<Tasks backTo="/manager/summary" />} />
         <Route path="/manager/board" element={<Board />} />
 

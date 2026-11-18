@@ -260,6 +260,54 @@ bot.command("cashdebug", async (ctx) => {
   }
 });
 
+// Сверка выручки: /revcheck [ДД.ММ.ГГГГ] [ДД.ММ.ГГГГ] — по бизнес-дням выручка Quick Resto
+// против той, что записана в начислениях (shift_payroll), расхождения помечаются.
+bot.command("revcheck", async (ctx) => {
+  if (!ctx.from || !(await isReportAdmin(ctx.from.id))) return;
+  const toIso = (x: string) => {
+    const m = x.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+  };
+  const args = (ctx.match?.toString().trim() ?? "").split(/\s+/).filter(Boolean);
+  const now = new Date(Date.now() + 3 * 3600_000);
+  const defFrom = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const defTo = new Date(Date.now() + 3 * 3600_000 - 86400000 * 2).toISOString().slice(0, 10);
+  const from = args[0] ? toIso(args[0]) : defFrom;
+  const to = args[1] ? toIso(args[1]) : args[0] ? from : defTo;
+  if (!from || !to) {
+    await ctx.reply("Формат: /revcheck 01.11.2026 16.11.2026");
+    return;
+  }
+  try {
+    const supa = createClient(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!);
+    const { data, error } = await supa.from("shift_payroll").select("date, revenue").gte("date", from).lte("date", to);
+    if (error) throw error;
+    const recorded = new Map<string, number>();
+    for (const r of data ?? []) {
+      const d = String(r.date).slice(0, 10);
+      recorded.set(d, Math.max(recorded.get(d) ?? 0, Number(r.revenue)));
+    }
+    const lines: string[] = [];
+    let sumQr = 0;
+    let sumRec = 0;
+    let bad = 0;
+    for (let t = new Date(`${from}T12:00:00+03:00`).getTime(); t <= new Date(`${to}T12:00:00+03:00`).getTime(); t += 86400000) {
+      const qr = await fetchRevenueSplitForDate(new Date(t));
+      const rec = recorded.get(qr.isoDate);
+      sumQr += qr.total;
+      sumRec += rec ?? 0;
+      const diff = rec === undefined ? null : Math.round((rec - qr.total) * 100) / 100;
+      const mark = rec === undefined ? "нет начисления" : Math.abs(diff!) < 1 ? "ок" : `разница ${diff}`;
+      if (rec === undefined || Math.abs(diff!) >= 1) bad++;
+      lines.push(`${qr.isoDate.slice(8)}.${qr.isoDate.slice(5, 7)}  QR ${Math.round(qr.total)}  база ${rec === undefined ? "—" : Math.round(rec)}  ${mark}`);
+    }
+    await ctx.reply(`Сверка выручки ${from} — ${to}\n` + lines.join("\n") + `\n\nИтого: Quick Resto ${Math.round(sumQr)}, в начислениях ${Math.round(sumRec)}. Расхождений: ${bad}.`);
+  } catch (err) {
+    console.error("/revcheck ошибка:", err);
+    await ctx.reply("Не удалось сверить выручку — см. логи бота.");
+  }
+});
+
 // Превращает результат processScheduledDate/manuallyAccrueDate в человеко-
 // читаемое русское сообщение — раньше /accrue и кнопка пересчёта в миниаппе
 // всегда отвечали обобщённым "Готово", даже если на самом деле ничего не

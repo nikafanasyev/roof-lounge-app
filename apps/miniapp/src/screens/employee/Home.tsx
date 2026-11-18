@@ -6,6 +6,7 @@ import {
   currentMonthKey,
   getStaffProfile,
   listMySchedule,
+  venueSettingsStore,
   scheduleStore,
   shiftPayrollStore,
   shiftStore,
@@ -33,6 +34,8 @@ export default function Home() {
   useStore(shiftPayrollStore);
   useStore(tipsStore);
   const shift = useStore(shiftStore);
+  const venue = useStore(venueSettingsStore);
+  const todayHours = venue.hours[new Date().getDay()];
 
   const me = getStaffProfile();
   const firstName = (me.name || "").split(" ")[0];
@@ -70,6 +73,10 @@ export default function Home() {
           <div className="value">{money(tips)}</div>
           <div className="label">Чаевые</div>
         </div>
+      </div>
+
+      <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+        Часы работы сегодня: {todayHours.closed ? "выходной" : `${todayHours.open}–${todayHours.close}`}
       </div>
 
       <h2>Быстрые действия</h2>
