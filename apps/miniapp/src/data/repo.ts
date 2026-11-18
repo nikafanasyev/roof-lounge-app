@@ -125,7 +125,16 @@ export interface DayHours {
   open: string; // "12:00"
   close: string; // "02:00" — может быть после полуночи
 }
+/** Шаблон смены роли: будни (вс–чт) и выходные (пт, сб). */
+export interface ShiftTemplate {
+  weekdayStart: string;
+  weekdayEnd: string;
+  weekendStart: string;
+  weekendEnd: string;
+}
 export interface VenueSettings {
+  /** Время смен по ролям — подставляется при постановке в график. */
+  shifts: Record<WorkRole, ShiftTemplate>;
   /** Часы работы по дням недели, 0 = воскресенье … 6 = суббота (как Date.getDay()). */
   hours: DayHours[];
   /** Час, с которого начинается бизнес-день (смена, выручка, начисления). */
@@ -134,7 +143,15 @@ export interface VenueSettings {
   coalSoonMin: number;
   coalLateMin: number;
 }
+const tpl = (a: string, b: string, c: string, d: string): ShiftTemplate => ({ weekdayStart: a, weekdayEnd: b, weekendStart: c, weekendEnd: d });
 export const DEFAULT_VENUE_SETTINGS: VenueSettings = {
+  shifts: {
+    bar: tpl("11:30", "02:00", "11:30", "03:00"),
+    hookah: tpl("11:30", "02:00", "11:30", "03:00"),
+    waiter: tpl("18:00", "00:00", "18:00", "00:00"),
+    kitchen: tpl("12:30", "23:45", "12:30", "01:45"),
+    cleaning: tpl("11:00", "23:00", "11:00", "23:00"),
+  },
   hours: Array.from({ length: 7 }, () => ({ closed: false, open: "12:00", close: "02:00" })),
   businessDayStartHour: 11,
   coalCycleMin: 20,
@@ -151,6 +168,7 @@ async function loadVenueSettings() {
     ...DEFAULT_VENUE_SETTINGS,
     ...d,
     hours: Array.isArray(d.hours) && d.hours.length === 7 ? d.hours : DEFAULT_VENUE_SETTINGS.hours,
+    shifts: { ...DEFAULT_VENUE_SETTINGS.shifts, ...(d.shifts ?? {}) },
   });
 }
 
@@ -3239,8 +3257,19 @@ export function listMySchedule(): ScheduleEntry[] {
 }
 
 /** Назначить сотрудника на роль в конкретный день (руководитель). Одна роль в день — один сотрудник, повторная запись переставляет назначение. */
-export function setScheduleEntry(staffId: string, role: WorkRole, date: string, startTime = "18:00", endTime = "02:00") {
+export function shiftTimesFor(role: WorkRole, dateIso: string): { start: string; end: string } {
+  const [y, m, d] = dateIso.slice(0, 10).split("-").map(Number);
+  const dow = new Date(y, m - 1, d, 12).getDay();
+  const t = venueSettingsStore.get().shifts[role] ?? DEFAULT_VENUE_SETTINGS.shifts[role];
+  const weekend = dow === 5 || dow === 6;
+  return weekend ? { start: t.weekendStart, end: t.weekendEnd } : { start: t.weekdayStart, end: t.weekdayEnd };
+}
+
+export function setScheduleEntry(staffId: string, role: WorkRole, date: string, startTimeArg?: string, endTimeArg?: string) {
   const dateKey = date.slice(0, 10);
+  const def = shiftTimesFor(role, dateKey);
+  const startTime = startTimeArg ?? def.start;
+  const endTime = endTimeArg ?? def.end;
   const entry: ScheduleEntry = { id: uid(), staffId, role, date, startTime, endTime };
   scheduleStore.update((list) => [...list.filter((e) => !(e.date.slice(0, 10) === dateKey && e.role === role)), entry]);
   if (isSupabaseConfigured && supabase) {

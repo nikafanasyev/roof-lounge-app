@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useStore } from "@/data/useStore";
 import { saveVenueSettings, venueSettingsStore } from "@/data/repo";
-import type { VenueSettings } from "@/data/repo";
+import type { ShiftTemplate, VenueSettings } from "@/data/repo";
+import { ROLE_LABELS } from "@/lib/roles";
+import type { WorkRole } from "@/types";
 
 const DAYS = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 // Порядок показа: с понедельника.
@@ -44,9 +46,45 @@ export default function Settings() {
     setDraft((d) => ({ ...d, hours: d.hours.map((h, idx) => (idx === i ? { ...h, ...patch } : h)) }));
   }
 
+  function setShift(role: WorkRole, patch: Partial<ShiftTemplate>) {
+    setDraft((d) => ({ ...d, shifts: { ...d.shifts, [role]: { ...d.shifts[role], ...patch } } }));
+  }
+  const SHIFT_ROLES: WorkRole[] = ["bar", "hookah", "waiter", "kitchen", "cleaning"];
+
   return (
     <div className="screen">
       <h1>Настройки</h1>
+
+      <div className="eyebrow">Время смен по ролям</div>
+      <div className="card">
+        {SHIFT_ROLES.map((r, n) => {
+          const t = draft.shifts[r];
+          return (
+            <div key={r} style={{ marginTop: n === 0 ? 0 : 12 }}>
+              <div style={{ fontWeight: 700 }}>{ROLE_LABELS[r]}</div>
+              <div className="card-row" style={{ gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                <span className="muted" style={{ fontSize: 13 }}>вс–чт</span>
+                <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input type="time" value={t.weekdayStart} onChange={(e) => setShift(r, { weekdayStart: e.target.value })} />
+                  <span className="muted">–</span>
+                  <input type="time" value={t.weekdayEnd} onChange={(e) => setShift(r, { weekdayEnd: e.target.value })} />
+                </span>
+              </div>
+              <div className="card-row" style={{ gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                <span className="muted" style={{ fontSize: 13 }}>пт, сб</span>
+                <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input type="time" value={t.weekendStart} onChange={(e) => setShift(r, { weekendStart: e.target.value })} />
+                  <span className="muted">–</span>
+                  <input type="time" value={t.weekendEnd} onChange={(e) => setShift(r, { weekendEnd: e.target.value })} />
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="muted" style={{ fontSize: 12, margin: "6px 4px 14px" }}>
+        Подставляется, когда вы ставите человека в график. Уже поставленные смены не меняются.
+      </div>
 
       <div className="eyebrow">Часы работы заведения</div>
       <div className="card">
