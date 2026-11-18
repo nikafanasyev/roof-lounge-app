@@ -6,7 +6,7 @@ import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls
 import { startShiftNotifier } from "./shiftNotify";
 import { startFlavorProposalNotifier } from "./flavorNotify";
 import { buildExpensesWorkbook, buildSalaryWorkbook, payrollPeriodForDate } from "./reports";
-import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, debugCashSplit, scheduleDailyCashSplitSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
+import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, debugCashSplit, scheduleDailyCashSplitSync, buildCashReconText, scheduleDailyCashRecon, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -257,6 +257,18 @@ bot.command("cashdebug", async (ctx) => {
   } catch (err) {
     console.error("/cashdebug ошибка:", err);
     await ctx.reply("Не удалось получить данные из Quick Resto — см. логи бота.");
+  }
+});
+
+bot.command("cashrecon", async (ctx) => {
+  if (!ctx.from || !(await isReportAdmin(ctx.from.id))) return;
+  const m = (ctx.match?.toString().trim() ?? "").match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  const iso = m ? `${m[3]}-${m[2]}-${m[1]}` : new Date(Date.now() + 3 * 3600_000 - 86400000).toISOString().slice(0, 10);
+  try {
+    await ctx.reply(await buildCashReconText(createClient(env.SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!), iso));
+  } catch (err) {
+    console.error("/cashrecon ошибка:", err);
+    await ctx.reply("Не удалось собрать сверку кассы — см. логи бота.");
   }
 });
 
@@ -754,6 +766,7 @@ async function main() {
     // просто всем, кто стоит в графике (руководитель составляет его заранее в
     // разделе «Руководитель» → «График») — ровно то же самое, что раньше
     // делали вручную SQL-бэкфиллом, теперь ежедневно и автоматически.
+    if (qrChatId) scheduleDailyCashRecon((text) => bot.api.sendMessage(qrChatId, text));
     scheduleDailyPayrollJob(
       async (issue) => {
         // onIssue срабатывает только при reconcile: true — сейчас не используется.
