@@ -40,21 +40,6 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "2-digit" });
 }
 
-function formatDateLong(iso: string): string {
-  return new Date(`${iso}T12:00:00`).toLocaleDateString("ru-RU", { weekday: "long", day: "2-digit", month: "long" });
-}
-
-function buildMonthGrid(year: number, month: number): (Date | null)[] {
-  const first = new Date(year, month, 1);
-  // Понедельник = 0 ... воскресенье = 6
-  const firstWeekday = (first.getDay() + 6) % 7;
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (Date | null)[] = Array(firstWeekday).fill(null);
-  for (let day = 1; day <= daysInMonth; day++) cells.push(new Date(year, month, day));
-  while (cells.length % 7 !== 0) cells.push(null);
-  return cells;
-}
-
 type DayEntries = Partial<Record<WorkRole, ScheduleEntry>>;
 
 /**
@@ -94,63 +79,80 @@ function RecalcButton({ dateIso }: { dateIso: string }) {
   );
 }
 
-function DayPanel({ dateIso, staff, staffById, dayEntries }: { dateIso: string; staff: StaffProfile[]; staffById: Map<string, string>; dayEntries: DayEntries }) {
-  const [picks, setPicks] = useState<Record<WorkRole, string>>(
-    () => Object.fromEntries(WORK_ROLES.map((r) => [r, dayEntries[r]?.staffId ?? staff[0]?.id ?? ""])) as Record<WorkRole, string>,
-  );
+function startOfWeek(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // понедельник
+  return x;
+}
 
-  if (!staff.length) {
-    return <div className="list-empty">Сначала кто-то из сотрудников должен хотя бы раз войти в мини-апп или на терминал Quick Resto.</div>;
+function shortName(full: string): string {
+  const [first, last] = full.split(" ");
+  return last ? `${first} ${last[0]}.` : first;
+}
+
+/** Официант нужен только чт–сб — в остальные дни пустая строка не подсвечивается как пробел. */
+function roleNeeded(role: WorkRole, dow: number): boolean {
+  return role !== "waiter" || dow === 4 || dow === 5 || dow === 6;
+}
+
+/** Строка роли в карточке дня: имя и время; нажатие открывает выбор сотрудника, выбор сохраняется сразу. */
+function RoleRow({ role, dateIso, entry, staff, staffById, needed }: { role: WorkRole; dateIso: string; entry?: ScheduleEntry; staff: StaffProfile[]; staffById: Map<string, string>; needed: boolean }) {
+  const [open, setOpen] = useState(false);
+  const name = entry ? staffById.get(entry.staffId) ?? "сотрудник не найден" : undefined;
+  const ofRole = staff.filter((s) => s.role === role);
+  const others = staff.filter((s) => s.role !== role);
+
+  function pick(id: string) {
+    setScheduleEntry(id, role, dateIso);
+    setOpen(false);
   }
 
   return (
-    <div className="card">
-      <div className="eyebrow" style={{ marginBottom: 10, textTransform: "capitalize" }}>
-        {formatDateLong(dateIso)}
-      </div>
-      {ROLES.map((role) => {
-        const entry = dayEntries[role];
-        return (
-          <div key={role} style={{ marginBottom: role === ROLES[ROLES.length - 1] ? 0 : 16 }}>
-            <div className="card-row" style={{ marginBottom: 6 }}>
-              <span style={{ fontWeight: 700 }}>{ROLE_LABELS[role]}</span>
-              {entry ? (
-                <span className="chip accent">{staffById.get(entry.staffId) ?? "сотрудник не найден"}</span>
-              ) : (
-                <span className="chip">не назначено</span>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <select style={{ flex: 1 }} value={picks[role]} onChange={(e) => setPicks((p) => ({ ...p, [role]: e.target.value }))}>
-                {staff.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+    <div style={{ borderTop: "1px solid var(--border)" }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{ display: "flex", width: "100%", alignItems: "center", gap: 8, padding: "9px 0", background: "none", border: "none", color: "inherit", font: "inherit", cursor: "pointer", textAlign: "left", opacity: !entry && !needed ? 0.45 : 1 }}
+      >
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: ROLE_COLORS[role], flex: "none" }} />
+        <span className="muted" style={{ width: 82, flex: "none", fontSize: 14 }}>
+          {ROLE_LABELS[role]}
+        </span>
+        <span style={{ flex: 1, fontWeight: entry ? 600 : 400, color: !entry && needed ? "var(--danger, #e5484d)" : undefined }}>
+          {name ? shortName(name) : needed ? "никого" : "—"}
+        </span>
+        {entry && (
+          <span className="muted" style={{ fontSize: 12 }}>
+            {entry.startTime}–{entry.endTime}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div style={{ paddingBottom: 10 }}>
+          <div className="chip-row" style={{ flexWrap: "wrap" }}>
+            {[...ofRole, ...others].map((st, i) => (
               <button
-                className="btn primary"
-                style={{ width: "auto", padding: "11px 16px" }}
-                onClick={() => setScheduleEntry(picks[role], role, dateIso)}
+                key={st.id}
+                className={`chip ${entry?.staffId === st.id ? "accent" : ""}`}
+                style={{ cursor: "pointer", opacity: i >= ofRole.length ? 0.7 : 1 }}
+                onClick={() => pick(st.id)}
               >
-                {entry ? "Заменить" : "Назначить"}
+                {st.name}
               </button>
-            </div>
-            {entry && (
-              <button className="btn secondary" style={{ marginTop: 8, padding: "6px 10px" }} onClick={() => removeScheduleEntry(entry.id)}>
-                Убрать
-              </button>
-            )}
+            ))}
           </div>
-        );
-      })}
-      <RecalcButton dateIso={dateIso} />
+          {entry && (
+            <button className="btn secondary" style={{ marginTop: 8, padding: "6px 10px", width: "auto" }} onClick={() => { removeScheduleEntry(entry.id); setOpen(false); }}>
+              Убрать
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-/** Календарь месяца — точки под числом показывают, что на этот день кто-то назначен (по ролям), клик открывает день ниже. */
-function ScheduleCalendar() {
+/** График неделей: каждый день — карточка со всеми ролями и людьми, без провала в день. */
+function ScheduleWeek() {
   const entries = useStore(scheduleStore);
   useStore(staffDirectoryStore);
   const staff = listStaffDirectory();
@@ -166,83 +168,58 @@ function ScheduleCalendar() {
     return map;
   }, [entries]);
 
-  const [cursor, setCursor] = useState(() => new Date());
-  const [selected, setSelected] = useState(todayIso);
-  const year = cursor.getFullYear();
-  const month = cursor.getMonth();
-  const cells = useMemo(() => buildMonthGrid(year, month), [year, month]);
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
   const todayKey = todayIso();
+  const shift = (n: number) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + n * 7);
+    setWeekStart(d);
+  };
+  const fmt = (d: Date) => d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+
+  if (!activeStaff.length) {
+    return <div className="list-empty">Сначала кто-то из сотрудников должен хотя бы раз войти в мини-апп или на терминал Quick Resto.</div>;
+  }
 
   return (
     <>
       <div className="card-row" style={{ marginBottom: 10 }}>
-        <button className="btn secondary" style={{ padding: "6px 12px" }} onClick={() => setCursor(new Date(year, month - 1, 1))}>
+        <button className="btn secondary" style={{ padding: "6px 12px", width: "auto" }} onClick={() => shift(-1)}>
           ←
         </button>
-        <div style={{ fontWeight: 700, textTransform: "capitalize" }}>
-          {cursor.toLocaleDateString("ru-RU", { month: "long", year: "numeric" })}
-        </div>
-        <button className="btn secondary" style={{ padding: "6px 12px" }} onClick={() => setCursor(new Date(year, month + 1, 1))}>
+        <button className="muted" style={{ background: "none", border: "none", font: "inherit", fontWeight: 700, color: "var(--ink)", cursor: "pointer" }} onClick={() => setWeekStart(startOfWeek(new Date()))}>
+          {fmt(days[0])} – {fmt(days[6])}
+        </button>
+        <button className="btn secondary" style={{ padding: "6px 12px", width: "auto" }} onClick={() => shift(1)}>
           →
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 }}>
-        {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d) => (
-          <div key={d} className="muted" style={{ textAlign: "center", fontSize: 11 }}>
-            {d}
+      {days.map((d) => {
+        const key = dateKey(d);
+        const dayEntries = byDate.get(key) ?? {};
+        const isToday = key === todayKey;
+        const isPast = key < todayKey;
+        return (
+          <div key={key} className="card" style={{ borderColor: isToday ? "var(--accent)" : undefined, paddingBottom: 6 }}>
+            <div className="card-row" style={{ marginBottom: 4 }}>
+              <span style={{ fontWeight: 700, textTransform: "capitalize" }}>
+                {d.toLocaleDateString("ru-RU", { weekday: "short" })} {fmt(d)}
+                {isToday && <span className="chip accent" style={{ marginLeft: 8, fontSize: 11 }}>сегодня</span>}
+              </span>
+            </div>
+            {ROLES.map((role) => (
+              <RoleRow key={role} role={role} dateIso={key} entry={dayEntries[role]} staff={activeStaff} staffById={staffById} needed={roleNeeded(role, d.getDay())} />
+            ))}
+            {isPast && <RecalcButton dateIso={key} />}
           </div>
-        ))}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 12 }}>
-        {cells.map((date, i) => {
-          if (!date) return <div key={i} />;
-          const key = dateKey(date);
-          const dayEntries = byDate.get(key);
-          const isToday = key === todayKey;
-          const isSelected = key === selected;
-          return (
-            <button
-              key={i}
-              onClick={() => setSelected(key)}
-              className="card"
-              style={{
-                padding: "6px 4px",
-                textAlign: "center",
-                margin: 0,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                background: isSelected ? "var(--accent)" : "var(--surface)",
-                borderColor: isSelected ? "var(--accent)" : isToday ? "var(--accent)" : "var(--border)",
-              }}
-            >
-              <div style={{ fontSize: 12, fontWeight: isToday ? 700 : 400, color: isSelected ? "var(--accent-ink)" : "var(--ink)" }}>
-                {date.getDate()}
-              </div>
-              <div style={{ display: "flex", gap: 2, justifyContent: "center", marginTop: 4, height: 6 }}>
-                {WORK_ROLES.map(
-                  (r) =>
-                    dayEntries?.[r] && (
-                      <span key={r} style={{ width: 5, height: 5, borderRadius: "50%", background: isSelected ? "var(--accent-ink)" : ROLE_COLORS[r] }} />
-                    ),
-                )}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="chip-row" style={{ marginBottom: 12 }}>
-        {WORK_ROLES.map((r) => (
-          <span key={r} className="chip">
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: ROLE_COLORS[r], display: "inline-block", marginRight: 4 }} />
-            {ROLE_LABELS[r]}
-          </span>
-        ))}
-      </div>
-
-      <DayPanel key={selected} dateIso={selected} staff={activeStaff} staffById={staffById} dayEntries={byDate.get(selected) ?? {}} />
+        );
+      })}
     </>
   );
 }
@@ -318,7 +295,7 @@ export default function SchedulePayroll() {
       <PayrollIssues />
 
       <h2>График</h2>
-      <ScheduleCalendar />
+      <ScheduleWeek />
     </div>
   );
 }
