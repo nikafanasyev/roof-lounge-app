@@ -599,7 +599,10 @@ async function loadServiceCalls() {
 
 /** Пункты про тех. задачи в чек-листах не показываем (их нет в seed, но они могли сохраниться в старой смене в базе). */
 function dropTechItems(list: ChecklistItem[] | null | undefined): ChecklistItem[] {
-  return (list ?? []).filter((i) => i.id !== "bar-c-6" && !/тех\.?\s*задач/i.test(i.label));
+  return (list ?? [])
+    .filter((i) => i.id !== "bar-c-6" && !/тех\.?\s*задач/i.test(i.label))
+    // Подпись пункта из старой смены в базе — на актуальную (лампы теперь раз в 4 дня, 19.11.2026).
+    .map((i) => (i.id === "bar-c-20" ? { ...i, label: "Лампы (раз в 4 дня)" } : i));
 }
 
 async function loadShift() {
@@ -2025,6 +2028,7 @@ export function getTodayCleaningTasksForRole(role: string, nowArg?: Date): Today
     if (day === todayName) result.push({ task, note: "сегодня" });
     else if (day === "Каждый день") result.push({ task, note: "каждый день" });
     else if (day === "Каждый второй день" && evenDay) result.push({ task, note: "через день" });
+    else if (day === "Каждый четвёртый день" && dayOfYear(now) % 4 === 0) result.push({ task, note: "раз в 4 дня" });
   }
   return result;
 }
