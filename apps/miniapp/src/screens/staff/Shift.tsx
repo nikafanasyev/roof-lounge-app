@@ -13,7 +13,7 @@ import {
 } from "@/data/repo";
 import CameraCapture from "@/components/CameraCapture";
 import { isCurrentUserManager } from "@/lib/telegram";
-import { businessDateIso, fetchMyArrivalToday, fetchMyShiftTimesToday, fetchTodayArrivals, getTodayCleaningTasksForRole, recordArrival, recordDeparture, scheduleStore, sendTechPhotos, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
+import { businessDateIso, fetchMyArrivalToday, fetchMyShiftTimesToday, fetchTodayArrivals, getTechTasksForRoleOnDate, loadTechMarks, markTechTaskDoneByStaff, techMarkFor, techMarksStore, techTasksStore, recordArrival, recordDeparture, scheduleStore, sendTechPhotos, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
 import type { TodayArrival } from "@/data/repo";
 import { ROLE_LABELS as ALL_ROLE_LABELS } from "@/lib/roles";
 import type { ChecklistItem, StaffRole, WorkRole } from "@/types";
@@ -60,6 +60,14 @@ function PhotoSet({ photos, onChange }: { photos: CapturedPhoto[]; onChange: (ne
 
 /** Отправка фото выполнения тех. задачи руководителю (до трёх фото, минимум одно). */
 function TechPhotoSender({ role, task }: { role: WorkRole; task: string }) {
+  useStore(techMarksStore);
+  useStore(techTasksStore);
+  const today = businessDateIso();
+  const roleKey = techRoleKeyForWorkRole(role) ?? "";
+  useEffect(() => {
+    loadTechMarks(today, today);
+  }, [today]);
+  const mark = techMarkFor(today, roleKey, task);
   const [open, setOpen] = useState(false);
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
   const [busy, setBusy] = useState(false);
@@ -72,15 +80,23 @@ function TechPhotoSender({ role, task }: { role: WorkRole; task: string }) {
     const ok = await sendTechPhotos(role, task, photos.map((p) => p.blob));
     setBusy(false);
     if (!ok) return setError("Не получилось отправить, попробуйте ещё раз");
+    if (roleKey) void markTechTaskDoneByStaff(today, roleKey, task);
     setSent(true);
     setOpen(false);
     setPhotos([]);
   }
 
-  if (sent) {
+  if (mark?.approvedAt && !open) {
+    return (
+      <div className="muted" style={{ fontSize: 13, margin: "-4px 0 12px 4px", color: "var(--good, #3fb950)" }}>
+        ✓ Принято руководителем
+      </div>
+    );
+  }
+  if ((sent || mark?.doneAt) && !open) {
     return (
       <div className="muted" style={{ fontSize: 13, margin: "-4px 0 12px 4px" }}>
-        ✓ Фото выполнения отправлено руководителю{" "}
+        ✓ Отмечено выполненным · ждёт проверки руководителя{" "}
         <button type="button" className="btn ghost" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => { setSent(false); setOpen(true); }}>
           ещё фото
         </button>
@@ -231,7 +247,7 @@ function ZoneShift() {
   const canCloseZone = !roleShift.openedBy || roleShift.openedBy === myName || isCurrentUserManager();
   const showCloseChecklist = roleOpened && !roleClosed && canCloseZone;
   const techKey = techRoleKeyForWorkRole(role);
-  const techTasks = techKey ? getTodayCleaningTasksForRole(techKey) : [];
+  const techTasks = techKey ? getTechTasksForRoleOnDate(techKey, businessDateIso()) : [];
 
   return (
     <div className="screen">
@@ -392,7 +408,7 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" | "waiter" }) {
     }
   }, [role]);
   const techKey = techRoleKeyForWorkRole(role);
-  const techTasks = techKey ? getTodayCleaningTasksForRole(techKey) : [];
+  const techTasks = techKey ? getTechTasksForRoleOnDate(techKey, businessDateIso()) : [];
 
   async function open() {
     if (!photo) return;
