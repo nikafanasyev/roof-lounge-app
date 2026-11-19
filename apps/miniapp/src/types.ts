@@ -289,6 +289,7 @@ export interface PayoutRecord {
   date: string; // ISO-дата выплаты
   amount: number;
   note?: string; // например "за первую половину августа"
+  kind?: "salary" | "advance"; // аванс виден в зарплате, но не попадает в расходы
 }
 
 export type AdjustmentType = "fine" | "bonus";
