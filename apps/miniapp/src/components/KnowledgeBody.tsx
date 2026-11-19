@@ -5,6 +5,7 @@ import { useState } from "react";
 //   # Раздел              -> заголовок-разделитель между блоками
 //   ## Название пункта    -> отдельная карточка с заголовком
 //   - текст / — текст     -> пункт списка (внутри текущей карточки, если она есть)
+//   ![подпись](/kb/x.jpg) -> картинка (внутри текущей карточки)
 //   обычная строка        -> абзац текста (внутри карточки или отдельно)
 //   пустая строка         -> просто разделитель, самостоятельного смысла не несёт
 //
@@ -14,14 +15,14 @@ import { useState } from "react";
 
 type Block =
   | { kind: "h1"; text: string }
-  | { kind: "card"; title?: string; items: string[]; paragraphs: string[] };
+  | { kind: "card"; title?: string; items: string[]; paragraphs: string[]; images: { src: string; alt: string }[] };
 
 function parseBody(body: string): Block[] {
   const blocks: Block[] = [];
   let current: Extract<Block, { kind: "card" }> | null = null;
 
   function closeCurrent() {
-    if (current && (current.title || current.items.length || current.paragraphs.length)) {
+    if (current && (current.title || current.items.length || current.paragraphs.length || current.images.length)) {
       blocks.push(current);
     }
     current = null;
@@ -38,15 +39,21 @@ function parseBody(body: string): Block[] {
     }
     if (line.startsWith("## ")) {
       closeCurrent();
-      current = { kind: "card", title: line.slice(3), items: [], paragraphs: [] };
+      current = { kind: "card", title: line.slice(3), items: [], paragraphs: [], images: [] };
+      continue;
+    }
+    const img = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (img) {
+      if (!current) current = { kind: "card", items: [], paragraphs: [], images: [] };
+      current.images.push({ alt: img[1], src: img[2] });
       continue;
     }
     if (line.startsWith("- ") || line.startsWith("— ")) {
-      if (!current) current = { kind: "card", items: [], paragraphs: [] };
+      if (!current) current = { kind: "card", items: [], paragraphs: [], images: [] };
       current.items.push(line.slice(2));
       continue;
     }
-    if (!current) current = { kind: "card", items: [], paragraphs: [] };
+    if (!current) current = { kind: "card", items: [], paragraphs: [], images: [] };
     current.paragraphs.push(line);
   }
   closeCurrent();
@@ -84,12 +91,21 @@ function CardView({ block }: { block: CardBlock }) {
           ))}
         </ul>
       )}
+      {block.images.map((im, i) => (
+        <img
+          key={i}
+          src={im.src}
+          alt={im.alt}
+          loading="lazy"
+          style={{ display: "block", width: "100%", maxWidth: 320, margin: "10px auto 0", borderRadius: 12, border: "1px solid var(--border)" }}
+        />
+      ))}
     </div>
   );
 }
 
 function isTechCard(b: Block): b is CardBlock {
-  return b.kind === "card" && !!b.title && b.items.length > 0;
+  return b.kind === "card" && !!b.title && b.items.length > 0 && b.images.length === 0;
 }
 
 export default function KnowledgeBody({ body, query }: { body: string; query?: string }) {
