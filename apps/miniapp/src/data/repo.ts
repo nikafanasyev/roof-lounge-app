@@ -422,15 +422,22 @@ async function ensureCurrentStaff() {
   const telegramId = tgUser?.id ?? DEMO_STAFF_TELEGRAM_ID;
   const fallbackName = tgUser ? `${tgUser.first_name}${tgUser.last_name ? ` ${tgUser.last_name}` : ""}`.trim() : DEMO_STAFF_NAME;
 
-  const { error: upsertError } = await supabase!
-    .from("staff")
-    .upsert({ telegram_id: telegramId, name: fallbackName, role: "master" }, { onConflict: "telegram_id", ignoreDuplicates: true });
-  if (upsertError) logSyncError("ensureCurrentStaff:upsert", upsertError);
+  // Уволенный сотрудник хранится с telegram_id со знаком минус (см. 0026). Раньше
+  // при следующем открытии приложения под ним заводилась НОВАЯ запись — так
+  // «удалённые» снова появлялись в списке (фидбек Никиты 19.11.2026).
+  const { data: archivedRow } = await supabase!.from("staff").select("id").eq("telegram_id", -telegramId).eq("archived", true).maybeSingle();
+  const lookupTelegramId = archivedRow ? -telegramId : telegramId;
+  if (!archivedRow) {
+    const { error: upsertError } = await supabase!
+      .from("staff")
+      .upsert({ telegram_id: telegramId, name: fallbackName, role: "master" }, { onConflict: "telegram_id", ignoreDuplicates: true });
+    if (upsertError) logSyncError("ensureCurrentStaff:upsert", upsertError);
+  }
 
   const { data: row, error: selectError } = await supabase!
     .from("staff")
     .select("id, name, work_role, position, salary_model, photo_url, phone, email, medical_book_number, medical_book_expiry, hired_at")
-    .eq("telegram_id", telegramId)
+    .eq("telegram_id", lookupTelegramId)
     .single();
   if (selectError || !row) return logSyncError("ensureCurrentStaff:select", selectError);
 

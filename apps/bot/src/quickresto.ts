@@ -1223,6 +1223,9 @@ async function upsertStaffForEmployee(supabase: SupabaseClient, employee: QuickR
     }
     return existing.id as string;
   }
+  // Уволенный (telegram_id со знаком минус) — новую запись не создаём.
+  const { data: archived } = await supabase.from("staff").select("id").eq("telegram_id", -telegramId).eq("archived", true).maybeSingle();
+  if (archived) return archived.id as string;
 
   const { data: inserted, error: insertError } = await supabase
     .from("staff")

@@ -45,7 +45,9 @@ bot.command("start", async (ctx) => {
   if (ctx.from && supa) {
     // Ссылка-приглашение для сотрудника (?start=staff) заводит запись в staff —
     // с этого момента приложение открывается рабочим кабинетом, а не гостевым.
-    if (isPrivate && ctx.match === "staff") {
+    // Уволенного (telegram_id со знаком минус) заново не заводим по старой ссылке.
+    const { data: archivedTwin } = await supa.from("staff").select("id").eq("telegram_id", -ctx.from.id).eq("archived", true).maybeSingle();
+    if (isPrivate && ctx.match === "staff" && !archivedTwin) {
       const fullName = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(" ").trim() || "Сотрудник";
       const { error } = await supa
         .from("staff")
