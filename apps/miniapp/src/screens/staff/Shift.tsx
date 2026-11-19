@@ -12,6 +12,7 @@ import {
   toggleOpenChecklistItem,
 } from "@/data/repo";
 import CameraCapture from "@/components/CameraCapture";
+import { isCurrentUserManager } from "@/lib/telegram";
 import { businessDateIso, fetchMyArrivalToday, fetchMyShiftTimesToday, fetchTodayArrivals, getTodayCleaningTasksForRole, recordArrival, recordDeparture, scheduleStore, sendTechPhotos, staffProfileStore, techRoleKeyForWorkRole } from "@/data/repo";
 import type { TodayArrival } from "@/data/repo";
 import { ROLE_LABELS as ALL_ROLE_LABELS } from "@/lib/roles";
@@ -224,7 +225,11 @@ function ZoneShift() {
   const roleOpened = !!roleShift.openedAt;
   const roleClosed = !!roleShift.closedAt;
   const showOpenChecklist = !roleOpened;
-  const showCloseChecklist = roleOpened && !roleClosed;
+  // Закрыть зону может тот, кто её открыл, или руководитель — чтобы сотрудник
+  // не закрывал чужую зону (фидбек Никиты 19.11.2026).
+  const myName = getStaffProfile().name;
+  const canCloseZone = !roleShift.openedBy || roleShift.openedBy === myName || isCurrentUserManager();
+  const showCloseChecklist = roleOpened && !roleClosed && canCloseZone;
   const techKey = techRoleKeyForWorkRole(role);
   const techTasks = techKey ? getTodayCleaningTasksForRole(techKey) : [];
 
@@ -308,6 +313,12 @@ function ZoneShift() {
             </div>
           ))}
         </>
+      )}
+
+      {roleOpened && !roleClosed && !canCloseZone && (
+        <div className="card muted" style={{ marginTop: 12 }}>
+          Зону «{ROLE_LABELS[role]}» открыл(а) {roleShift.openedBy}. Закрыть её может он(а) или руководитель.
+        </div>
       )}
 
       {showCloseChecklist && (
