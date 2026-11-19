@@ -56,6 +56,10 @@ import type {
   TaskStatus,
 } from "@/types";
 import {
+  BAR_OPEN_CHECKLIST,
+  BAR_CLOSE_CHECKLIST,
+  HOOKAH_OPEN_CHECKLIST,
+  HOOKAH_CLOSE_CHECKLIST,
   CLEANING_BAR_WEEKS,
   CLEANING_KITCHEN_WEEKS,
   CLEANING_KM_WEEKS,
@@ -598,6 +602,23 @@ async function loadServiceCalls() {
 }
 
 /** Пункты про тех. задачи в чек-листах не показываем (их нет в seed, но они могли сохраниться в старой смене в базе). */
+/** Пункты, добавленные в seed позже, дописываем в чек-лист, сохранённый в старой смене. */
+function withNewSeedItems(list: ChecklistItem[], seed: ChecklistItem[]): ChecklistItem[] {
+  if (!list.length) return list;
+  const have = new Set(list.map((i) => i.id));
+  const out = [...list];
+  for (const item of seed) {
+    if (have.has(item.id)) continue;
+    // ставим после последнего пункта того же раздела, иначе в конец
+    let at = -1;
+    out.forEach((x, idx) => {
+      if (x.section === item.section) at = idx;
+    });
+    out.splice(at >= 0 ? at + 1 : out.length, 0, { ...item, done: false });
+  }
+  return out;
+}
+
 function dropTechItems(list: ChecklistItem[] | null | undefined): ChecklistItem[] {
   return (list ?? [])
     .filter((i) => i.id !== "bar-c-6" && !/тех\.?\s*задач/i.test(i.label))
@@ -637,16 +658,16 @@ async function loadShift() {
     closedBy: data.closed_by ? staffNameById.get(data.closed_by) ?? DEMO_STAFF_NAME : undefined,
     closedAt: data.closed_at ?? undefined,
     bar: {
-      openChecklist: dropTechItems(data.bar_open_checklist)?.length ? dropTechItems(data.bar_open_checklist) : prev.bar.openChecklist,
-      closeChecklist: dropTechItems(data.bar_close_checklist)?.length ? dropTechItems(data.bar_close_checklist) : prev.bar.closeChecklist,
+      openChecklist: dropTechItems(data.bar_open_checklist).length ? withNewSeedItems(dropTechItems(data.bar_open_checklist), BAR_OPEN_CHECKLIST) : prev.bar.openChecklist,
+      closeChecklist: dropTechItems(data.bar_close_checklist).length ? withNewSeedItems(dropTechItems(data.bar_close_checklist), BAR_CLOSE_CHECKLIST) : prev.bar.closeChecklist,
       openedBy: data.bar_opened_by ? staffNameById.get(data.bar_opened_by) ?? DEMO_STAFF_NAME : undefined,
       openedAt: data.bar_opened_at ?? undefined,
       closedBy: data.bar_closed_by ? staffNameById.get(data.bar_closed_by) ?? DEMO_STAFF_NAME : undefined,
       closedAt: data.bar_closed_at ?? undefined,
     },
     hookah: {
-      openChecklist: dropTechItems(data.hookah_open_checklist)?.length ? dropTechItems(data.hookah_open_checklist) : prev.hookah.openChecklist,
-      closeChecklist: dropTechItems(data.hookah_close_checklist)?.length ? dropTechItems(data.hookah_close_checklist) : prev.hookah.closeChecklist,
+      openChecklist: dropTechItems(data.hookah_open_checklist).length ? withNewSeedItems(dropTechItems(data.hookah_open_checklist), HOOKAH_OPEN_CHECKLIST) : prev.hookah.openChecklist,
+      closeChecklist: dropTechItems(data.hookah_close_checklist).length ? withNewSeedItems(dropTechItems(data.hookah_close_checklist), HOOKAH_CLOSE_CHECKLIST) : prev.hookah.closeChecklist,
       openedBy: data.hookah_opened_by ? staffNameById.get(data.hookah_opened_by) ?? DEMO_STAFF_NAME : undefined,
       openedAt: data.hookah_opened_at ?? undefined,
       closedBy: data.hookah_closed_by ? staffNameById.get(data.hookah_closed_by) ?? DEMO_STAFF_NAME : undefined,

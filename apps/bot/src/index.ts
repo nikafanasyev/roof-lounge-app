@@ -752,7 +752,9 @@ async function main() {
       // уведомлении отличалось бы от московского на 3 часа.
       const time = event.at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Moscow" });
       console.log(`Quick Resto: ${label.toLowerCase()} — ${event.employee.name}, ${time}`);
-      if (qrChatId) {
+      // Закрытие смены из Quick Resto в чат не шлём — оно дублирует закрытие в
+      // приложении и приходило не в тот чат (фидбек Никиты 19.11.2026).
+      if (qrChatId && event.type === "opened") {
         await bot.api.sendMessage(qrChatId, `${label} (Quick Resto)\n${event.employee.name}, ${time}`);
       }
     });

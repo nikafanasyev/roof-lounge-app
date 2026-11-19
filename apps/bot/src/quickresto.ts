@@ -705,6 +705,9 @@ async function fetchStaffSalaryModel(supabase: SupabaseClient, staffId: string):
   return (data?.salary_model as SalaryModel | null) ?? null;
 }
 
+/** Сколько получает за день человек, закрывший и кухню, и клининг (кроме воскресенья). */
+const COMBINED_KITCHEN_CLEANING_SALARY = 10250;
+
 async function writeShiftPayrollForRole(
   supabase: SupabaseClient,
   shiftRowId: string | null,
@@ -712,10 +715,11 @@ async function writeShiftPayrollForRole(
   role: WorkRole,
   revenue: number,
   isoDate: string,
+  salaryOverride?: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   let model = await fetchStaffSalaryModel(supabase, staffId);
   if (!model) model = DEFAULT_SALARY_MODEL; // 8,5% от общей выручки — дефолт для обеих ролей, см. миграцию 0004
-  const salary = computeSalary(model, revenue);
+  const salary = salaryOverride ?? computeSalary(model, revenue);
 
   const { error } = await supabase
     .from("shift_payroll")
@@ -922,8 +926,23 @@ async function processScheduledDate(
     // кальянной/барной по отдельности) — см. DEFAULT_SALARY_MODEL выше.
     const accruedRoles: string[] = [];
     const writeErrors: string[] = [];
+    // Кухня + клининг одним человеком в один день (кроме воскресенья) — за день
+    // ровно COMBINED_KITCHEN_CLEANING_SALARY: клининг по обычной ставке, кухня —
+    // остаток до этой суммы (запрос Никиты 19.11.2026, Азиза).
+    const dow = new Date(`${dateIso}T12:00:00+03:00`).getUTCDay();
+    const kitchenOverride = new Map<string, number>();
+    if (dow !== 0) {
+      for (const { staff_id, role } of pendingRoles) {
+        if (role !== "kitchen") continue;
+        const alsoCleaning = (scheduleRows as { staff_id: string; role: WorkRole }[]).some((r) => r.staff_id === staff_id && r.role === "cleaning");
+        if (!alsoCleaning) continue;
+        const model = (await fetchStaffSalaryModel(supabase, staff_id)) ?? DEFAULT_SALARY_MODEL;
+        kitchenOverride.set(staff_id, Math.max(0, COMBINED_KITCHEN_CLEANING_SALARY - computeSalary(model, split.total)));
+      }
+    }
     for (const { staff_id, role } of pendingRoles) {
-      const result = await writeShiftPayrollForRole(supabase, null, staff_id, role, split.total, dateIso);
+      const override = role === "kitchen" ? kitchenOverride.get(staff_id) : undefined;
+      const result = await writeShiftPayrollForRole(supabase, null, staff_id, role, split.total, dateIso, override);
       if (result.ok) accruedRoles.push(role);
       else writeErrors.push(`${role}: ${result.error}`);
     }
@@ -1131,6 +1150,7 @@ const DEFAULT_BAR_CLOSE_CHECKLIST = [
   { id: "bar-c-4", section: "Закрытие рабочей зоны", label: "Протереть холодильник, ледогенератор, кофемашину и т.д.", done: false },
   { id: "bar-c-5", section: "Закрытие рабочей зоны", label: "Замыть раковину, барную станцию", done: false },
   { id: "bar-c-6", section: "Закрытие рабочей зоны", label: "Выполнить тех. задачу дня", done: false },
+  { id: "bar-c-26", section: "Закрытие рабочей зоны", label: "Промывка кофемашины: Настройки → Глубокая очистка → Полная очистка машины; замочить капучинатор", done: false },
   { id: "bar-c-7", section: "Закрытие рабочей зоны", label: "Сфотографировать рабочую зону и отправить в чат", done: false },
   { id: "bar-c-8", section: "Проверка закрытия зала", label: "Диваны чистые", done: false },
   { id: "bar-c-9", section: "Проверка закрытия зала", label: "Столы чистые", done: false },
