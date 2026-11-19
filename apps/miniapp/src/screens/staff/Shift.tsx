@@ -489,8 +489,45 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" | "waiter" }) {
   );
 }
 
+type SimpleRole = "kitchen" | "cleaning" | "waiter";
+const isSimpleRole = (r?: WorkRole): r is SimpleRole => r === "kitchen" || r === "cleaning" || r === "waiter";
+
+/** Роль по должности, если в карточке роль не задана: «Повар» → кухня, «Клинер» → клининг и т.п. */
+function roleFromPosition(position?: string): WorkRole | undefined {
+  const p = (position ?? "").toLowerCase();
+  if (/повар|кух|шеф/.test(p)) return "kitchen";
+  if (/клин|уборщ/.test(p)) return "cleaning";
+  if (/официант/.test(p)) return "waiter";
+  if (/бармен|бар/.test(p)) return "bar";
+  if (/кальян/.test(p)) return "hookah";
+  return undefined;
+}
+
+/**
+ * Какой экран смены показать. Приоритет: график на сегодня → роль в карточке →
+ * должность. Чек-листы бара/кальянов — только для этих ролей и руководителей
+ * (фидбек Никиты 19.11.2026: повару и клинерам показывался чек-лист бара).
+ */
 export default function Shift() {
   const me = useStore(staffProfileStore);
-  if (me.role === "kitchen" || me.role === "cleaning" || me.role === "waiter") return <SimpleShift role={me.role} />;
-  return <ZoneShift />;
+  const schedule = useStore(scheduleStore);
+  const today = businessDateIso();
+  const todayRoles = schedule.filter((e) => e.staffId === me.id && e.date.slice(0, 10) === today).map((e) => e.role);
+  const scheduledZone = todayRoles.find((r) => r === "bar" || r === "hookah");
+  const scheduledSimple = todayRoles.find(isSimpleRole);
+  const role = me.role ?? roleFromPosition(me.position);
+
+  if (scheduledZone) return <ZoneShift />;
+  if (scheduledSimple) return <SimpleShift role={scheduledSimple} />;
+  if (isSimpleRole(role)) return <SimpleShift role={role} />;
+  if (role === "bar" || role === "hookah" || isCurrentUserManager()) return <ZoneShift />;
+  return (
+    <div className="screen">
+      <h1>Смена</h1>
+      <div className="card muted">
+        В вашей карточке не указана роль на смене, и сегодня вас нет в графике. Попросите руководителя указать роль (Бар, Кальяны,
+        Кухня, Клининг или Официант) в разделе «Сотрудники».
+      </div>
+    </div>
+  );
 }
