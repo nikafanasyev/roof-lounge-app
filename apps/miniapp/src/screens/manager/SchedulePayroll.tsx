@@ -14,6 +14,7 @@ import {
   scheduleStore,
   setScheduleEntry,
   staffDirectoryStore,
+  businessDateIso,
 } from "@/data/repo";
 import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/lib/roles";
 import type { ScheduleEntry, StaffProfile, WorkRole } from "@/types";
@@ -133,9 +134,10 @@ function readView(): ScheduleView {
   }
 }
 
-function initials(full: string): string {
-  const [first, last] = full.split(" ");
-  return ((first?.[0] ?? "") + (last?.[0] ?? "")).toUpperCase();
+/** Сегодняшний бизнес-день (до начала нового дня ночная смена — ещё вчера) как дата на полдень. */
+function businessToday(): Date {
+  const [y, m, d] = businessDateIso().split("-").map(Number);
+  return new Date(y, m - 1, d, 12);
 }
 
 /** Карточка одного дня: все роли с людьми, нажатие на роль — замена. */
@@ -196,14 +198,27 @@ function ScheduleWeek() {
   }, [entries]);
 
   const [view, setViewState] = useState<ScheduleView>(readView);
-  const [anchor, setAnchor] = useState(() => {
-    const n = new Date();
-    return new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12);
-  });
-  const todayKey = todayIso();
+  const [anchor, setAnchor] = useState(businessToday);
+  const todayKey = businessDateIso();
 
-  function setView(v: ScheduleView) {
+  // В клетке месяца — имя; если имена совпадают, добавляем первую букву фамилии.
+  const monthName = useMemo(() => {
+    const firstCount = new Map<string, number>();
+    for (const st of staff) {
+      const f = st.name.split(" ")[0];
+      firstCount.set(f, (firstCount.get(f) ?? 0) + 1);
+    }
+    return (id: string) => {
+      const full = staffById.get(id) ?? "?";
+      const [f, l] = full.split(" ");
+      return (firstCount.get(f) ?? 0) > 1 && l ? `${f} ${l[0]}.` : f;
+    };
+  }, [staff, staffById]);
+
+  function setView(v: ScheduleView, keepAnchor = false) {
     setViewState(v);
+    // Переключение вкладки — к текущему бизнес-дню; из клетки месяца — к выбранному дню.
+    if (!keepAnchor) setAnchor(businessToday());
     try {
       localStorage.setItem(VIEW_KEY, v);
     } catch {
@@ -218,8 +233,7 @@ function ScheduleWeek() {
     setAnchor(d);
   }
   function goToday() {
-    const n = new Date();
-    setAnchor(new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12));
+    setAnchor(businessToday());
   }
 
   if (!activeStaff.length) {
@@ -297,7 +311,7 @@ function ScheduleWeek() {
                   key={i}
                   onClick={() => {
                     setAnchor(d);
-                    setView("day");
+                    setView("day", true);
                   }}
                   style={{
                     background: "var(--surface)",
@@ -312,13 +326,17 @@ function ScheduleWeek() {
                     flexDirection: "column",
                     alignItems: "center",
                     gap: 1,
+                    minWidth: 0,
                   }}
                 >
                   <span style={{ fontSize: 11, fontWeight: key === todayKey ? 700 : 400, color: missing && key >= todayKey ? "var(--danger, #e5484d)" : undefined }}>{d.getDate()}</span>
                   {ROLES.map((r) =>
                     day[r] ? (
-                      <span key={r} style={{ fontSize: 10, lineHeight: "13px", fontWeight: 700, color: ROLE_COLORS[r] }}>
-                        {initials(staffById.get(day[r]!.staffId) ?? "?")}
+                      <span
+                        key={r}
+                        style={{ fontSize: 9.5, lineHeight: "13px", fontWeight: 600, color: ROLE_COLORS[r], maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      >
+                        {monthName(day[r]!.staffId)}
                       </span>
                     ) : null,
                   )}
@@ -335,7 +353,7 @@ function ScheduleWeek() {
             ))}
           </div>
           <div className="muted" style={{ fontSize: 12 }}>
-            Инициалы цветом роли. Красное число — в будущем дне не хватает людей. Нажмите на день, чтобы изменить.
+            Имена цветом роли. Красное число — в будущем дне не хватает людей. Нажмите на день, чтобы изменить.
           </div>
         </>
       )}
