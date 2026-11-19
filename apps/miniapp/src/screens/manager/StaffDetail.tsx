@@ -3,7 +3,10 @@ import { useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import {
+  addPayout,
   archiveStaff,
+  listPayoutsForStaff,
+  payoutsStore,
   computeAverageSalaryPerShift,
   computeEarnedThisCalendarMonthForStaff,
   computePayrollSummaryForStaff,
@@ -284,6 +287,78 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
   );
 }
 
+/** Авансы и выплаты: аванс уменьшает «к выплате», но в расходы не попадает. */
+function AdvancesCard({ staffId }: { staffId: string }) {
+  useStore(payoutsStore);
+  const payouts = listPayoutsForStaff(staffId);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+  const advancesThisMonth = payouts
+    .filter((p) => p.kind === "advance" && p.date.slice(0, 7) === new Date().toISOString().slice(0, 7))
+    .reduce((a, p) => a + p.amount, 0);
+
+  return (
+    <div className="card">
+      <div className="card-row">
+        <div className="eyebrow" style={{ margin: 0 }}>Авансы и выплаты</div>
+        {!open && (
+          <button className="btn secondary" style={{ width: "auto", padding: "6px 12px", fontSize: 13 }} onClick={() => setOpen(true)}>
+            + Аванс
+          </button>
+        )}
+      </div>
+      {advancesThisMonth > 0 && (
+        <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+          Авансов в этом месяце: {money(advancesThisMonth)}
+        </div>
+      )}
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          <input type="number" inputMode="numeric" placeholder="Сумма аванса, ₽" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ marginBottom: 8 }} />
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ marginBottom: 8 }} />
+          <input type="text" placeholder="Комментарий (необязательно)" value={note} onChange={(e) => setNote(e.target.value)} style={{ marginBottom: 8 }} />
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Аванс уменьшит «к выплате» в зарплате, но не попадёт в расходы.</div>
+          <div className="btn-row">
+            <button
+              className="btn primary"
+              disabled={!(Number(amount) > 0)}
+              onClick={() => {
+                addPayout(staffId, Math.round(Number(amount)), date, note.trim() || undefined, "advance");
+                setAmount("");
+                setNote("");
+                setOpen(false);
+              }}
+            >
+              Выдать аванс
+            </button>
+            <button className="btn secondary" onClick={() => setOpen(false)}>
+              Отмена
+            </button>
+          </div>
+        </div>
+      )}
+      {payouts.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          {payouts.slice(0, 8).map((p) => (
+            <div key={p.id} className="card-row" style={{ padding: "5px 0", borderTop: "1px solid var(--border)", fontSize: 14 }}>
+              <span>
+                {new Date(`${p.date.slice(0, 10)}T12:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}{" "}
+                <span className={`chip ${p.kind === "advance" ? "accent" : ""}`} style={{ fontSize: 11, marginLeft: 4 }}>
+                  {p.kind === "advance" ? "аванс" : "выплата"}
+                </span>
+                {p.note && <span className="muted" style={{ fontSize: 12 }}> · {p.note}</span>}
+              </span>
+              <span style={{ fontWeight: 600 }}>{money(p.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Фиксированные начисления вне сменной сетки — см. запрос Никиты: "Никита 10000 (раз в 2 недели)". */
 function FixedAccrualsCard({ staffId }: { staffId: string }) {
   // Раньше компонент не подписывался на fixedAccrualsStore — после
@@ -544,6 +619,8 @@ export default function StaffDetail() {
       </div>
 
       <FixedAccrualsCard staffId={staffId} />
+
+      <AdvancesCard staffId={staffId} />
 
       <h2>Начисления по сменам</h2>
       {months.length === 0 && <div className="list-empty">Смен пока не было</div>}

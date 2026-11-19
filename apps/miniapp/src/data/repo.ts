@@ -890,6 +890,7 @@ async function loadPayouts() {
       date: r.date,
       amount: Number(r.amount),
       note: r.note ?? undefined,
+      kind: r.kind === "advance" ? "advance" : "salary",
     })),
   );
 }
@@ -2720,14 +2721,14 @@ export function listPayoutsForStaff(staffId: string): PayoutRecord[] {
  * только в кабинете руководителя) вызывает это с суммой "К выплате" этого
  * периода по умолчанию — можно поправить вручную, если выплатили не всё.
  */
-export function addPayout(staffId: string, amount: number, dateIso?: string, note?: string) {
+export function addPayout(staffId: string, amount: number, dateIso?: string, note?: string, kind: "salary" | "advance" = "salary") {
   const date = dateIso || new Date().toISOString().slice(0, 10);
-  const entry: PayoutRecord = { id: uid(), staffId, date, amount, note: note || undefined };
+  const entry: PayoutRecord = { id: uid(), staffId, date, amount, note: note || undefined, kind };
   payoutsStore.update((list) => [entry, ...list]);
   if (isSupabaseConfigured && supabase) {
     supabase
       .from("payouts")
-      .insert({ id: entry.id, staff_id: staffId, date, amount, note: note || null })
+      .insert({ id: entry.id, staff_id: staffId, date, amount, note: note || null, kind })
       .then(({ error }) => error && logSyncError("addPayout", error));
   }
 }
@@ -2988,13 +2989,18 @@ export interface StaffSalaryOverview {
 export interface SalaryOverview {
   staff: StaffSalaryOverview[];
   netTotal: number; // сумма netTotal по всем сотрудникам — то, что реально выдаётся на руки
-  ndfl: number; // НДФЛ 13%, начисляемый СВЕРХ суммы "на руки" (гросс-ап: net = gross*0.87)
+  ndfl: number; // НДФЛ 13% от суммы «на руки»
   grossTotal: number; // netTotal + ndfl — полная стоимость ФОТ с учётом налога
 }
 
-/** НДФЛ 13% сверху суммы "на руки" (netAmount — это net, уже без налога): ndfl = net * 13/87, gross = net + ndfl = net/0.87. */
+/** НДФЛ 13% от суммы «на руки» (решение Никиты 19.11.2026: просто +13% сверху). */
 export function computeNdflOnTop(netAmount: number): number {
-  return Math.round((netAmount * 13) / 87);
+  return Math.round(netAmount * 0.13);
+}
+
+/** Комиссия за вывод средств: 15% от суммы «на руки». */
+export function computeWithdrawalFee(netAmount: number): number {
+  return Math.round(netAmount * 0.15);
 }
 
 export interface PayrollPeriodShiftGroup {
