@@ -49,35 +49,6 @@ type DayEntries = Partial<Record<WorkRole, ScheduleEntry>>;
  * поэтому локальный выбор в select'ах всегда стартует от актуальных данных
  * этого дня, без лишнего useEffect.
  */
-const RECALC_STATUS_LABEL: Record<string, string> = {
-  pending: "Считаю…",
-  done: "Готово",
-  failed: "Не получилось",
-};
-
-/** Кнопка "Начислить ЗП за этот день" — пишет запрос через Supabase, бот сам
- * его подхватывает и выполняет (см. requestPayrollRecalc в data/repo.ts) —
- * без ручных правок в базе и без команды /accrue в Telegram. См. запрос
- * Никиты 14.10.2026: "чтобы руками не лезть в базу данных". */
-function RecalcButton({ dateIso }: { dateIso: string }) {
-  useStore(payrollRecalcRequestsStore);
-  const request = latestPayrollRecalcRequestForDate(dateIso);
-  const pending = request?.status === "pending";
-
-  return (
-    <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
-      <button className="btn secondary" style={{ width: "100%" }} disabled={pending} onClick={() => requestPayrollRecalc(dateIso)}>
-        {pending ? "Считаю…" : "Начислить ЗП за этот день"}
-      </button>
-      {request && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          {RECALC_STATUS_LABEL[request.status] ?? request.status}
-          {request.result ? `: ${request.result}` : ""}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function startOfWeek(d: Date): Date {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12);
@@ -151,7 +122,63 @@ function RoleRow({ role, dateIso, entry, staff, staffById, needed }: { role: Wor
   );
 }
 
-/** График неделей: каждый день — карточка со всеми ролями и людьми, без провала в день. */
+type ScheduleView = "day" | "week" | "month";
+const VIEW_KEY = "schedule-view";
+function readView(): ScheduleView {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === "day" || v === "month" ? v : "week";
+  } catch {
+    return "week";
+  }
+}
+
+function initials(full: string): string {
+  const [first, last] = full.split(" ");
+  return ((first?.[0] ?? "") + (last?.[0] ?? "")).toUpperCase();
+}
+
+/** Карточка одного дня: все роли с людьми, нажатие на роль — замена. */
+function DayCard({ date, dayEntries, staff, staffById, todayKey }: { date: Date; dayEntries: DayEntries; staff: StaffProfile[]; staffById: Map<string, string>; todayKey: string }) {
+  const key = dateKey(date);
+  const isToday = key === todayKey;
+  const fmt = date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+  return (
+    <div className="card" style={{ borderColor: isToday ? "var(--accent)" : undefined, paddingBottom: 6 }}>
+      <div className="card-row" style={{ marginBottom: 4 }}>
+        <span style={{ fontWeight: 700, textTransform: "capitalize" }}>
+          {date.toLocaleDateString("ru-RU", { weekday: "short" })} {fmt}
+          {isToday && <span className="chip accent" style={{ marginLeft: 8, fontSize: 11 }}>сегодня</span>}
+        </span>
+        {key < todayKey && <RecalcLink dateIso={key} />}
+      </div>
+      {ROLES.map((role) => (
+        <RoleRow key={role} role={role} dateIso={key} entry={dayEntries[role]} staff={staff} staffById={staffById} needed={roleNeeded(role, date.getDay())} />
+      ))}
+    </div>
+  );
+}
+
+/** Компактное «Начислить ЗП» в шапке прошедшего дня. */
+function RecalcLink({ dateIso }: { dateIso: string }) {
+  useStore(payrollRecalcRequestsStore);
+  const request = latestPayrollRecalcRequestForDate(dateIso);
+  const pending = request?.status === "pending";
+  const label = pending ? "считаю…" : request?.status === "done" ? "ЗП ✓" : request?.status === "failed" ? "ЗП: ошибка" : "начислить ЗП";
+  return (
+    <button
+      className="muted"
+      title={request?.result ?? undefined}
+      disabled={pending}
+      onClick={() => requestPayrollRecalc(dateIso)}
+      style={{ background: "none", border: "none", padding: 0, font: "inherit", fontSize: 12, textDecoration: "underline", cursor: "pointer" }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** График: переключатель День / Неделя / Месяц. */
 function ScheduleWeek() {
   const entries = useStore(scheduleStore);
   useStore(staffDirectoryStore);
@@ -168,58 +195,150 @@ function ScheduleWeek() {
     return map;
   }, [entries]);
 
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
-    return d;
+  const [view, setViewState] = useState<ScheduleView>(readView);
+  const [anchor, setAnchor] = useState(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12);
   });
   const todayKey = todayIso();
-  const shift = (n: number) => {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + n * 7);
-    setWeekStart(d);
-  };
-  const fmt = (d: Date) => d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+
+  function setView(v: ScheduleView) {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* без хранилища просто не запоминаем */
+    }
+  }
+  function move(n: number) {
+    const d = new Date(anchor);
+    if (view === "day") d.setDate(d.getDate() + n);
+    else if (view === "week") d.setDate(d.getDate() + n * 7);
+    else d.setMonth(d.getMonth() + n, 1);
+    setAnchor(d);
+  }
+  function goToday() {
+    const n = new Date();
+    setAnchor(new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12));
+  }
 
   if (!activeStaff.length) {
     return <div className="list-empty">Сначала кто-то из сотрудников должен хотя бы раз войти в мини-апп или на терминал Quick Resto.</div>;
   }
 
+  const fmt = (d: Date) => d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+  const weekStart = startOfWeek(anchor);
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+  const title =
+    view === "day"
+      ? anchor.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "long" })
+      : view === "week"
+        ? `${fmt(weekDays[0])} – ${fmt(weekDays[6])}`
+        : anchor.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+
+  // Месяц: сетка с понедельника, в клетке — инициалы людей цветом роли.
+  const monthCells: (Date | null)[] = [];
+  if (view === "month") {
+    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 12);
+    for (let i = 0; i < (first.getDay() + 6) % 7; i++) monthCells.push(null);
+    const days = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
+    for (let d = 1; d <= days; d++) monthCells.push(new Date(anchor.getFullYear(), anchor.getMonth(), d, 12));
+    while (monthCells.length % 7) monthCells.push(null);
+  }
+
   return (
     <>
+      <div className="seg-toggle" role="tablist" style={{ marginBottom: 10 }}>
+        {(["day", "week", "month"] as ScheduleView[]).map((v) => (
+          <button key={v} className={view === v ? "active" : ""} onClick={() => setView(v)}>
+            {v === "day" ? "День" : v === "week" ? "Неделя" : "Месяц"}
+          </button>
+        ))}
+      </div>
+
       <div className="card-row" style={{ marginBottom: 10 }}>
-        <button className="btn secondary" style={{ padding: "6px 12px", width: "auto" }} onClick={() => shift(-1)}>
+        <button className="btn secondary" style={{ padding: "6px 12px", width: "auto" }} onClick={() => move(-1)}>
           ←
         </button>
-        <button className="muted" style={{ background: "none", border: "none", font: "inherit", fontWeight: 700, color: "var(--ink)", cursor: "pointer" }} onClick={() => setWeekStart(startOfWeek(new Date()))}>
-          {fmt(days[0])} – {fmt(days[6])}
+        <button onClick={goToday} style={{ background: "none", border: "none", font: "inherit", fontWeight: 700, color: "var(--ink)", cursor: "pointer", textTransform: "capitalize" }}>
+          {title}
         </button>
-        <button className="btn secondary" style={{ padding: "6px 12px", width: "auto" }} onClick={() => shift(1)}>
+        <button className="btn secondary" style={{ padding: "6px 12px", width: "auto" }} onClick={() => move(1)}>
           →
         </button>
       </div>
 
-      {days.map((d) => {
-        const key = dateKey(d);
-        const dayEntries = byDate.get(key) ?? {};
-        const isToday = key === todayKey;
-        const isPast = key < todayKey;
-        return (
-          <div key={key} className="card" style={{ borderColor: isToday ? "var(--accent)" : undefined, paddingBottom: 6 }}>
-            <div className="card-row" style={{ marginBottom: 4 }}>
-              <span style={{ fontWeight: 700, textTransform: "capitalize" }}>
-                {d.toLocaleDateString("ru-RU", { weekday: "short" })} {fmt(d)}
-                {isToday && <span className="chip accent" style={{ marginLeft: 8, fontSize: 11 }}>сегодня</span>}
-              </span>
-            </div>
-            {ROLES.map((role) => (
-              <RoleRow key={role} role={role} dateIso={key} entry={dayEntries[role]} staff={activeStaff} staffById={staffById} needed={roleNeeded(role, d.getDay())} />
+      {view === "day" && <DayCard date={anchor} dayEntries={byDate.get(dateKey(anchor)) ?? {}} staff={activeStaff} staffById={staffById} todayKey={todayKey} />}
+
+      {view === "week" &&
+        weekDays.map((d) => <DayCard key={dateKey(d)} date={d} dayEntries={byDate.get(dateKey(d)) ?? {}} staff={activeStaff} staffById={staffById} todayKey={todayKey} />)}
+
+      {view === "month" && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
+            {["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d) => (
+              <div key={d} className="muted" style={{ textAlign: "center", fontSize: 11 }}>
+                {d}
+              </div>
             ))}
-            {isPast && <RecalcButton dateIso={key} />}
           </div>
-        );
-      })}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 10 }}>
+            {monthCells.map((d, i) => {
+              if (!d) return <div key={i} />;
+              const key = dateKey(d);
+              const day = byDate.get(key) ?? {};
+              const missing = ROLES.some((r) => !day[r] && roleNeeded(r, d.getDay()));
+              return (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setAnchor(d);
+                    setView("day");
+                  }}
+                  style={{
+                    background: "var(--surface)",
+                    border: `1px solid ${key === todayKey ? "var(--accent)" : "var(--border)"}`,
+                    borderRadius: 8,
+                    padding: "4px 2px",
+                    minHeight: 92,
+                    color: "inherit",
+                    font: "inherit",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 1,
+                  }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: key === todayKey ? 700 : 400, color: missing && key >= todayKey ? "var(--danger, #e5484d)" : undefined }}>{d.getDate()}</span>
+                  {ROLES.map((r) =>
+                    day[r] ? (
+                      <span key={r} style={{ fontSize: 10, lineHeight: "13px", fontWeight: 700, color: ROLE_COLORS[r] }}>
+                        {initials(staffById.get(day[r]!.staffId) ?? "?")}
+                      </span>
+                    ) : null,
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="chip-row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+            {ROLES.map((r) => (
+              <span key={r} className="chip">
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: ROLE_COLORS[r], display: "inline-block", marginRight: 4 }} />
+                {ROLE_LABELS[r]}
+              </span>
+            ))}
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Инициалы цветом роли. Красное число — в будущем дне не хватает людей. Нажмите на день, чтобы изменить.
+          </div>
+        </>
+      )}
     </>
   );
 }
