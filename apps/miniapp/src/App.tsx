@@ -144,56 +144,41 @@ function EmployeeNav({ onNavigate }: { onNavigate: () => void }) {
 function ManagerNav({ onNavigate }: { onNavigate: () => void }) {
   useStore(flavorProposalsStore);
   const pendingFlavors = listPendingFlavorProposals().length;
+  const link = (to: string, icon: string, label: React.ReactNode) => (
+    <NavLink to={to} onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
+      <span className="icon">{icon}</span>
+      {label}
+    </NavLink>
+  );
+  // Разделы сгруппированы заголовками (фидбек Никиты 19.11.2026).
   return (
     <nav className="drawer-nav">
-      <NavLink to="/manager/summary" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">📊</span>Сводка
-      </NavLink>
-      <NavLink to="/manager/salary" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">💰</span>Зарплата
-      </NavLink>
-      <NavLink to="/manager/fines" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">⚠️</span>Штрафы
-      </NavLink>
-      <NavLink to="/manager/expenses" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">💸</span>Расходы
-      </NavLink>
-      <a
-        aria-disabled="true"
-        onClick={(e) => e.preventDefault()}
-        style={{ opacity: 0.5, pointerEvents: "none", cursor: "default" }}
-      >
+      {link("/manager/summary", "📊", "Сводка")}
+
+      <div className="drawer-nav-heading">Финансы</div>
+      {link("/manager/salary", "💰", "Зарплата")}
+      {link("/manager/expenses", "💸", "Расходы")}
+      {link("/manager/fines", "⚠️", "Штрафы")}
+
+      <div className="drawer-nav-heading">Команда</div>
+      {link("/manager/staff", "👥", "Сотрудники")}
+      {link("/manager/schedule", "📅", "График")}
+      {isOwner() && link("/manager/managers", "🔑", "Руководители")}
+
+      <div className="drawer-nav-heading">Операционка</div>
+      {link("/manager/board", "🪑", "Борд")}
+      {link("/manager/tasks", "📋", "Задачи")}
+      {link("/manager/tech", "🧽", "Тех. задачи")}
+      {link("/manager/problems", "🛠", "Проблемы")}
+      <a aria-disabled="true" onClick={(e) => e.preventDefault()} style={{ opacity: 0.5, pointerEvents: "none", cursor: "default" }}>
         <span className="icon">🔔</span>Вызовы <small>(в разработке)</small>
       </a>
-      <NavLink to="/manager/staff" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">👥</span>Сотрудники
-      </NavLink>
-      <NavLink to="/manager/schedule" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">📅</span>График
-      </NavLink>
-      {isOwner() && (
-        <NavLink to="/manager/managers" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-          <span className="icon">🔑</span>Руководители
-        </NavLink>
-      )}
-      <NavLink to="/manager/tech" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🧽</span>Тех. задачи
-      </NavLink>
-      <NavLink to="/manager/flavors" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🍃</span>Новые вкусы{pendingFlavors > 0 ? ` (${pendingFlavors})` : ""}
-      </NavLink>
-      <NavLink to="/manager/board" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🪑</span>Борд
-      </NavLink>
-      <NavLink to="/manager/tasks" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">📋</span>Задачи
-      </NavLink>
-      <NavLink to="/manager/problems" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">🛠</span>Проблемы
-      </NavLink>
-      <NavLink to="/manager/settings" onClick={onNavigate} className={({ isActive }) => (isActive ? "active" : "")}>
-        <span className="icon">⚙️</span>Настройки
-      </NavLink>
+
+      <div className="drawer-nav-heading">Гости и меню</div>
+      {link("/manager/flavors", "🍃", <>Новые вкусы{pendingFlavors > 0 ? ` (${pendingFlavors})` : ""}</>)}
+
+      <div className="drawer-nav-heading">Система</div>
+      {link("/manager/settings", "⚙️", "Настройки")}
     </nav>
   );
 }
