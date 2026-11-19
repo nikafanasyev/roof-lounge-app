@@ -370,6 +370,7 @@ export async function initData(): Promise<void> {
           loadLateProposals(),
           loadVenueSettings(),
           loadCashInRegister(),
+          loadTechTasks(),
           loadStaffDirectory(),
           loadShiftPayroll(),
           loadAdjustments(),
@@ -996,6 +997,7 @@ function subscribeRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => loadTasks())
     .on("postgres_changes", { event: "*", schema: "public", table: "late_proposals" }, () => loadLateProposals())
     .on("postgres_changes", { event: "*", schema: "public", table: "venue_settings" }, () => loadVenueSettings())
+    .on("postgres_changes", { event: "*", schema: "public", table: "tech_tasks" }, () => loadTechTasks())
     .on("postgres_changes", { event: "*", schema: "public", table: "cash_in_register" }, () => loadCashInRegister())
     .on("postgres_changes", { event: "*", schema: "public", table: "staff" }, () => loadStaffDirectory())
     .on("postgres_changes", { event: "*", schema: "public", table: "shift_payroll" }, () => loadShiftPayroll())
@@ -2252,11 +2254,6 @@ export function techRoleKeyForWorkRole(role: WorkRole): string | undefined {
   return TECH_ROLES.find((r) => r.workRole === role)?.key;
 }
 
-/** Техзадачи роли на дату (YYYY-MM-DD, локальная). */
-export function getTechTasksForRoleOnDate(roleKey: string, dateIso: string): TodayCleaningTask[] {
-  const [y, m, d] = dateIso.split("-").map(Number);
-  return getTodayCleaningTasksForRole(roleKey, new Date(y, m - 1, d, 12, 0, 0));
-}
 
 export function localDateIso(now: Date = new Date()): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -3580,4 +3577,186 @@ export async function decideFlavorProposal(id: string, approve: boolean, overrid
     .update({ status: approve ? "approved" : "rejected", decided_by_name: getStaffProfile().name, decided_at: new Date().toISOString() })
     .eq("id", id);
   if (error) logSyncError("decideFlavorProposal", error);
+}
+
+// --- Тех. задачи по датам (supabase/migrations/0040_tech_tasks.sql) ---
+// Задача: роль, текст, дата старта и повтор «раз в N дней» (0 — разово). Без
+// привязки к неделям и дням недели (фидбек Никиты 19.11.2026). Пока таблица
+// пустая — работает старая 4-недельная ротация из seed (CLEANING_*_WEEKS).
+
+export interface TechTask {
+  id: string;
+  roleKey: string;
+  title: string;
+  startDate: string; // YYYY-MM-DD
+  everyDays: number; // 0 — разово
+}
+export const techTasksStore = new Store<TechTask[]>([]);
+
+async function loadTechTasks() {
+  const { data, error } = await supabase!.from("tech_tasks").select("*").eq("active", true).order("created_at");
+  if (error) return logSyncError("loadTechTasks", error);
+  techTasksStore.set(
+    (data ?? []).map((r) => ({ id: r.id, roleKey: r.role, title: r.title, startDate: String(r.start_date).slice(0, 10), everyDays: Number(r.every_days) })),
+  );
+}
+
+function isoToDayNumber(iso: string): number {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return Math.round(Date.UTC(y, m - 1, d) / 86400000);
+}
+
+export function techTaskOccursOn(t: TechTask, dateIso: string): boolean {
+  const diff = isoToDayNumber(dateIso) - isoToDayNumber(t.startDate);
+  if (diff < 0) return false;
+  return t.everyDays > 0 ? diff % t.everyDays === 0 : diff === 0;
+}
+
+export function techRepeatLabel(everyDays: number): string {
+  if (everyDays === 0) return "разово";
+  if (everyDays === 1) return "каждый день";
+  if (everyDays === 2) return "через день";
+  if (everyDays === 7) return "раз в неделю";
+  if (everyDays === 14) return "раз в 2 недели";
+  if (everyDays % 7 === 0) return `раз в ${everyDays / 7} нед.`;
+  return `раз в ${everyDays} дн.`;
+}
+
+/** Используется ли новый формат (в таблице есть задачи). */
+export function techTasksByDateEnabled(): boolean {
+  return techTasksStore.get().length > 0;
+}
+
+/** Задачи роли на дату: из tech_tasks, а пока их нет — из старой ротации. */
+export function getTechTasksForRoleOnDate(roleKey: string, dateIso: string): TodayCleaningTask[] {
+  if (techTasksByDateEnabled()) {
+    return techTasksStore
+      .get()
+      .filter((t) => t.roleKey === roleKey && techTaskOccursOn(t, dateIso))
+      .map((t) => ({ task: t.title, note: techRepeatLabel(t.everyDays) }));
+  }
+  const [y, m, d] = dateIso.split("-").map(Number);
+  return getTodayCleaningTasksForRole(roleKey, new Date(y, m - 1, d, 12, 0, 0));
+}
+
+export function addTechTask(input: { roleKey: string; title: string; startDate: string; everyDays: number }) {
+  const t: TechTask = { id: uid(), ...input };
+  techTasksStore.update((list) => [...list, t]);
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("tech_tasks")
+      .insert({ id: t.id, role: t.roleKey, title: t.title, start_date: t.startDate, every_days: t.everyDays })
+      .then(({ error }) => error && logSyncError("addTechTask", error));
+  }
+}
+
+export function removeTechTask(id: string) {
+  techTasksStore.update((list) => list.filter((t) => t.id !== id));
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("tech_tasks")
+      .update({ active: false })
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("removeTechTask", error));
+  }
+}
+
+/**
+ * Перенос старой 4-недельной ротации в задачи по датам: «каждый день» — раз в 1
+ * день, «через день» — 2, «раз в 4 дня» — 4, задачи по дню недели — раз в 28 дней
+ * с ближайшей даты, когда они выпадали бы по старой таблице. Ничего не теряется:
+ * в ближайшие 4 недели задачи выпадут на те же дни, что и раньше.
+ */
+export function importRotationAsTechTasks() {
+  const today = businessDateIso();
+  const [y, m, d] = today.split("-").map(Number);
+  const seen = new Set<string>();
+  const rows: { roleKey: string; title: string; startDate: string; everyDays: number }[] = [];
+  for (const r of TECH_ROLES) {
+    for (let offset = 0; offset < 28; offset++) {
+      const date = new Date(y, m - 1, d + offset, 12);
+      const iso = localDateIso(date);
+      for (const t of getTodayCleaningTasksForRole(r.key, date)) {
+        const every = t.note === "каждый день" ? 1 : t.note === "через день" ? 2 : t.note === "раз в 4 дня" ? 4 : 28;
+        const key = `${r.key}|${t.task}|${every}`;
+        // Повторяющиеся по N дней — одна строка; по дням недели — своя строка на каждое выпадение в 4 неделях.
+        const k = every === 28 ? `${key}|${offset}` : key;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        rows.push({ roleKey: r.key, title: t.task, startDate: iso, everyDays: every });
+      }
+    }
+  }
+  for (const row of rows) addTechTask(row);
+  return rows.length;
+}
+
+/** Отметки: сотрудник «сделал» (done_*), руководитель «принял» (approved_*). Ключ "дата::роль::задача". */
+export interface TechMark {
+  doneAt?: string;
+  doneBy?: string;
+  approvedAt?: string;
+}
+export const techMarksStore = new Store<Record<string, TechMark>>({});
+const techMarkKey = (date: string, role: string, task: string) => `${date}::${role}::${task}`;
+
+export async function loadTechMarks(fromIso: string, toIso: string) {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { data, error } = await supabase
+    .from("cleaning_log")
+    .select("role, task, log_date, done_at, done_by, approved_at")
+    .gte("log_date", fromIso)
+    .lte("log_date", toIso);
+  if (error) return logSyncError("loadTechMarks", error);
+  techMarksStore.update((cur) => {
+    const next = { ...cur };
+    for (const k of Object.keys(next)) {
+      const date = k.slice(0, 10);
+      if (date >= fromIso && date <= toIso) delete next[k];
+    }
+    for (const r of data ?? []) {
+      next[techMarkKey(String(r.log_date).slice(0, 10), r.role, r.task)] = {
+        doneAt: r.done_by ? r.done_at ?? undefined : undefined,
+        doneBy: r.done_by ?? undefined,
+        approvedAt: r.approved_at ?? undefined,
+      };
+    }
+    return next;
+  });
+}
+
+export function techMarkFor(date: string, role: string, task: string): TechMark | undefined {
+  return techMarksStore.get()[techMarkKey(date, role, task)];
+}
+
+/** Сотрудник отметил задачу выполненной (вызывается при отправке фото выполнения). */
+export async function markTechTaskDoneByStaff(date: string, role: string, task: string) {
+  const me = getStaffProfile();
+  const now = new Date().toISOString();
+  techMarksStore.update((cur) => ({ ...cur, [techMarkKey(date, role, task)]: { ...cur[techMarkKey(date, role, task)], doneAt: now, doneBy: me.id } }));
+  if (!isSupabaseConfigured || !supabase) return;
+  const { error } = await supabase
+    .from("cleaning_log")
+    .upsert({ role, task, log_date: date, done_by: me.id || null, done_at: now }, { onConflict: "role,task,log_date" });
+  if (error) logSyncError("markTechTaskDoneByStaff", error);
+}
+
+/** Руководитель принял / снял приёмку. */
+export async function approveTechTask(date: string, role: string, task: string, approve: boolean) {
+  const key = techMarkKey(date, role, task);
+  const existing = techMarksStore.get()[key];
+  const now = new Date().toISOString();
+  techMarksStore.update((cur) => ({ ...cur, [key]: { ...cur[key], approvedAt: approve ? now : undefined } }));
+  if (!isSupabaseConfigured || !supabase) return;
+  const me = getStaffProfile();
+  if (!approve && !existing?.doneBy) {
+    const { error } = await supabase.from("cleaning_log").delete().eq("role", role).eq("task", task).eq("log_date", date);
+    if (error) logSyncError("approveTechTask:delete", error);
+    return;
+  }
+  const row = { role, task, log_date: date, approved_at: approve ? now : null, approved_by: approve ? me.id || null : null };
+  const { error } = existing
+    ? await supabase.from("cleaning_log").update({ approved_at: row.approved_at, approved_by: row.approved_by }).eq("role", role).eq("task", task).eq("log_date", date)
+    : await supabase.from("cleaning_log").upsert({ ...row, done_at: null }, { onConflict: "role,task,log_date" });
+  if (error) logSyncError("approveTechTask", error);
 }
