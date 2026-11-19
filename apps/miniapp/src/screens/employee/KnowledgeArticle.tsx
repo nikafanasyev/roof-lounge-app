@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CLEANING_ROLE_WEEKS, getCurrentStaffRole, getKnowledgeArticle, splitKnowledgeSections, STAFF_ROLE_TO_CLEANING_ROLE } from "@/data/repo";
 import KnowledgeBody from "@/components/KnowledgeBody";
 import CleaningChecklist from "./CleaningChecklist";
@@ -23,7 +23,8 @@ function formatUpdated(iso: string): string {
 export default function KnowledgeArticleScreen() {
   const { articleId = "", sectionIndex } = useParams();
   const article = getKnowledgeArticle(articleId);
-  const [query, setQuery] = useState("");
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   const [showAllRoles, setShowAllRoles] = useState(false);
 
   if (!article) {

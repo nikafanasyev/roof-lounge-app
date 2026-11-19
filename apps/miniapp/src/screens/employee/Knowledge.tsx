@@ -11,9 +11,24 @@ const CATEGORY_ICONS: Record<string, string> = {
   "Техника": "🔧",
   "Безопасность": "🛡",
   "Правила бронирования": "📅",
+  "Алкоголь": "🍾",
 };
 
 const CAT_VIEW_KEY = "kb-cat-view";
+
+/** Кусочек текста статьи вокруг найденного слова — чтобы было видно, где совпало. */
+function snippet(body: string, q: string): { before: string; match: string; after: string } | null {
+  const text = body.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/^#+\s*/gm, "").replace(/^[-—]\s+/gm, "").replace(/\s+/g, " ");
+  const i = text.toLowerCase().indexOf(q);
+  if (i < 0) return null;
+  const from = Math.max(0, i - 40);
+  const to = Math.min(text.length, i + q.length + 60);
+  return {
+    before: (from > 0 ? "…" : "") + text.slice(from, i),
+    match: text.slice(i, i + q.length),
+    after: text.slice(i + q.length, to) + (to < text.length ? "…" : ""),
+  };
+}
 
 function readCatView(): "tiles" | "list" {
   try {
@@ -57,11 +72,21 @@ export default function Knowledge() {
     setParams({ cat: name });
   }
 
-  function articleCard(a: { id: string; title: string }) {
+  function articleCard(a: { id: string; title: string; body: string }) {
+    const hit = q ? snippet(a.body, q) : null;
     return (
-      <Link key={a.id} to={`/employee/knowledge/${a.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+      <Link key={a.id} to={`/employee/knowledge/${a.id}${q ? `?q=${encodeURIComponent(query.trim())}` : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
         <div className="card card-row">
-          <span>{a.title}</span>
+          <span>
+            {a.title}
+            {hit && (
+              <span className="muted" style={{ display: "block", fontSize: 13, marginTop: 4, lineHeight: 1.4 }}>
+                {hit.before}
+                <mark style={{ background: "var(--accent)", color: "#111", borderRadius: 3, padding: "0 2px" }}>{hit.match}</mark>
+                {hit.after}
+              </span>
+            )}
+          </span>
           <span className="muted">→</span>
         </div>
       </Link>

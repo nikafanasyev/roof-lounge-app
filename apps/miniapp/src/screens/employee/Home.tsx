@@ -26,6 +26,10 @@ function greeting(): string {
   return "Добрый вечер";
 }
 
+function zoneState(z: { openedAt?: string; closedAt?: string }): string {
+  return z.closedAt ? "закрыта" : z.openedAt ? "открыта" : "не открыта";
+}
+
 const actionStyle = { display: "block", textAlign: "center", textDecoration: "none" } as const;
 
 /** Главная сотрудника: приветствие, плитки на сегодня и быстрые действия. */
@@ -64,6 +68,11 @@ export default function Home() {
         <div className={`stat-tile ${isOpen ? "good" : ""}`}>
           <div className="value">{isOpen ? "Открыта" : "Закрыта"}</div>
           <div className="label">Смена в зале</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 4, lineHeight: 1.35 }}>
+            Бар: {zoneState(shift.bar)}
+            <br />
+            Кальяны: {zoneState(shift.hookah)}
+          </div>
         </div>
         <div className="stat-tile">
           <div className="value">{money(earned)}</div>
