@@ -456,7 +456,8 @@ async function ensureCurrentStaff() {
     // (руководитель через Supabase Studio), иначе дефолт 8,5% от общей
     // выручки (см. DEFAULT_SALARY_MODEL).
     salaryModel: (row.salary_model as SalaryModel | null) ?? DEFAULT_SALARY_MODEL,
-    role: (row.work_role as WorkRole | null) ?? prev.role,
+    // Без подстановки демо-роли: незаданная роль должна оставаться незаданной (иначе повар видел чек-лист бара).
+    role: (row.work_role as WorkRole | null) ?? undefined,
     position: (row.position as string | null) ?? prev.position,
   }));
 }
