@@ -1144,7 +1144,7 @@ const DEFAULT_BAR_CLOSE_CHECKLIST = [
   { id: "bar-c-17", section: "Поставить технику на зарядку", label: "Телефон", done: false },
   { id: "bar-c-18", section: "Поставить технику на зарядку", label: "2 планшета", done: false },
   { id: "bar-c-19", section: "Поставить технику на зарядку", label: "Часы зал / веранда", done: false },
-  { id: "bar-c-20", section: "Поставить технику на зарядку", label: "Лампы (каждый второй день)", done: false },
+  { id: "bar-c-20", section: "Поставить технику на зарядку", label: "Лампы (раз в 4 дня)", done: false },
   { id: "bar-c-21", section: "Закрытие заведения", label: "Выключить приток, вытяжку", done: false },
   { id: "bar-c-22", section: "Закрытие заведения", label: "Выключить лампочки, стены в зале", done: false },
   { id: "bar-c-23", section: "Закрытие заведения", label: "Выключить музыку", done: false },
