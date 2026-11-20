@@ -636,13 +636,15 @@ function dropTechItems(list: ChecklistItem[] | null | undefined): ChecklistItem[
 }
 
 async function loadShift() {
-  const { data, error } = await supabase!
+  const { data: rows, error } = await supabase!
     .from("shifts")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(5);
   if (error) return logSyncError("loadShift", error);
+  // Строки, где не открыта ни одна зона, раньше заводил бот по входу в Quick Resto —
+  // они не смена приложения, пропускаем их (фидбек Никиты 20.11.2026).
+  const data = (rows ?? []).find((r) => r.bar_opened_at || r.hookah_opened_at) ?? (rows ?? [])[0] ?? null;
   if (!data) return; // смен ещё не было — оставляем закрытую заготовку из seed
   const prev = shiftStore.get();
   // Последняя смена из прошлого бизнес-дня (день меняется в 11:00) и уже закрыта —
@@ -1750,6 +1752,15 @@ function syncRoleClaim(role: StaffRole, kind: "open" | "close", at: string) {
 async function openVenueShiftIfNeeded(): Promise<string> {
   const current = shiftStore.get();
   if (current.status === "open") return current.id;
+
+  // Напарник мог уже открыть смену с другого телефона, а до нас ещё не дошло
+  // обновление — тогда не заводим вторую строку, а подхватываем его (иначе бар и
+  // кальяны оказываются в разных строках и одна из зон показывается «не открыта»).
+  if (isSupabaseConfigured && supabase) {
+    await loadShift();
+    const fresh = shiftStore.get();
+    if (fresh.status === "open") return fresh.id;
+  }
 
   const openedAt = new Date().toISOString();
   const openedByName = getStaffProfile().name;
