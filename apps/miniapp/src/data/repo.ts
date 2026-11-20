@@ -3795,3 +3795,39 @@ export async function approveTechTask(date: string, role: string, task: string, 
     : await supabase.from("cleaning_log").upsert({ ...row, done_at: null }, { onConflict: "role,task,log_date" });
   if (error) logSyncError("approveTechTask", error);
 }
+
+
+/**
+ * Пересчитать уже записанные начисления сотрудника по его новой модели ЗП —
+ * за смены с fromIso включительно (по умолчанию текущий зарплатный период).
+ * Начисление — снимок на момент расчёта, поэтому смена модели в карточке сама
+ * по себе старые суммы не меняет (фидбек Никиты 20.11.2026, официант).
+ * Кухня в дни, когда тот же человек был и на клининге, не трогаем — там своя
+ * сумма за день (10 250 ₽, считается ботом).
+ */
+export function recalcStaffPayrollFrom(staffId: string, model: SalaryModel, fromIso: string, dryRun = false): number {
+  const all = shiftPayrollStore.get();
+  const targets = all.filter((e) => {
+    if (e.staffId !== staffId || e.date.slice(0, 10) < fromIso) return false;
+    if (e.role === "kitchen" && all.some((x) => x.staffId === staffId && x.role === "cleaning" && x.date.slice(0, 10) === e.date.slice(0, 10))) return false;
+    return true;
+  });
+  const updates = targets
+    .map((e) => ({ id: e.id, salary: computeShiftSalary(model, e.revenue) }))
+    .filter((u) => u.salary !== targets.find((t) => t.id === u.id)!.salary);
+  if (!updates.length || dryRun) return updates.length;
+  shiftPayrollStore.update((list) => list.map((e) => {
+    const u = updates.find((x) => x.id === e.id);
+    return u ? { ...e, salary: u.salary } : e;
+  }));
+  if (isSupabaseConfigured && supabase) {
+    for (const u of updates) {
+      supabase
+        .from("shift_payroll")
+        .update({ salary: u.salary })
+        .eq("id", u.id)
+        .then(({ error }) => error && logSyncError("recalcStaffPayrollFrom", error));
+    }
+  }
+  return updates.length;
+}

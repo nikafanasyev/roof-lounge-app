@@ -5,6 +5,8 @@ import { useStore } from "@/data/useStore";
 import {
   addPayout,
   archiveStaff,
+  getPayrollPeriodForDate,
+  recalcStaffPayrollFrom,
   listPayoutsForStaff,
   payoutsStore,
   computeAverageSalaryPerShift,
@@ -129,6 +131,10 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
   const [salaryType, setSalaryType] = useState<SalaryModelType>(profile.salaryModel.type);
   const [salaryValue, setSalaryValue] = useState(String(profile.salaryModel.type === "fixed_plus_percent" ? profile.salaryModel.base : profile.salaryModel.value));
   const [salaryPercent, setSalaryPercent] = useState(String(profile.salaryModel.type === "fixed_plus_percent" ? profile.salaryModel.percent : ""));
+  // После смены модели ЗП — предложить пересчитать уже начисленные смены текущего периода.
+  const [recalcModel, setRecalcModel] = useState<SalaryModel | null>(null);
+  const [recalcResult, setRecalcResult] = useState<string | null>(null);
+  const periodStart = getPayrollPeriodForDate(new Date().toISOString().slice(0, 10)).start;
 
   async function save() {
     let salaryModel: SalaryModel;
@@ -161,6 +167,10 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
     }
     setTelegramIdError(null);
     setEditing(false);
+    if (JSON.stringify(salaryModel) !== JSON.stringify(profile!.salaryModel)) {
+      setRecalcModel(salaryModel);
+      setRecalcResult(null);
+    }
   }
 
   if (!editing) {
@@ -197,6 +207,47 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
         <button className="btn secondary" style={{ marginTop: 12, padding: "8px 12px", fontSize: 13 }} onClick={() => setEditing(true)}>
           Изменить
         </button>
+        {!recalcModel && recalcStaffPayrollFrom(staffId, profile.salaryModel, periodStart, true) > 0 && (
+          <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+            <div style={{ fontSize: 14 }}>
+              {recalcStaffPayrollFrom(staffId, profile.salaryModel, periodStart, true)} смен(ы) текущего периода начислены не по текущей модели ЗП.
+            </div>
+            <button
+              className="btn secondary"
+              style={{ marginTop: 8, padding: "8px 12px", fontSize: 13 }}
+              onClick={() => {
+                const n = recalcStaffPayrollFrom(staffId, profile.salaryModel, periodStart);
+                setRecalcResult(`Пересчитано смен: ${n}`);
+              }}
+            >
+              Пересчитать по текущей модели
+            </button>
+          </div>
+        )}
+        {recalcModel && (
+          <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+            <div style={{ fontSize: 14 }}>
+              Модель ЗП изменена. Уже начисленные смены считаются по старой — пересчитать смены с{" "}
+              {new Date(`${periodStart}T12:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "long" })} по новой модели?
+            </div>
+            <div className="btn-row" style={{ marginTop: 8 }}>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  const n = recalcStaffPayrollFrom(staffId, recalcModel, periodStart);
+                  setRecalcResult(n ? `Пересчитано смен: ${n}` : "Пересчитывать нечего — суммы уже совпадают");
+                  setRecalcModel(null);
+                }}
+              >
+                Пересчитать
+              </button>
+              <button className="btn secondary" onClick={() => setRecalcModel(null)}>
+                Не надо
+              </button>
+            </div>
+          </div>
+        )}
+        {recalcResult && <div className="muted" style={{ fontSize: 13, marginTop: 8 }}>{recalcResult}</div>}
       </div>
     );
   }
