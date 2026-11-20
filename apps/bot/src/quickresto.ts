@@ -1254,39 +1254,19 @@ async function loadOpenShiftRowId(supabase: SupabaseClient): Promise<string | nu
   return null;
 }
 
-async function openVenueShift(supabase: SupabaseClient, employee: QuickRestoEmployee, openedAt: Date): Promise<string | null> {
-  const staffId = await upsertStaffForEmployee(supabase, employee);
-  const { data, error } = await supabase
-    .from("shifts")
-    .insert({
-      opened_by: staffId,
-      opened_at: openedAt.toISOString(),
-      bar_open_checklist: DEFAULT_BAR_OPEN_CHECKLIST,
-      bar_close_checklist: DEFAULT_BAR_CLOSE_CHECKLIST,
-      hookah_open_checklist: DEFAULT_HOOKAH_OPEN_CHECKLIST,
-      hookah_close_checklist: DEFAULT_HOOKAH_CLOSE_CHECKLIST,
-    })
-    .select("id")
-    .single();
-  if (error) {
-    console.error("Quick Resto: не удалось создать строку смены:", error.message);
-    return null;
-  }
-  return data.id as string;
+// Смену заведения в таблице shifts открывает и закрывает ТОЛЬКО мини-апп (кнопками
+// зон с чек-листами и фото). Раньше вход по ПИН на терминале Quick Resto заводил
+// здесь отдельную строку shifts, а выход последнего сотрудника закрывал строку
+// приложения — из-за этого днём открытые бар/кальяны вечером показывались «не
+// открыта» (фидбек Никиты 20.11.2026). Теперь Quick Resto учитывается только в
+// памяти бота — для уведомления об открытии и завершения визитов гостей.
+const QR_SESSION = "quick-resto-session";
+async function openVenueShift(_supabase: SupabaseClient, _employee: QuickRestoEmployee, _openedAt: Date): Promise<string | null> {
+  return QR_SESSION;
 }
 
-async function closeVenueShift(supabase: SupabaseClient, shiftRowId: string, employee: QuickRestoEmployee, closedAt: Date) {
-  const staffId = await upsertStaffForEmployee(supabase, employee);
-  const { error } = await supabase
-    .from("shifts")
-    .update({ closed_by: staffId, closed_at: closedAt.toISOString() })
-    .eq("id", shiftRowId);
-  if (error) console.error("Quick Resto: не удалось закрыть строку смены:", error.message);
-  // Начисление ЗП здесь НЕ считаем — оно теперь отдельным ежедневным заданием
-  // в 10:00 МСК, см. schedulePayrollJob ниже. Так надёжнее: не зависит от
-  // мгновенного детекта закрытия смены (см. известную проблему с задержкой/
-  // сбоями статуса смены в claude/quickresto-shift-integration.md), плюс к
-  // 10 утра бар уже точно закрыт и выручка за бизнес-день не изменится.
+async function closeVenueShift(supabase: SupabaseClient, _shiftRowId: string, _employee: QuickRestoEmployee, _closedAt: Date) {
+  // Строку shifts не трогаем (см. комментарий у openVenueShift) — только завершаем визиты гостей.
   await endAllActiveGuestVisits(supabase);
 }
 
@@ -1372,7 +1352,7 @@ export function watchQuickRestoShifts(onEvent: (event: QuickRestoShiftEvent) => 
     }
 
     if (!warmedUp) {
-      currentShiftRowId = await loadOpenShiftRowId(supabase);
+      currentShiftRowId = openEmployeeIds.size ? QR_SESSION : null;
     }
 
     const events: { type: "opened" | "closed"; employee: QuickRestoEmployee; at: number }[] = [];
