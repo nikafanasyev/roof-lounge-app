@@ -425,7 +425,11 @@ async function ensureCurrentStaff() {
   // Уволенный сотрудник хранится с telegram_id со знаком минус (см. 0026). Раньше
   // при следующем открытии приложения под ним заводилась НОВАЯ запись — так
   // «удалённые» снова появлялись в списке (фидбек Никиты 19.11.2026).
-  const { data: archivedRow } = await supabase!.from("staff").select("id").eq("telegram_id", -telegramId).eq("archived", true).maybeSingle();
+  // Действующая карточка важнее уволенного двойника (у владельца бывают оба).
+  const { data: activeRow } = await supabase!.from("staff").select("id").eq("telegram_id", telegramId).maybeSingle();
+  const { data: archivedRow } = activeRow
+    ? { data: null }
+    : await supabase!.from("staff").select("id").eq("telegram_id", -telegramId).eq("archived", true).maybeSingle();
   const lookupTelegramId = archivedRow ? -telegramId : telegramId;
   if (!archivedRow) {
     const { error: upsertError } = await supabase!
