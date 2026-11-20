@@ -2614,9 +2614,21 @@ export function requestPayrollRecalc(dateIso: string) {
   supabase
     .from("payroll_recalc_requests")
     .insert({ date: dateIso })
-    .then(({ error }) => {
+    .then(async ({ error }) => {
       if (error) return logSyncError("requestPayrollRecalc", error);
-      loadPayrollRecalcRequests();
+      await loadPayrollRecalcRequests();
+      // Realtime-обновление статуса в Telegram WebView иногда не доходит — статус
+      // «считаю…» зависал, хотя бот уже ответил «Начислено». Опрашиваем сами,
+      // пока бот не закончит (до 2 минут), и подтягиваем свежие начисления.
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        await loadPayrollRecalcRequests();
+        const req = latestPayrollRecalcRequestForDate(dateIso);
+        if (req && req.status !== "pending") {
+          await loadShiftPayroll();
+          break;
+        }
+      }
     });
 }
 
