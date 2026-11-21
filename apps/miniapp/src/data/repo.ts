@@ -84,6 +84,7 @@ import {
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { getTelegramUser, isCurrentUserManager, isGuestTestAccount, setDbManager } from "@/lib/telegram";
 import { computeShiftSalary, DEFAULT_SALARY_MODEL } from "@/lib/payroll";
+import { hamming } from "@/lib/photoGuard";
 import { computeLateFine } from "@/lib/lateness";
 
 // --- простой реактивный стор (pub/sub), чтобы экраны обновлялись после мутаций ---
@@ -3830,4 +3831,28 @@ export function recalcStaffPayrollFrom(staffId: string, model: SalaryModel, from
     }
   }
   return updates.length;
+}
+
+// --- Отпечатки фото (supabase/migrations/0041_photo_fingerprints.sql) ---
+
+/** Было ли уже такое фото (почти идентичное) за последние 60 дней. */
+export async function findDuplicatePhoto(hash: string): Promise<{ staffName?: string; createdAt: string } | null> {
+  if (!hash || !isSupabaseConfigured || !supabase) return null;
+  const since = new Date(Date.now() - 60 * 86400000).toISOString();
+  const { data, error } = await supabase.from("photo_fingerprints").select("hash, staff_name, created_at").gte("created_at", since).limit(5000);
+  if (error) {
+    logSyncError("findDuplicatePhoto", error);
+    return null;
+  }
+  const hit = (data ?? []).find((r) => hamming(String(r.hash), hash) <= 2);
+  return hit ? { staffName: hit.staff_name ?? undefined, createdAt: hit.created_at } : null;
+}
+
+export function rememberPhoto(hash: string) {
+  if (!hash || !isSupabaseConfigured || !supabase) return;
+  const me = getStaffProfile();
+  supabase
+    .from("photo_fingerprints")
+    .insert({ hash, staff_id: me.id || null, staff_name: me.name || null })
+    .then(({ error }) => error && logSyncError("rememberPhoto", error));
 }

@@ -1,4 +1,6 @@
 import { useRef, useState } from "react";
+import { findDuplicatePhoto, rememberPhoto } from "@/data/repo";
+import { dHash, readExifDate, staleReason } from "@/lib/photoGuard";
 
 // Открывает камеру устройства (атрибут capture — на мобильных сразу запускает
 // системную камеру, а не выбор файла) и вшивает дату/время съёмки прямо в
@@ -16,17 +18,44 @@ interface Props {
 export default function CameraCapture({ previewUrl, onCapture, label = "Сделать фото" }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // чтобы можно было пересъёмкой выбрать тот же файл повторно
     if (!file) return;
     setBusy(true);
+    setError("");
+
+    // 1) Свежесть: снимок не старше 5 минут (EXIF-время съёмки и время файла).
+    let exif: Date | null = null;
+    try {
+      exif = readExifDate(await file.arrayBuffer());
+    } catch {
+      exif = null;
+    }
+    const stale = staleReason(file, exif);
+    if (stale) {
+      setBusy(false);
+      setError(stale);
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
+        // 2) Повтор: тот же кадр уже присылали — не принимаем.
+        const hash = dHash(img);
+        const dup = await findDuplicatePhoto(hash);
+        if (dup) {
+          setBusy(false);
+          const when = new Date(dup.createdAt).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+          setError(`Это фото уже отправлялось ${when}${dup.staffName ? ` (${dup.staffName})` : ""}. Сделайте новый снимок.`);
+          return;
+        }
+        rememberPhoto(hash);
+
         const canvas = document.createElement("canvas");
         canvas.width = img.width;
         canvas.height = img.height;
@@ -84,6 +113,7 @@ export default function CameraCapture({ previewUrl, onCapture, label = "Сдел
         onChange={handleFile}
         style={{ display: "none" }}
       />
+      {error && <div style={{ color: "var(--danger, #e5484d)", fontSize: 13, margin: "0 0 8px" }}>{error}</div>}
       {previewUrl ? (
         <div className="card" style={{ padding: 8 }}>
           <img src={previewUrl} alt="" style={{ width: "100%", borderRadius: 8, display: "block" }} />
