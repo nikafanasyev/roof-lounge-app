@@ -1,10 +1,13 @@
 import type { WorkRole } from "@/types";
 
-// Штрафная сетка (редакция 17.11.2026): ступени суммируются.
-//  Первая смена (приходить к 11:30, отсчёт опоздания от 12:00):
-//    с 11:47 до 12:00 — 500 ₽; с 12:01 до 13:00 — +2000 ₽; с 13:01 каждый начатый час — +1000 ₽.
-//  Вторая смена (официант, с 18:00):
+// Штрафная сетка (редакция 22.11.2026, PDF от Никиты): на работе нужно быть в 11:45,
+// ступени суммируются.
+//  Первая смена (бар, кальяны, клининг):
+//    с 11:47 до 12:00 — 500 ₽; с 12:01 до 13:00 — +1000 ₽; с 13:01 каждый начатый час — +1000 ₽.
+//  Кухня (Аскар) — от начала своей смены (по умолчанию 12:30):
 //    от 2 до 15 минут — 500 ₽; от 16 до 60 минут — +1000 ₽; каждый следующий начатый час — +1000 ₽.
+//  Официант — по той же схеме, что кухня, от 18:00.
+// Первое опоздание за двухнедельный табель — предупреждение (см. proposeLateFine).
 
 export interface LateFine {
   amount: number;
@@ -23,23 +26,32 @@ function hhmm(min: number): string {
   return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 }
 
-export function computeLateFine(role: WorkRole, arrivedAt: Date): LateFine | null {
+function toMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+/** Опоздание от начала своей смены: 2–15 мин — 500, 16–60 — +1000, каждый следующий начатый час — +1000. */
+function relativeFine(m: number, startMin: number, label: string, time: string): LateFine | null {
+  const late = m - startMin;
+  if (late < 2 || late > 8 * 60) return null;
+  let amount = 500;
+  if (late > 15) amount += 1000;
+  if (late > 60) amount += Math.ceil((late - 60) / 60) * 1000;
+  return { amount, reason: `Опоздание (${label}): пришёл в ${time}, смена с ${hhmm(startMin)}` };
+}
+
+export function computeLateFine(role: WorkRole, arrivedAt: Date, shiftStart?: string): LateFine | null {
   const m = moscowMinutes(arrivedAt);
   const time = hhmm(m);
 
-  if (role === "waiter") {
-    const late = m - 18 * 60;
-    if (late < 2 || m >= 23 * 60) return null;
-    let amount = 500;
-    if (late > 15) amount += 1000;
-    if (late > 60) amount += Math.ceil((late - 60) / 60) * 1000;
-    return { amount, reason: `Опоздание на вторую смену: пришёл в ${time} (смена с 18:00)` };
-  }
+  if (role === "kitchen") return relativeFine(m, toMinutes(shiftStart ?? "12:30"), "кухня", time);
+  if (role === "waiter") return relativeFine(m, toMinutes(shiftStart ?? "18:00"), "официант", time);
 
-  // Первая смена. Позже 18:00 — это уже не опоздание на первую смену.
+  // Первая смена: быть в 11:45, штраф с 11:47. Позже 18:00 — уже не опоздание на первую смену.
   if (m < 11 * 60 + 47 || m >= 18 * 60) return null;
   let amount = 500;
-  if (m > 12 * 60) amount += 2000;
+  if (m > 12 * 60) amount += 1000;
   if (m > 13 * 60) amount += Math.ceil((m - 13 * 60) / 60) * 1000;
-  return { amount, reason: `Опоздание на смену: пришёл в ${time} (смена с 12:00)` };
+  return { amount, reason: `Опоздание на смену: пришёл в ${time} (быть в 11:45)` };
 }
