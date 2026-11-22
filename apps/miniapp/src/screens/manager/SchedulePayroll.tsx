@@ -18,6 +18,7 @@ import {
 } from "@/data/repo";
 import { ROLE_LABELS, WORK_ROLES, ROLE_COLORS, POSITION_SUGGESTIONS } from "@/lib/roles";
 import type { ScheduleEntry, StaffProfile, WorkRole } from "@/types";
+import { parseScheduleText, type ParsedEntry } from "@/lib/scheduleImport";
 
 // Порядок показа роли в дне — кальяны первой, это основная зона заведения.
 const ROLES: WorkRole[] = WORK_ROLES;
@@ -140,6 +141,132 @@ function businessToday(): Date {
   return new Date(y, m - 1, d, 12);
 }
 
+/** Вставка графика текстом (как пишут в чат) — разбор, проверка и внесение одним нажатием. */
+function ImportScheduleModal({ onClose, staff, byDate, staffById }: { onClose: () => void; staff: StaffProfile[]; byDate: Map<string, DayEntries>; staffById: Map<string, string> }) {
+  const [text, setText] = useState("");
+  const [parsed, setParsed] = useState<ParsedEntry[] | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [done, setDone] = useState<number | null>(null);
+
+  function parse() {
+    const r = parseScheduleText(text, staff);
+    setParsed(r.entries);
+    setErrors(r.errors);
+    setDone(null);
+  }
+  function setPick(i: number, staffId: string) {
+    setParsed((list) => list && list.map((e, idx) => (idx === i ? { ...e, staffId: staffId || undefined } : e)));
+  }
+  const ready = parsed?.filter((e) => e.staffId) ?? [];
+  const missing = (parsed?.length ?? 0) - ready.length;
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{ width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", margin: 0, borderRadius: "16px 16px 0 0", padding: 16, paddingBottom: 24 }}
+      >
+        <h2 style={{ marginTop: 0 }}>Вставить график</h2>
+        {!parsed && (
+          <>
+            <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+              Скопируйте график из чата как есть. Подходят оба вида: шапка «Бар Кальян» и строки «23 Артем 23 Никита» — или блок «Бар», под ним «16 Артём Боков».
+              Месяц определится сам. Имена можно сокращать (Даня, Макс).
+            </div>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={"Бар Кальян\n23 Артем 23 Никита\n24 Макс 24 Даня"}
+              style={{ minHeight: 200, marginBottom: 10, fontFamily: "inherit" }}
+            />
+            <div className="btn-row">
+              <button className="btn primary" disabled={!text.trim()} onClick={parse}>
+                Разобрать
+              </button>
+              <button className="btn secondary" onClick={onClose}>
+                Отмена
+              </button>
+            </div>
+          </>
+        )}
+
+        {parsed && done === null && (
+          <>
+            {errors.map((er, i) => (
+              <div key={i} style={{ color: "var(--danger, #e5484d)", fontSize: 13, marginBottom: 4 }}>
+                {er}
+              </div>
+            ))}
+            <div className="muted" style={{ fontSize: 13, marginBottom: 8 }}>
+              Найдено смен: {parsed.length}
+              {missing > 0 ? ` · без сотрудника: ${missing} — выберите вручную` : ""}. Совпадающие с текущим графиком помечены «уже так».
+            </div>
+            {parsed.map((e, i) => {
+              const existing = byDate.get(e.dateIso)?.[e.role];
+              const same = existing && existing.staffId === e.staffId;
+              const d = new Date(`${e.dateIso}T12:00:00`);
+              return (
+                <div key={i} className="card-row" style={{ borderTop: "1px solid var(--border)", padding: "6px 0", gap: 8, fontSize: 14 }}>
+                  <span style={{ width: 64, flex: "none", textTransform: "capitalize" }}>
+                    {d.toLocaleDateString("ru-RU", { weekday: "short" })} {d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}
+                  </span>
+                  <span className="muted" style={{ width: 66, flex: "none" }}>
+                    {ROLE_LABELS[e.role]}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <select value={e.staffId ?? ""} onChange={(ev) => setPick(i, ev.target.value)} style={{ padding: "4px 6px", fontSize: 13, borderColor: e.staffId ? undefined : "var(--danger, #e5484d)" }}>
+                      <option value="">— «{e.rawName.replace(/\.$/, "")}» не найден —</option>
+                      {(e.candidates.length > 1 ? e.candidates : staff).map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="muted" style={{ fontSize: 11, display: "block" }}>
+                      {same ? "уже так" : existing ? `сейчас: ${staffById.get(existing.staffId) ?? "?"} → заменим` : "новая"}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+            <div className="btn-row" style={{ marginTop: 12 }}>
+              <button
+                className="btn primary"
+                disabled={!ready.length}
+                onClick={() => {
+                  let n = 0;
+                  for (const e of ready) {
+                    const existing = byDate.get(e.dateIso)?.[e.role];
+                    if (existing && existing.staffId === e.staffId) continue;
+                    setScheduleEntry(e.staffId!, e.role, e.dateIso);
+                    n++;
+                  }
+                  setDone(n);
+                }}
+              >
+                Внести {ready.length} смен
+              </button>
+              <button className="btn secondary" onClick={() => setParsed(null)}>
+                Назад
+              </button>
+            </div>
+          </>
+        )}
+
+        {done !== null && (
+          <>
+            <div style={{ fontSize: 15, marginBottom: 12 }}>✓ Готово: внесено или изменено смен — {done}.</div>
+            <button className="btn primary" onClick={onClose}>
+              Закрыть
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Карточка одного дня: все роли с людьми, нажатие на роль — замена. */
 function DayCard({ date, dayEntries, staff, staffById, todayKey }: { date: Date; dayEntries: DayEntries; staff: StaffProfile[]; staffById: Map<string, string>; todayKey: string }) {
   const key = dateKey(date);
@@ -198,6 +325,7 @@ function ScheduleWeek() {
   }, [entries]);
 
   const [view, setViewState] = useState<ScheduleView>(readView);
+  const [importOpen, setImportOpen] = useState(false);
   const [anchor, setAnchor] = useState(businessToday);
   const todayKey = businessDateIso();
 
@@ -266,6 +394,10 @@ function ScheduleWeek() {
 
   return (
     <>
+      <button className="btn secondary" style={{ marginBottom: 10 }} onClick={() => setImportOpen(true)}>
+        📋 Вставить график текстом
+      </button>
+      {importOpen && <ImportScheduleModal onClose={() => setImportOpen(false)} staff={activeStaff} byDate={byDate} staffById={staffById} />}
       <div className="seg-toggle" role="tablist" style={{ marginBottom: 10 }}>
         {(["day", "week", "month"] as ScheduleView[]).map((v) => (
           <button key={v} className={view === v ? "active" : ""} onClick={() => setView(v)}>
