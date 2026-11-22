@@ -14,7 +14,6 @@ import {
   listStaffDirectory,
   shiftPayrollStore,
   staffDirectoryStore,
-  computeWithdrawalFee,
 } from "@/data/repo";
 import { exportSalaryWorkbook } from "@/lib/salaryExport";
 import { SendReportButton } from "@/components/SendReportButton";
@@ -210,20 +209,12 @@ export default function Salary() {
           <span style={{ fontWeight: 700 }}>{money(overview.netTotal)}</span>
         </div>
         <div className="card-row" style={{ marginTop: 6 }}>
-          <span className="muted">+ НДФЛ 13% от суммы на руки</span>
+          <span className="muted">НДФЛ (13% от итого ≈ 15% от на руки)</span>
           <span>{money(overview.ndfl)}</span>
         </div>
-        <div className="card-row" style={{ marginTop: 6 }}>
-          <span className="muted">Итого + НДФЛ</span>
-          <span>{money(overview.grossTotal)}</span>
-        </div>
-        <div className="card-row" style={{ marginTop: 6 }}>
-          <span className="muted">+ 15% за вывод средств</span>
-          <span>{money(computeWithdrawalFee(overview.netTotal))}</span>
-        </div>
         <div className="card-row" style={{ marginTop: 6, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
-          <span style={{ fontWeight: 700 }}>Итого + НДФЛ + вывод</span>
-          <span style={{ fontWeight: 700, color: "var(--accent)" }}>{money(overview.grossTotal + computeWithdrawalFee(overview.netTotal))}</span>
+          <span style={{ fontWeight: 700 }}>Итого с НДФЛ</span>
+          <span style={{ fontWeight: 700, color: "var(--accent)" }}>{money(overview.grossTotal)}</span>
         </div>
       </div>
 
@@ -239,7 +230,7 @@ export default function Salary() {
                 <span style={{ fontWeight: 700, color: "var(--accent)" }}>{money(p.net)}</span>
               </div>
               <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                +НДФЛ {money(p.gross)} · +вывод {money(p.gross + computeWithdrawalFee(p.net))} · →
+                НДФЛ {money(p.ndfl)} · итого {money(p.gross)} · →
               </div>
             </Link>
           ))}
