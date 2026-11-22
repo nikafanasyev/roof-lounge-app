@@ -21,6 +21,7 @@ import type { ChecklistItem, StaffRole, WorkRole } from "@/types";
 const ROLE_LABELS: Record<StaffRole, string> = { bar: "Бар", hookah: "Кальяны" };
 
 const MAX_SHIFT_PHOTOS = 3; // обязательна минимум одна, максимум три
+const MAX_BAR_PHOTOS = 6; // у бара больше зон для фото (фидбек Никиты 22.11.2026)
 
 interface CapturedPhoto {
   url: string;
@@ -28,7 +29,7 @@ interface CapturedPhoto {
 }
 
 /** Одно окно для фото смены: первое обязательно, можно добавить до MAX_SHIFT_PHOTOS. */
-function PhotoSet({ photos, onChange }: { photos: CapturedPhoto[]; onChange: (next: CapturedPhoto[]) => void }) {
+function PhotoSet({ photos, onChange, max = MAX_SHIFT_PHOTOS }: { photos: CapturedPhoto[]; onChange: (next: CapturedPhoto[]) => void; max?: number }) {
   return (
     <div>
       {photos.length > 0 && (
@@ -48,10 +49,10 @@ function PhotoSet({ photos, onChange }: { photos: CapturedPhoto[]; onChange: (ne
           ))}
         </div>
       )}
-      {photos.length < MAX_SHIFT_PHOTOS && (
+      {photos.length < max && (
         <CameraCapture
           onCapture={(url, blob) => onChange([...photos, { url, blob }])}
-          label={photos.length === 0 ? "Сделать фото (обязательно)" : `Добавить фото (${photos.length} из ${MAX_SHIFT_PHOTOS})`}
+          label={photos.length === 0 ? "Сделать фото (обязательно)" : `Добавить фото (${photos.length} из ${max})`}
         />
       )}
     </div>
@@ -296,7 +297,7 @@ function ZoneShift() {
           <div className="eyebrow" style={{ marginTop: 8 }}>
             Фото на месте (со штампом даты и времени, уходит руководителю в Telegram)
           </div>
-          <PhotoSet photos={openPhotos} onChange={setOpenPhotos} />
+          <PhotoSet photos={openPhotos} onChange={setOpenPhotos} max={role === "bar" ? MAX_BAR_PHOTOS : MAX_SHIFT_PHOTOS} />
 
           <button
             className="btn primary"
@@ -352,7 +353,7 @@ function ZoneShift() {
           <div className="eyebrow" style={{ marginTop: 8 }}>
             Фото контрольных зон (со штампом даты и времени, уходит руководителю в Telegram)
           </div>
-          <PhotoSet photos={closePhotos} onChange={setClosePhotos} />
+          <PhotoSet photos={closePhotos} onChange={setClosePhotos} max={role === "bar" ? MAX_BAR_PHOTOS : MAX_SHIFT_PHOTOS} />
 
           <div className="eyebrow" style={{ marginTop: 12 }}>
             Передача смены (заметка для следующей)
