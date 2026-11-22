@@ -290,6 +290,9 @@ export interface PayoutRecord {
   amount: number;
   note?: string; // например "за первую половину августа"
   kind?: "salary" | "advance"; // аванс виден в зарплате, но не попадает в расходы
+  deletedAt?: string; // удалён (не учитывается), см. 0042
+  deletedByName?: string;
+  deleteReason?: string;
 }
 
 export type AdjustmentType = "fine" | "bonus";
