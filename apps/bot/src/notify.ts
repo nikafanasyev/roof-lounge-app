@@ -140,6 +140,7 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
     clearTimeout(group.timer);
     const rows = group.rows;
     const first = rows[0];
+    let sent = false;
     try {
       await onEvent({
         kind: first.kind,
@@ -159,12 +160,16 @@ export function watchShiftPhotos(onEvent: (event: ShiftPhotoEvent) => void | Pro
           return buffers;
         },
       });
+      sent = true;
     } catch (err) {
-      console.error("Ошибка при обработке фото смены:", err);
+      console.error("Ошибка при обработке фото смены (повторим через 15 с):", err);
     } finally {
-      // Удаляем в любом случае — фото не должно оставаться ни в Storage, ни в таблице.
-      await supabase.storage.from("shift-photos").remove(rows.map((r) => r.storage_path));
-      await supabase.from("shift_photo_uploads").delete().in("id", rows.map((r) => r.id));
+      // Удаляем только после успешной отправки. При ошибке (Telegram/сеть) строки
+      // остаются — запасной опрос раз в 15 с попробует снова (старше 6 ч — чистится).
+      if (sent) {
+        await supabase.storage.from("shift-photos").remove(rows.map((r) => r.storage_path));
+        await supabase.from("shift_photo_uploads").delete().in("id", rows.map((r) => r.id));
+      }
       rows.forEach((r) => queued.delete(r.id));
     }
   }

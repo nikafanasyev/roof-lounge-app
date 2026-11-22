@@ -224,6 +224,8 @@ function ZoneShift() {
   const [handoverNote, setHandoverNote] = useState("");
   const [openPhotos, setOpenPhotos] = useState<CapturedPhoto[]>([]);
   const [closePhotos, setClosePhotos] = useState<CapturedPhoto[]>([]);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
 
   const roleShift = role === "bar" ? shift.bar : shift.hookah;
 
@@ -299,14 +301,19 @@ function ZoneShift() {
           <button
             className="btn primary"
             style={{ marginTop: 12 }}
-            disabled={!openReady}
-            onClick={() => {
-              openShift(role, getStaffProfile().name, openPhotos.map((x) => x.blob));
+            disabled={!openReady || sending}
+            onClick={async () => {
+              setSending(true);
+              setSendError("");
+              const ok = await openShift(role, getStaffProfile().name, openPhotos.map((x) => x.blob));
+              setSending(false);
+              if (!ok) return setSendError("Фото не отправились — проверьте интернет и нажмите «Отправить» ещё раз. Не закрывайте приложение, пока идёт отправка.");
               setOpenPhotos([]);
             }}
           >
-            {openReady ? "Отправить" : !isChecklistComplete(roleShift.openChecklist) ? "Отметьте все пункты" : "Сделайте хотя бы одно фото"}
+            {sending ? "Отправляем фото…" : openReady ? "Отправить" : !isChecklistComplete(roleShift.openChecklist) ? "Отметьте все пункты" : "Сделайте хотя бы одно фото"}
           </button>
+          {sendError && <div style={{ color: "var(--danger, #e5484d)", fontSize: 13, marginTop: 8 }}>{sendError}</div>}
         </>
       )}
 
@@ -359,15 +366,20 @@ function ZoneShift() {
 
           <button
             className="btn primary"
-            disabled={!closeReady}
-            onClick={() => {
-              closeShift(role, getStaffProfile().name, handoverNote || undefined, closePhotos.map((x) => x.blob));
+            disabled={!closeReady || sending}
+            onClick={async () => {
+              setSending(true);
+              setSendError("");
+              const ok = await closeShift(role, getStaffProfile().name, handoverNote || undefined, closePhotos.map((x) => x.blob));
+              setSending(false);
+              if (!ok) return setSendError("Фото не отправились — проверьте интернет и нажмите «Отправить» ещё раз. Не закрывайте приложение, пока идёт отправка.");
               setClosePhotos([]);
               setHandoverNote("");
             }}
           >
-            {closeReady ? "Отправить" : !isChecklistComplete(roleShift.closeChecklist) ? "Отметьте все пункты" : "Сделайте хотя бы одно фото"}
+            {sending ? "Отправляем фото…" : closeReady ? "Отправить" : !isChecklistComplete(roleShift.closeChecklist) ? "Отметьте все пункты" : "Сделайте хотя бы одно фото"}
           </button>
+          {sendError && <div style={{ color: "var(--danger, #e5484d)", fontSize: 13, marginTop: 8 }}>{sendError}</div>}
         </>
       )}
 

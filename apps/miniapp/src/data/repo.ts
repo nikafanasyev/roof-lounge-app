@@ -1836,20 +1836,31 @@ function closeVenueShift(closedBy: string, closedAt: string, handoverNote?: stri
  * её через Realtime, пересылает фото руководителю в Telegram и сразу удаляет и
  * файл, и запись. Без Supabase — просто no-op, фото живёт только в памяти вкладки.
  */
-function uploadAndNotifyShiftPhoto(role: StaffRole, kind: "open" | "close", blob: Blob, staffName: string, index = 0) {
-  if (!isSupabaseConfigured || !supabase) return;
+/**
+ * Загружает фото и ставит его в очередь боту. Возвращает true, только когда фото
+ * точно дошло (с двумя повторами). Раньше загрузка шла фоном после того, как зона
+ * уже показывалась закрытой — сотрудник закрывал приложение, загрузка обрывалась,
+ * и фото закрытия не доходили (фидбек Дани 21.11.2026).
+ */
+async function uploadAndNotifyShiftPhoto(role: StaffRole, kind: "open" | "close", blob: Blob, staffName: string, index = 0): Promise<boolean> {
+  if (!isSupabaseConfigured || !supabase) return true;
   const shiftId = shiftStore.get().id;
   const path = `${shiftId}/${role}-${kind}-${Date.now()}-${index}.jpg`;
-  supabase.storage
-    .from("shift-photos")
-    .upload(path, blob, { contentType: "image/jpeg" })
-    .then(({ error: uploadError }) => {
-      if (uploadError) return logSyncError("uploadShiftPhoto", uploadError);
-      supabase!
-        .from("shift_photo_uploads")
-        .insert({ shift_id: shiftId, kind, role, storage_path: path, staff_name: staffName })
-        .then(({ error }) => error && logSyncError("shiftPhotoUpload:insert", error));
-    });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    const up = await supabase.storage.from("shift-photos").upload(path, blob, { contentType: "image/jpeg", upsert: true });
+    if (up.error) {
+      logSyncError("uploadShiftPhoto", up.error);
+      continue;
+    }
+    const ins = await supabase.from("shift_photo_uploads").insert({ shift_id: shiftId, kind, role, storage_path: path, staff_name: staffName });
+    if (ins.error) {
+      logSyncError("shiftPhotoUpload:insert", ins.error);
+      continue;
+    }
+    return true;
+  }
+  return false;
 }
 
 function toBlobList(b?: Blob | Blob[]): Blob[] {
@@ -1893,14 +1904,17 @@ export function toggleCloseChecklistItem(role: StaffRole, itemId: string) {
  * сохранён поштучно через toggleOpenChecklistItem. Принимает роль (бар/
  * кальяны), т.к. у каждой роли свой чек-лист и своё фото.
  */
-export async function openShift(role: StaffRole, openedBy: string, photoBlobs?: Blob | Blob[]) {
+export async function openShift(role: StaffRole, openedBy: string, photoBlobs?: Blob | Blob[]): Promise<boolean> {
   await openVenueShiftIfNeeded();
+  // Сначала фото (дожидаемся), потом отметка зоны — чтобы зона не открылась без фото.
+  const results = await Promise.all(toBlobList(photoBlobs).map((b, i) => uploadAndNotifyShiftPhoto(role, "open", b, openedBy, i)));
+  if (results.some((ok) => !ok)) return false;
   const at = new Date().toISOString();
   // Каждая зона (бар/кальяны) открывается отдельно и своим сотрудником.
   shiftStore.update((s) => ({ ...s, [role]: { ...s[role], openedBy, openedAt: at, closedBy: undefined, closedAt: undefined } }));
   syncRoleClaim(role, "open", at);
-  toBlobList(photoBlobs).forEach((b, i) => uploadAndNotifyShiftPhoto(role, "open", b, openedBy, i));
   proposeLateFine(role, new Date(at));
+  return true;
 }
 
 /**
@@ -1908,7 +1922,10 @@ export async function openShift(role: StaffRole, openedBy: string, photoBlobs?: 
  * закрыты все открытые зоны — иначе первый закрывшийся "выключал" смену
  * второму сотруднику посреди работы.
  */
-export function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlobs?: Blob | Blob[]) {
+export async function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlobs?: Blob | Blob[]): Promise<boolean> {
+  // Сначала фото (дожидаемся), потом закрытие зоны.
+  const results = await Promise.all(toBlobList(photoBlobs).map((b, i) => uploadAndNotifyShiftPhoto(role, "close", b, closedBy, i)));
+  if (results.some((ok) => !ok)) return false;
   const closedAt = new Date().toISOString();
   const otherRole: StaffRole = role === "bar" ? "hookah" : "bar";
   const before = shiftStore.get();
@@ -1925,7 +1942,7 @@ export function closeShift(role: StaffRole, closedBy: string, handoverNote?: str
   else if (handoverNote && isSupabaseConfigured && supabase) {
     supabase.from("shifts").update({ handover_note: handoverNote }).eq("id", before.id).then(({ error }) => error && logSyncError("closeShift:note", error));
   }
-  toBlobList(photoBlobs).forEach((b, i) => uploadAndNotifyShiftPhoto(role, "close", b, closedBy, i));
+  return true;
 }
 
 export function isChecklistComplete(items: ChecklistItem[]): boolean {
