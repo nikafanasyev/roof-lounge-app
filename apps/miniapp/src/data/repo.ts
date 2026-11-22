@@ -907,6 +907,9 @@ async function loadPayouts() {
       amount: Number(r.amount),
       note: r.note ?? undefined,
       kind: r.kind === "advance" ? "advance" : "salary",
+      deletedAt: r.deleted_at ?? undefined,
+      deletedByName: r.deleted_by_name ?? undefined,
+      deleteReason: r.delete_reason ?? undefined,
     })),
   );
 }
@@ -2738,11 +2741,31 @@ export function listShiftPayrollByMonth(): { monthLabel: string; total: number; 
   return listShiftPayrollByMonthForStaff(getStaffProfile().id);
 }
 
+/** Действующие выплаты/авансы (удалённые не учитываются в зарплате). */
 export function listPayoutsForStaff(staffId: string): PayoutRecord[] {
+  return listAllPayoutsForStaff(staffId).filter((p) => !p.deletedAt);
+}
+
+/** Все выплаты/авансы сотрудника, включая удалённые (для истории в карточке). */
+export function listAllPayoutsForStaff(staffId: string): PayoutRecord[] {
   return payoutsStore
     .get()
     .filter((p) => p.staffId === staffId)
     .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** Удалить аванс/выплату с комментарием: запись помечается удалённой, история остаётся. */
+export function deletePayout(id: string, reason: string) {
+  const deletedAt = new Date().toISOString();
+  const deletedByName = getStaffProfile().name;
+  payoutsStore.update((list) => list.map((p) => (p.id === id ? { ...p, deletedAt, deletedByName, deleteReason: reason } : p)));
+  if (isSupabaseConfigured && supabase) {
+    supabase
+      .from("payouts")
+      .update({ deleted_at: deletedAt, deleted_by_name: deletedByName, delete_reason: reason })
+      .eq("id", id)
+      .then(({ error }) => error && logSyncError("deletePayout", error));
+  }
 }
 
 /**

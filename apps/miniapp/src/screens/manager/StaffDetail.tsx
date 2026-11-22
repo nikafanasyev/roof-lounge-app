@@ -8,6 +8,8 @@ import {
   getPayrollPeriodForDate,
   recalcStaffPayrollFrom,
   listPayoutsForStaff,
+  listAllPayoutsForStaff,
+  deletePayout,
   payoutsStore,
   computeAverageSalaryPerShift,
   computeEarnedThisCalendarMonthForStaff,
@@ -342,6 +344,9 @@ function EditableCard({ staffId, profile }: { staffId: string; profile: ReturnTy
 function AdvancesCard({ staffId }: { staffId: string }) {
   useStore(payoutsStore);
   const payouts = listPayoutsForStaff(staffId);
+  const history = listAllPayoutsForStaff(staffId);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -390,20 +395,72 @@ function AdvancesCard({ staffId }: { staffId: string }) {
           </div>
         </div>
       )}
-      {payouts.length > 0 && (
+      {history.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          {payouts.slice(0, 8).map((p) => (
-            <div key={p.id} className="card-row" style={{ padding: "5px 0", borderTop: "1px solid var(--border)", fontSize: 14 }}>
-              <span>
-                {new Date(`${p.date.slice(0, 10)}T12:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}{" "}
-                <span className={`chip ${p.kind === "advance" ? "accent" : ""}`} style={{ fontSize: 11, marginLeft: 4 }}>
-                  {p.kind === "advance" ? "аванс" : "выплата"}
-                </span>
-                {p.note && <span className="muted" style={{ fontSize: 12 }}> · {p.note}</span>}
-              </span>
-              <span style={{ fontWeight: 600 }}>{money(p.amount)}</span>
-            </div>
-          ))}
+          {history.slice(0, 10).map((p) => {
+            const removed = Boolean(p.deletedAt);
+            return (
+              <div key={p.id} style={{ borderTop: "1px solid var(--border)", padding: "6px 0", fontSize: 14 }}>
+                <div className="card-row" style={{ opacity: removed ? 0.5 : 1 }}>
+                  <span>
+                    {new Date(`${p.date.slice(0, 10)}T12:00:00`).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" })}{" "}
+                    <span className={`chip ${p.kind === "advance" && !removed ? "accent" : ""}`} style={{ fontSize: 11, marginLeft: 4 }}>
+                      {p.kind === "advance" ? "аванс" : "выплата"}
+                    </span>
+                    {p.note && <span className="muted" style={{ fontSize: 12 }}> · {p.note}</span>}
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontWeight: 600, textDecoration: removed ? "line-through" : undefined }}>{money(p.amount)}</span>
+                    {!removed && deleting !== p.id && (
+                      <button
+                        className="muted"
+                        aria-label="Удалить"
+                        style={{ background: "none", border: "none", fontSize: 16, cursor: "pointer", padding: 0 }}
+                        onClick={() => {
+                          setDeleting(p.id);
+                          setDeleteReason("");
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {removed && (
+                  <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                    удалено{p.deletedByName ? ` · ${p.deletedByName}` : ""}
+                    {p.deleteReason ? ` · «${p.deleteReason}»` : ""}
+                  </div>
+                )}
+                {deleting === p.id && (
+                  <div style={{ marginTop: 6 }}>
+                    <input
+                      type="text"
+                      placeholder="Почему удаляете (обязательно)"
+                      value={deleteReason}
+                      onChange={(e) => setDeleteReason(e.target.value)}
+                      style={{ marginBottom: 6 }}
+                    />
+                    <div className="btn-row">
+                      <button
+                        className="btn primary"
+                        disabled={!deleteReason.trim()}
+                        onClick={() => {
+                          deletePayout(p.id, deleteReason.trim());
+                          setDeleting(null);
+                        }}
+                      >
+                        Удалить {p.kind === "advance" ? "аванс" : "выплату"}
+                      </button>
+                      <button className="btn secondary" onClick={() => setDeleting(null)}>
+                        Отмена
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
