@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useStore } from "@/data/useStore";
+import Sheet from "@/components/Sheet";
 import {
   latestPayrollRecalcRequestForDate,
   listActiveStaffDirectory,
@@ -161,12 +162,7 @@ function ImportScheduleModal({ onClose, staff, byDate, staffById }: { onClose: (
   const missing = (parsed?.length ?? 0) - ready.length;
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="card"
-        style={{ width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", margin: 0, borderRadius: "16px 16px 0 0", padding: 16, paddingBottom: 24 }}
-      >
+    <Sheet onClose={onClose}>
         <h2 style={{ marginTop: 0 }}>Вставить график</h2>
         {!parsed && (
           <>
@@ -262,8 +258,7 @@ function ImportScheduleModal({ onClose, staff, byDate, staffById }: { onClose: (
             </button>
           </>
         )}
-      </div>
-    </div>
+    </Sheet>
   );
 }
 

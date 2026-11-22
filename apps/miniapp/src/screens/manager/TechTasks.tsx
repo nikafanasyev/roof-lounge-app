@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "@/data/useStore";
+import Sheet from "@/components/Sheet";
 import {
   TECH_ROLES,
   addTechTask,
@@ -54,15 +55,7 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
   const [everyDays, setEveryDays] = useState(7);
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 50, display: "flex", alignItems: "flex-end", justifyContent: "center" }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="card"
-        style={{ width: "100%", maxWidth: 520, margin: 0, borderRadius: "16px 16px 0 0", padding: 16, paddingBottom: 24 }}
-      >
+    <Sheet onClose={onClose}>
         <h2 style={{ marginTop: 0 }}>Новая тех. задача</h2>
         <div className="eyebrow">Кто делает</div>
         <div className="chip-row" style={{ flexWrap: "wrap", marginBottom: 10 }}>
@@ -101,8 +94,7 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
             Отмена
           </button>
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }
 
