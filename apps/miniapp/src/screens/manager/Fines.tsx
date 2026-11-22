@@ -99,7 +99,7 @@ export default function Fines() {
           {pendingLate.map((p) => (
             <div key={p.id} className="card">
               <div style={{ fontWeight: 700 }}>
-                {listStaffDirectory().find((s) => s.id === p.staffId)?.name ?? "Сотрудник"} · {money(p.amount)}
+                {listStaffDirectory().find((s) => s.id === p.staffId)?.name ?? "Сотрудник"} · {p.amount > 0 ? money(p.amount) : "предупреждение"}
               </div>
               <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
                 {p.reason}

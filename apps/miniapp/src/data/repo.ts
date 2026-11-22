@@ -1913,7 +1913,7 @@ export async function openShift(role: StaffRole, openedBy: string, photoBlobs?: 
   // Каждая зона (бар/кальяны) открывается отдельно и своим сотрудником.
   shiftStore.update((s) => ({ ...s, [role]: { ...s[role], openedBy, openedAt: at, closedBy: undefined, closedAt: undefined } }));
   syncRoleClaim(role, "open", at);
-  proposeLateFine(role, new Date(at));
+  void proposeLateFine(role, new Date(at));
   return true;
 }
 
@@ -2147,28 +2147,42 @@ export async function recordArrival(role: WorkRole, photoBlob: Blob): Promise<{ 
     .from("shift_photo_uploads")
     .insert({ shift_id: shiftStore.get().id, kind: "open", role, storage_path: path, staff_name: me.name });
   if (ins.error) logSyncError("recordArrival:photo", ins.error);
-  proposeLateFine(role, new Date(openedAt));
+  void proposeLateFine(role, new Date(openedAt));
   return { ok: true, openedAt };
 }
 
 /** Если сотрудник пришёл позже допустимого — создаём предложение штрафа (раз в бизнес-день); применяет или отклоняет руководитель. */
-function proposeLateFine(role: WorkRole, arrivedAt: Date) {
-  const fine = computeLateFine(role, arrivedAt);
+/**
+ * Предложение штрафа за опоздание. Первое опоздание за двухнедельный табель —
+ * предупреждение (0 ₽), со второго — штраф по сетке (редакция 22.11.2026).
+ */
+async function proposeLateFine(role: WorkRole, arrivedAt: Date) {
+  const date = businessDateIso(arrivedAt);
+  const fine = computeLateFine(role, arrivedAt, shiftTimesFor(role, date).start);
   if (!fine || !isSupabaseConfigured || !supabase) return;
-  supabase
+  const staffId = getStaffProfile().id;
+  const period = getPayrollPeriodForDate(date);
+  const { data: earlier } = await supabase
     .from("late_proposals")
-    .upsert(
-      {
-        staff_id: getStaffProfile().id,
-        date: businessDateIso(arrivedAt),
-        role,
-        arrived_at: arrivedAt.toISOString(),
-        amount: fine.amount,
-        reason: fine.reason,
-      },
-      { onConflict: "staff_id,date", ignoreDuplicates: true },
-    )
-    .then(({ error }) => error && logSyncError("proposeLateFine", error));
+    .select("id")
+    .eq("staff_id", staffId)
+    .gte("date", period.start)
+    .lt("date", date)
+    .neq("status", "dismissed")
+    .limit(1);
+  const first = !earlier?.length;
+  const { error } = await supabase.from("late_proposals").upsert(
+    {
+      staff_id: staffId,
+      date,
+      role,
+      arrived_at: arrivedAt.toISOString(),
+      amount: first ? 0 : fine.amount,
+      reason: first ? `Предупреждение (первое опоздание за табель, по сетке было бы ${fine.amount} ₽). ${fine.reason}` : fine.reason,
+    },
+    { onConflict: "staff_id,date", ignoreDuplicates: true },
+  );
+  if (error) logSyncError("proposeLateFine", error);
 }
 
 export function listPendingLateProposals(): LateProposal[] {
@@ -2180,7 +2194,8 @@ export function resolveLateProposal(id: string, apply: boolean) {
   const p = lateProposalsStore.get().find((x) => x.id === id);
   if (!p) return;
   const status = apply ? "applied" : "dismissed";
-  if (apply) addAdjustment("fine", p.amount, p.reason, p.staffId, p.date);
+  // Предупреждение (0 ₽) — только отмечаем, штраф не создаём.
+  if (apply && p.amount > 0) addAdjustment("fine", p.amount, p.reason, p.staffId, p.date);
   lateProposalsStore.update((list) => list.map((x) => (x.id === id ? { ...x, status } : x)));
   if (isSupabaseConfigured && supabase) {
     supabase
@@ -3486,17 +3501,43 @@ export function reassignShiftPayroll(entryId: string, newStaffId: string) {
   }
 }
 
+/**
+ * Строки статьи с префиксом «{{роль,роль}} » видны только этим ролям и
+ * руководителям (например, ветка опозданий кухни в штрафной сетке — фидбек
+ * Никиты 22.11.2026). Роль — из карточки, а если не задана — по должности.
+ */
+export function filterAudience(body: string): string {
+  const me = getStaffProfile();
+  const pos = (me.position ?? "").toLowerCase();
+  const role =
+    me.role ??
+    (/повар|кух|шеф/.test(pos) ? "kitchen" : /клин|уборщ/.test(pos) ? "cleaning" : /официант/.test(pos) ? "waiter" : /бармен/.test(pos) ? "bar" : /кальян/.test(pos) ? "hookah" : undefined);
+  const manager = isCurrentUserManager();
+  return body
+    .split("\n")
+    .filter((line) => {
+      const m = line.match(/^\{\{([^}]+)\}\} /);
+      if (!m) return true;
+      return manager || (!!role && m[1].split(",").map((x) => x.trim()).includes(role));
+    })
+    .map((line) => line.replace(/^\{\{[^}]+\}\} /, ""))
+    .join("\n");
+}
+
+const withAudience = (a: KnowledgeArticle): KnowledgeArticle => (a.body.includes("{{") ? { ...a, body: filterAudience(a.body) } : a);
+
 export function listKnowledgeArticles(): KnowledgeArticle[] {
-  return knowledgeStore.get();
+  return knowledgeStore.get().map(withAudience);
 }
 
 export function getKnowledgeArticle(id: string): KnowledgeArticle | undefined {
-  return knowledgeStore.get().find((a) => a.id === id);
+  const a = knowledgeStore.get().find((x) => x.id === id);
+  return a && withAudience(a);
 }
 
 export function groupKnowledgeByCategory(): { category: string; articles: KnowledgeArticle[] }[] {
   const byCategory = new Map<string, KnowledgeArticle[]>();
-  for (const article of knowledgeStore.get()) {
+  for (const article of knowledgeStore.get().map(withAudience)) {
     const list = byCategory.get(article.category) ?? [];
     list.push(article);
     byCategory.set(article.category, list);
