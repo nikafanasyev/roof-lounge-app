@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
+import { useEffect, useState } from "react";
 import {
   businessDateIso,
+  fetchMyShiftTimesToday,
   computeEarnedThisCalendarMonth,
   computeMyTipsForMonth,
   currentMonthKey,
@@ -54,7 +56,13 @@ export default function Home() {
   // только если это я открыл зону и она ещё открыта; «Открыть» — если я в графике.
   const myOpenZone = (["bar", "hookah"] as const).find((z) => shift[z].openedAt && !shift[z].closedAt && shift[z].openedBy === me.name);
   const closedByMe = (["bar", "hookah"] as const).some((z) => shift[z].closedAt && shift[z].closedBy === me.name);
-  const shiftAction = myOpenZone ? "close" : todayEntry && !closedByMe ? "open" : null;
+  // Кухня, клининг, официант открывают/закрывают смену без зоны — по отметке прихода/ухода.
+  const [simple, setSimple] = useState<{ openedAt?: string; closedAt?: string }>({});
+  useEffect(() => {
+    fetchMyShiftTimesToday().then(setSimple).catch(() => undefined);
+  }, []);
+  const simpleOpen = !!simple.openedAt && !simple.closedAt;
+  const shiftAction = myOpenZone || simpleOpen ? "close" : todayEntry && !closedByMe && !simple.closedAt ? "open" : null;
 
   return (
     <div className="screen">
