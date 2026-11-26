@@ -652,11 +652,14 @@ async function loadShift() {
   const data = (rows ?? []).find((r) => r.bar_opened_at || r.hookah_opened_at) ?? (rows ?? [])[0] ?? null;
   if (!data) return; // смен ещё не было — оставляем закрытую заготовку из seed
   const prev = shiftStore.get();
-  // Последняя смена из прошлого бизнес-дня (день меняется в 11:00) и уже закрыта —
-  // показываем новую пустую смену, иначе у зон нет кнопки «Открыть» и открыть смену нельзя.
+  // Последняя смена из прошлого бизнес-дня (день меняется в 11:00) — показываем новую
+  // пустую смену, даже если вчерашнюю «смену в зале» не закрыли (например, обе зоны
+  // закрыли, а общий статус остался «открыта» — фидбек Никиты 26.11.2026). Иначе у
+  // зон нет кнопки «Открыть» и открыть смену утром нельзя.
   const lastTs = new Date(data.opened_at ?? data.created_at ?? Date.now());
-  if (data.closed_at && businessDateIso(lastTs) !== businessDateIso()) {
-    if (prev.status === "open") return; // уже открыли новую локально, ждём ответ Supabase
+  if (businessDateIso(lastTs) !== businessDateIso()) {
+    // Уже открыли новую смену локально и ждём ответ Supabase — не сбрасываем.
+    if (prev.status === "open" && prev.openedAt && businessDateIso(new Date(prev.openedAt)) === businessDateIso()) return;
     const clear = (items: ChecklistItem[]) => items.map((i) => ({ ...i, done: false }));
     shiftStore.set({
       id: crypto.randomUUID(),
@@ -666,9 +669,23 @@ async function loadShift() {
     });
     return;
   }
+  // Все открытые зоны закрыты — смена в зале закрыта, даже если общий closed_at не
+  // записался (закрывали с двух телефонов, и у второго было старое состояние).
+  const zonesOpened = [data.bar_opened_at, data.hookah_opened_at].filter(Boolean).length;
+  const zonesStillOpen = (data.bar_opened_at && !data.bar_closed_at ? 1 : 0) + (data.hookah_opened_at && !data.hookah_closed_at ? 1 : 0);
+  const allZonesClosed = zonesOpened > 0 && zonesStillOpen === 0;
+  if (allZonesClosed && !data.closed_at) {
+    const lastClose = [data.bar_closed_at, data.hookah_closed_at].filter(Boolean).sort().pop();
+    supabase!
+      .from("shifts")
+      .update({ closed_at: lastClose })
+      .eq("id", data.id)
+      .is("closed_at", null)
+      .then(({ error: e }) => e && logSyncError("loadShift:selfHeal", e));
+  }
   shiftStore.set({
     id: data.id,
-    status: data.closed_at ? "closed" : data.opened_at ? "open" : "closed",
+    status: data.closed_at || allZonesClosed ? "closed" : data.opened_at ? "open" : "closed",
     openedBy: data.opened_by ? staffNameById.get(data.opened_by) ?? DEMO_STAFF_NAME : undefined,
     openedAt: data.opened_at ?? undefined,
     closedBy: data.closed_by ? staffNameById.get(data.closed_by) ?? DEMO_STAFF_NAME : undefined,
@@ -1923,6 +1940,9 @@ export async function openShift(role: StaffRole, openedBy: string, photoBlobs?: 
  * второму сотруднику посреди работы.
  */
 export async function closeShift(role: StaffRole, closedBy: string, handoverNote?: string, photoBlobs?: Blob | Blob[]): Promise<boolean> {
+  // Свежее состояние: напарник мог закрыть свою зону с другого телефона, а до нас
+  // ещё не дошло — иначе решим, что его зона открыта, и смена в зале не закроется.
+  if (isSupabaseConfigured && supabase) await loadShift();
   // Сначала фото (дожидаемся), потом закрытие зоны.
   const results = await Promise.all(toBlobList(photoBlobs).map((b, i) => uploadAndNotifyShiftPhoto(role, "close", b, closedBy, i)));
   if (results.some((ok) => !ok)) return false;
