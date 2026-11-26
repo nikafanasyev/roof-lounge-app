@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useStore } from "@/data/useStore";
 import {
+  businessDateIso,
   computeEarnedThisCalendarMonth,
   computeMyTipsForMonth,
   currentMonthKey,
@@ -43,11 +44,17 @@ export default function Home() {
 
   const me = getStaffProfile();
   const firstName = (me.name || "").split(" ")[0];
-  const todayKey = new Date().toISOString().slice(0, 10);
+  // «Сегодня» — бизнес-день (ночью ещё вчерашняя смена), а не дата по UTC.
+  const todayKey = businessDateIso();
   const todayEntry = listMySchedule().find((e) => e.date.slice(0, 10) === todayKey);
   const earned = computeEarnedThisCalendarMonth();
   const tips = computeMyTipsForMonth(currentMonthKey());
   const isOpen = shift.status === "open";
+  // Кнопка смены — по себе, а не по залу (фидбек Никиты 26.11.2026): «Закрыть» —
+  // только если это я открыл зону и она ещё открыта; «Открыть» — если я в графике.
+  const myOpenZone = (["bar", "hookah"] as const).find((z) => shift[z].openedAt && !shift[z].closedAt && shift[z].openedBy === me.name);
+  const closedByMe = (["bar", "hookah"] as const).some((z) => shift[z].closedAt && shift[z].closedBy === me.name);
+  const shiftAction = myOpenZone ? "close" : todayEntry && !closedByMe ? "open" : null;
 
   return (
     <div className="screen">
@@ -89,9 +96,15 @@ export default function Home() {
       </div>
 
       <h2>Быстрые действия</h2>
-      <Link to="/employee/shift" className="btn" style={{ ...actionStyle, marginBottom: 8 }}>
-        {isOpen ? "✅ Закрыть смену" : "✅ Открыть смену"}
-      </Link>
+{shiftAction ? (
+        <Link to="/employee/shift" className="btn" style={{ ...actionStyle, marginBottom: 8 }}>
+          {shiftAction === "close" ? "✅ Закрыть смену" : "✅ Открыть смену"}
+        </Link>
+      ) : (
+        <div className="muted" style={{ fontSize: 13, textAlign: "center", marginBottom: 8 }}>
+          Сегодня вас нет в графике
+        </div>
+      )}
       <Link to="/employee/problems" className="btn secondary" style={actionStyle}>
         🛠 Сообщить о проблеме
       </Link>
