@@ -6,7 +6,7 @@ import { watchLoyaltyCardRequests, watchPayrollRecalcRequests, watchServiceCalls
 import { startShiftNotifier } from "./shiftNotify";
 import { startFlavorProposalNotifier } from "./flavorNotify";
 import { buildExpensesWorkbook, buildSalaryWorkbook, payrollPeriodForDate } from "./reports";
-import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, debugCashSplit, scheduleDailyCashSplitSync, buildCashReconText, scheduleDailyCashRecon, scheduleCashInRegisterSync, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
+import { createLoyaltyCardInQuickResto, fetchRevenueSplitForDate, manuallyAccrueDate, manuallySyncCashSplit, debugCashSplit, scheduleDailyCashSplitSync, buildCashReconText, scheduleDailyCashRecon, scheduleCashInRegisterSync, scheduleUnclosedZoneCheck, scheduleDailyCrmCustomerSync, scheduleDailyPayrollJob, watchQuickRestoShifts, type ProcessScheduledDateResult } from "./quickresto";
 
 const bot = new Bot(env.BOT_TOKEN);
 
@@ -774,6 +774,7 @@ async function main() {
     // разделе «Руководитель» → «График») — ровно то же самое, что раньше
     // делали вручную SQL-бэкфиллом, теперь ежедневно и автоматически.
     scheduleCashInRegisterSync();
+    if (qrChatId) scheduleUnclosedZoneCheck((text) => bot.api.sendMessage(qrChatId, text));
     if (qrChatId) scheduleDailyCashRecon((text) => bot.api.sendMessage(qrChatId, text));
     scheduleDailyPayrollJob(
       async (issue) => {

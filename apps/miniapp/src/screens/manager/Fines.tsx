@@ -95,7 +95,7 @@ export default function Fines() {
 
       {pendingLate.length > 0 && (
         <div style={{ marginBottom: 14 }}>
-          <div className="eyebrow">Предложены штрафы за опоздание · {pendingLate.length}</div>
+          <div className="eyebrow">Предложены штрафы (опоздания, незакрытые зоны) · {pendingLate.length}</div>
           {pendingLate.map((p) => (
             <div key={p.id} className="card">
               <div style={{ fontWeight: 700 }}>
