@@ -2186,6 +2186,7 @@ async function proposeLateFine(role: WorkRole, arrivedAt: Date) {
     .from("late_proposals")
     .select("id")
     .eq("staff_id", staffId)
+    .eq("kind", "late")
     .gte("date", period.start)
     .lt("date", date)
     .neq("status", "dismissed")
@@ -2195,12 +2196,13 @@ async function proposeLateFine(role: WorkRole, arrivedAt: Date) {
     {
       staff_id: staffId,
       date,
+      kind: "late",
       role,
       arrived_at: arrivedAt.toISOString(),
       amount: first ? 0 : fine.amount,
       reason: first ? `Предупреждение (первое опоздание за табель, по сетке было бы ${fine.amount} ₽). ${fine.reason}` : fine.reason,
     },
-    { onConflict: "staff_id,date", ignoreDuplicates: true },
+    { onConflict: "staff_id,date,kind", ignoreDuplicates: true },
   );
   if (error) logSyncError("proposeLateFine", error);
 }

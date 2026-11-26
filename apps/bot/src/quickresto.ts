@@ -1808,3 +1808,91 @@ export function scheduleDailyCashRecon(send: (text: string) => Promise<unknown>)
   }
   scheduleNext();
 }
+
+// --- Штраф за незакрытую зону (запрос Никиты 26.11.2026) ---
+// В 10:00 МСК смотрим смены прошлого бизнес-дня: зона (бар/кальяны) открыта, но не
+// закрыта — предлагаем штраф 500 ₽ тому, кто её открыл (late_proposals, kind =
+// 'unclosed'). Первый раз за двухнедельный табель — предупреждение (0 ₽), как в
+// первом блоке штрафной сетки. Руководитель применяет или отклоняет в «Штрафах».
+const UNCLOSED_ZONE_FINE = 500;
+const ZONE_LABELS: Record<string, string> = { bar: "Бар", hookah: "Кальяны" };
+
+/** Начало двухнедельного табеля (11–24 / 25–10) для даты YYYY-MM-DD. */
+function payrollPeriodStart(dateIso: string): string {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (d >= 11 && d <= 24) return `${y}-${pad(m)}-11`;
+  if (d >= 25) return `${y}-${pad(m)}-25`;
+  const prev = new Date(Date.UTC(y, m - 2, 25));
+  return `${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-25`;
+}
+
+export async function proposeUnclosedZoneFines(supabase: SupabaseClient, dateIso: string): Promise<string[]> {
+  const { sinceMs, tillMs } = businessDayRangeMs(new Date(`${dateIso}T12:00:00+03:00`));
+  const { data: shifts, error } = await supabase
+    .from("shifts")
+    .select("id, bar_opened_at, bar_closed_at, bar_opened_by, hookah_opened_at, hookah_closed_at, hookah_opened_by")
+    .gte("created_at", new Date(sinceMs).toISOString())
+    .lt("created_at", new Date(tillMs).toISOString());
+  if (error) throw error;
+  const lines: string[] = [];
+  for (const sh of shifts ?? []) {
+    for (const zone of ["bar", "hookah"] as const) {
+      const opened = sh[`${zone}_opened_at`];
+      const closed = sh[`${zone}_closed_at`];
+      const staffId = sh[`${zone}_opened_by`] as string | null;
+      if (!opened || closed || !staffId) continue;
+      const { data: earlier } = await supabase
+        .from("late_proposals")
+        .select("id")
+        .eq("staff_id", staffId)
+        .eq("kind", "unclosed")
+        .gte("date", payrollPeriodStart(dateIso))
+        .lt("date", dateIso)
+        .neq("status", "dismissed")
+        .limit(1);
+      const first = !earlier?.length;
+      const name = await fetchStaffName(supabase, staffId);
+      const [y, m, d] = dateIso.split("-");
+      const reason = first
+        ? `Предупреждение (первый раз за табель, по сетке было бы ${UNCLOSED_ZONE_FINE} ₽): не закрыта зона «${ZONE_LABELS[zone]}» за ${d}.${m}.${y}`
+        : `Не закрыта зона «${ZONE_LABELS[zone]}» за ${d}.${m}.${y}`;
+      const { error: insErr } = await supabase.from("late_proposals").upsert(
+        { staff_id: staffId, date: dateIso, kind: "unclosed", role: zone, arrived_at: new Date().toISOString(), amount: first ? 0 : UNCLOSED_ZONE_FINE, reason, status: "pending" },
+        { onConflict: "staff_id,date,kind", ignoreDuplicates: true },
+      );
+      if (insErr) {
+        console.error("Незакрытая зона: не удалось записать предложение штрафа:", insErr.message);
+        continue;
+      }
+      lines.push(`• ${ZONE_LABELS[zone]} — ${name}: ${first ? "предупреждение" : `${UNCLOSED_ZONE_FINE} ₽`}`);
+    }
+  }
+  return lines;
+}
+
+/** Каждый день в 10:00 МСК — проверка незакрытых зон за прошедший бизнес-день. */
+export function scheduleUnclosedZoneCheck(send: (text: string) => Promise<unknown>) {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  function scheduleNext() {
+    const msk = new Date(Date.now() + 3 * 3600_000);
+    const target = new Date(Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth(), msk.getUTCDate(), 10, 0, 0));
+    if (target.getTime() <= msk.getTime()) target.setUTCDate(target.getUTCDate() + 1);
+    const delay = target.getTime() - msk.getTime();
+    setTimeout(async () => {
+      try {
+        // В 10:00 ещё идёт вчерашний бизнес-день (до 11:00) — он и проверяется.
+        const day = new Date(Date.now() + 3 * 3600_000 - 86400000).toISOString().slice(0, 10);
+        const lines = await proposeUnclosedZoneFines(supabase, day);
+        if (lines.length) {
+          const [y, m, d] = day.split("-");
+          await send(`⚠️ Не закрыты зоны за ${d}.${m}.${y} — предложены штрафы:\n${lines.join("\n")}\n\nПрименить или отклонить: «Руководитель» → «Штрафы».`);
+        }
+      } catch (err) {
+        console.error("Незакрытые зоны: ошибка проверки:", err);
+      }
+      scheduleNext();
+    }, delay);
+  }
+  scheduleNext();
+}
