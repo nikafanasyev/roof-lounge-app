@@ -411,14 +411,12 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" | "waiter" }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (role === "waiter") {
-      fetchMyShiftTimesToday().then((t) => {
-        setOpenedAt(t.openedAt);
-        setClosedAt(t.closedAt);
-      });
-    } else {
-      fetchMyArrivalToday().then(setOpenedAt);
-    }
+    // Закрытие смены с фото — у всех ролей без чек-листа (кухня, клининг, официант),
+    // не только у официанта (фидбек Никиты 26.11.2026).
+    fetchMyShiftTimesToday().then((t) => {
+      setOpenedAt(t.openedAt);
+      setClosedAt(t.closedAt);
+    });
   }, [role]);
   const techKey = techRoleKeyForWorkRole(role);
   const techTasks = techKey ? getTechTasksForRoleOnDate(techKey, businessDateIso()) : [];
@@ -478,7 +476,7 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" | "waiter" }) {
               <TechPhotoSender role={role} task={t.task} />
             </div>
           ))}
-          {role === "waiter" && !closedAt && (
+          {!closedAt && (
             <>
               <div className="eyebrow" style={{ marginTop: 20 }}>
                 Закрытие смены: фото (со штампом даты и времени)
@@ -490,7 +488,7 @@ function SimpleShift({ role }: { role: "kitchen" | "cleaning" | "waiter" }) {
               </button>
             </>
           )}
-          {role === "waiter" && closedAt && (
+          {closedAt && (
             <div className="card" style={{ marginTop: 12 }}>
               <span className="badge-dot done" />
               Смена закрыта в {new Date(closedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
