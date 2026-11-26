@@ -85,9 +85,29 @@ function LiveCamera({ onShot, onClose, onUnavailable }: { onShot: (canvas: HTMLC
   }
 
   return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 1100, display: "flex", flexDirection: "column" }}>
-      <video ref={videoRef} playsInline muted autoPlay style={{ flex: 1, width: "100%", objectFit: "contain", background: "#000" }} />
-      <div style={{ display: "flex", gap: 12, padding: 16, paddingBottom: "calc(16px + env(safe-area-inset-bottom))", background: "#000" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#000", zIndex: 1100, overflow: "hidden" }}>
+      {/* Видео — на весь экран, кнопки поверх него внизу: раньше видео растягивалось
+          по высоте и выталкивало кнопку «Снять» за экран (Android, фидбек 26.11.2026). */}
+      <video
+        ref={videoRef}
+        playsInline
+        muted
+        autoPlay
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", background: "#000" }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          display: "flex",
+          gap: 12,
+          padding: 16,
+          paddingBottom: "calc(28px + env(safe-area-inset-bottom))",
+          background: "linear-gradient(transparent, rgba(0,0,0,0.75) 40%)",
+        }}
+      >
         <button className="btn secondary" style={{ flex: 1 }} onClick={onClose}>
           Отмена
         </button>
